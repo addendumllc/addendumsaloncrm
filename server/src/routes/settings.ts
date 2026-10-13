@@ -69,6 +69,7 @@ const settingsPatch = z.object({
     logoMode: z.enum(['name', 'logo', 'logo_name']),
     logoAsIcon: z.boolean(),
   }).partial().optional(),
+  accounts: z.object({ allowAccessRequests: z.boolean() }).partial().optional(),
   onboardingComplete: z.boolean().optional(),
 });
 
@@ -77,6 +78,7 @@ function sectionPermissions(key: string): string[] {
   if (RULES_SECTIONS.includes(key)) return ['settings:rules'];
   if (key === 'highlevel') return ['integrations:manage'];
   if (key === 'inventorySync') return ['inventory:sync', 'settings:write'];
+  if (key === 'accounts') return ['users:manage'];
   return ['settings:write'];
 }
 

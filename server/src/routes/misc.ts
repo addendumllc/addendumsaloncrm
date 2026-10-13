@@ -9,6 +9,7 @@ import { newClientStats } from '../domain/newClients.js';
 import { globalSearch } from '../domain/search.js';
 import { integrationStatus } from '../integrations/registry.js';
 import { iso } from '../lib/time.js';
+import { calendarScope } from '../auth/scope.js';
 import { ah, parse } from './util.js';
 
 export const miscRouter = Router();
@@ -26,7 +27,9 @@ miscRouter.get('/dashboard', ah(async (req, res) => {
   const summary: Record<string, number | null> = { ...d.summary };
   if (!can(req.user, 'messages:read')) summary.unreadMessages = null;
   if (!can(req.user, 'leads:read')) summary.newLeads = null;
-  if (!can(req.user, 'appointments:read')) summary.appointmentsToday = summary.cancellations = summary.noShows = summary.pendingConfirmations = null;
+  // Salon-wide appointment counts only for people who see every team calendar.
+  const cal = calendarScope(req.user);
+  if (!cal || !('all' in cal)) summary.appointmentsToday = summary.cancellations = summary.noShows = summary.pendingConfirmations = null;
   res.json({ summary, actions: d.actions.filter((a: any) => linkAllowed(req.user, a.link)), integrations: await integrationStatus() });
 }));
 

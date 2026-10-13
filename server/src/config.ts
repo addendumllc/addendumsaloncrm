@@ -25,6 +25,13 @@ const schema = z.object({
   /** Comma-separated origins allowed to embed the app in an iframe, e.g. https://addendumsalon.com */
   ALLOWED_EMBED_ORIGINS: z.string().default(''),
   COOKIE_SECURE: bool(false),
+  /**
+   * How many reverse proxies sit in front of the app (for the client's real IP), or an Express trust-proxy list
+   * such as "loopback, 10.0.0.0/8". Default 1 (one host load balancer).
+   */
+  TRUST_PROXY: z.string().default('1'),
+  /** Recovery switch: when true, Location & Access never blocks anyone (e.g. the salon's IP changed and no admin can get in). */
+  ACCESS_ALLOW_ANYWHERE: bool(false),
   SESSION_DAYS: z.coerce.number().default(14),
 
   // Owner account created on first start (only if no staff exist).

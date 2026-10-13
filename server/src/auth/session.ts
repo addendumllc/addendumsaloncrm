@@ -50,17 +50,20 @@ export async function loadUser(req: Request, _res: Response, next: NextFunction)
     if (token) {
       // Permissions are read fresh on every request, so role or permission changes apply immediately.
       const row = await db().one<any>(
-        `SELECT s.id, s.name, s.email, s.role,
+        `SELECT s.id, s.name, s.email, s.role, s.calendar_staff_ids,
                 ARRAY(SELECT permission FROM role_permissions rp WHERE rp.role = s.role) AS role_perms,
                 COALESCE((SELECT json_agg(json_build_object('permission', o.permission, 'granted', o.granted))
                             FROM staff_permission_overrides o WHERE o.staff_id = s.id), '[]'::json) AS overrides
            FROM sessions x JOIN staff s ON s.id = x.staff_id
-          WHERE x.id = $1 AND x.expires_at > now() AND s.active`,
+          WHERE x.id = $1 AND x.expires_at > now() AND s.active AND s.approval_status = 'approved'`,
         [sha256(token)],
       );
       if (row) {
         const overrides = typeof row.overrides === 'string' ? JSON.parse(row.overrides) : row.overrides;
-        req.user = { id: row.id, name: row.name, email: row.email, role: row.role as Role, permissions: computeEffective(row.role_perms ?? [], overrides) };
+        req.user = {
+          id: row.id, name: row.name, email: row.email, role: row.role as Role, permissions: computeEffective(row.role_perms ?? [], overrides),
+          calendarStaffIds: row.calendar_staff_ids ?? null,
+        };
       }
     }
     next();

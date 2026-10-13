@@ -77,6 +77,9 @@ const ANY_SIGNED_IN: string[] = [];
 export const API_RULES: { method: string; path: RegExp; anyOf: string[] }[] = [
   // Always available once signed in: limited settings (salon name, time zone, colours, Order Hair defaults).
   { method: 'GET', path: /^\/settings$/, anyOf: ANY_SIGNED_IN },
+  // Location & Access: everyone can see whether they're on the salon network; changing it is Owner/Admin only (checked in the route).
+  { method: 'GET', path: /^\/access\/status$/, anyOf: ANY_SIGNED_IN },
+  { method: 'PUT', path: /^\/access$/, anyOf: ['settings:write'] },
   { method: 'GET', path: /^\/notifications$/, anyOf: ['dashboard:view'] },
   { method: 'POST', path: /^\/notifications\/read-all$/, anyOf: ['dashboard:view'] },
   { method: 'GET', path: /^\/updates$/, anyOf: ['dashboard:view'] },
@@ -105,7 +108,7 @@ export const API_RULES: { method: string; path: RegExp; anyOf: string[] }[] = [
 
   { method: '*', path: /^\/settings\/logo$/, anyOf: ['settings:write'] },
   { method: '*', path: /^\/settings\/font\/(heading|body)$/, anyOf: ['settings:write'] },
-  { method: 'PATCH', path: /^\/settings$/, anyOf: ['settings:rules', 'settings:write', 'integrations:manage', 'inventory:sync'] },
+  { method: 'PATCH', path: /^\/settings$/, anyOf: ['settings:rules', 'settings:write', 'integrations:manage', 'inventory:sync', 'users:manage'] },
   { method: 'GET', path: /^\/staff$/, anyOf: ['staff:read', 'users:manage', 'tasks:assign', 'inventory:order_for_others', 'commission:team'] },
   { method: 'PATCH', path: /^\/staff\/[^/]+$/, anyOf: ['users:manage'] },
   { method: 'GET', path: /^\/tags$/, anyOf: ['clients:read', 'clients:read_assigned', 'leads:read'] },
@@ -115,6 +118,12 @@ export const API_RULES: { method: string; path: RegExp; anyOf: string[] }[] = [
   { method: 'GET', path: /^\/privacy\/export$/, anyOf: ['privacy:export_all'] },
   { method: '*', path: /^\/demo(\/.*)?$/, anyOf: ['integrations:manage', 'settings:write'] },
 ];
+
+/**
+ * Approving or rejecting new accounts is for Admins (the owner is an Admin) who can manage accounts.
+ * Checked from the role itself, so an individual grant can't turn someone else into an approver.
+ */
+export const isApprover = (user: Pick<CurrentUser, 'permissions' | 'role'> | null | undefined) => !!user && user.role === 'admin' && can(user, 'users:manage');
 
 export function apiAllowed(user: Who, method: string, path: string) {
   const rule = API_RULES.find((r) => (r.method === '*' || r.method === method) && r.path.test(path));

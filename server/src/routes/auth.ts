@@ -4,7 +4,7 @@ import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { createSession, destroySession, requireAuth } from '../auth/session.js';
 import { db } from '../db/index.js';
-import { checkPasswordToken, createPasswordLink, emailPasswordLink, usePasswordToken } from '../domain/users.js';
+import { checkPasswordToken, createPasswordLink, emailPasswordLink, requestAccess, usePasswordToken } from '../domain/users.js';
 import { audit } from '../repos/audit.js';
 import { findStaffByEmail } from '../repos/staff.js';
 import { isDemo } from '../integrations/registry.js';
@@ -18,15 +18,24 @@ const loginLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 10, skipSuccessfu
 
 /** Public, non-sensitive: lets the sign-in screen show demo hints only in Demo Mode. */
 authRouter.get('/config', ah(async (_req, res) => {
-  const { appearance } = await getSettings();
-  res.json({ demoMode: isDemo(), accent: appearance.accent, appearance });
+  const { appearance, accounts } = await getSettings();
+  res.json({ demoMode: isDemo(), accent: appearance.accent, appearance, allowAccessRequests: accounts.allowAccessRequests });
 }));
 
 authRouter.post('/login', loginLimiter, ah(async (req, res) => {
   const { email, password } = parse(z.object({ email: z.string().email(), password: z.string().min(1).max(200) }), req.body);
   const staff = await findStaffByEmail(email);
-  const ok = staff?.password_hash && staff.active && (await bcrypt.compare(password, staff.password_hash));
-  if (!ok) {
+  const passwordOk = !!staff?.password_hash && (await bcrypt.compare(password, staff.password_hash));
+  // Only someone who knows the password learns that their account is waiting or was turned down.
+  if (passwordOk && staff.approval_status === 'pending') {
+    await logAction(req, 'auth.login_pending', 'staff', staff.id);
+    return res.status(403).json({ error: { code: 'pending_approval', message: 'Your account is waiting for an administrator to approve it. You’ll be able to sign in once it’s approved.' } });
+  }
+  if (passwordOk && staff.approval_status === 'rejected') {
+    await logAction(req, 'auth.login_rejected', 'staff', staff.id);
+    return res.status(403).json({ error: { code: 'access_rejected', message: 'Your access request wasn’t approved. Contact the salon if you think this is a mistake.' } });
+  }
+  if (!passwordOk || !staff.active) {
     await logAction(req, 'auth.login_failed');
     return res.status(401).json({ error: { code: 'invalid_login', message: "That email and password don't match." } });
   }
@@ -59,12 +68,28 @@ const strongPassword = z.string().min(10, 'must be at least 10 characters').max(
 authRouter.post('/forgot', forgotPerIp, forgotPerEmail, ah(async (req, res) => {
   const { email } = parse(z.object({ email: z.string().email() }), req.body);
   const staff = await findStaffByEmail(email);
-  if (staff?.active) {
+  if (staff?.active || staff?.approval_status === 'pending') {
     const link = await createPasswordLink(staff.id, 'reset', null);
     const emailed = await emailPasswordLink(staff.id, link, 'reset');
     await audit(staff.id, 'auth.password_reset_requested', 'staff', staff.id, { emailed }, req.ip);
   }
   res.json({ ok: true, message: 'If that email has an account, a reset link is on its way. No email? Ask an administrator for a reset link.' });
+}));
+
+/**
+ * "Request access" on the sign-in screen: creates a pending login (no access) and alerts the Admins.
+ * Same answer either way, so it can't reveal whether an email already has an account.
+ */
+const requestLimiter = rateLimit({ windowMs: 60 * 60_000, limit: 5, standardHeaders: true, legacyHeaders: false, message: tooMany });
+authRouter.post('/request-access', requestLimiter, ah(async (req, res) => {
+  const b = parse(z.object({
+    name: z.string().trim().min(2, 'enter your full name').max(100),
+    email: z.string().trim().email('must be an email address').max(200),
+    password: strongPassword,
+  }), req.body);
+  const r = await requestAccess(b);
+  if (r.created) await audit(r.id!, 'auth.access_requested', 'staff', r.id!, undefined, req.ip);
+  res.json({ ok: true, message: 'Request sent. An administrator needs to approve it before you can sign in. You can try signing in later with the password you just chose.' });
 }));
 
 authRouter.get('/reset/:token', resetLimiter, ah(async (req, res) => {

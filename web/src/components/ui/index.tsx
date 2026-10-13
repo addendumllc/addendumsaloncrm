@@ -24,7 +24,8 @@ export function Button({
       disabled={rest.disabled || loading}
       className={cx(
         'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
-        size === 'sm' ? 'h-8 px-2.5 text-[13px]' : 'h-10 px-3.5 text-sm',
+        // Taller on phones so they're easy to tap; compact on larger screens.
+        size === 'sm' ? 'h-9 px-3 text-[13px] sm:h-8 sm:px-2.5' : 'h-11 px-4 text-[15px] sm:h-10 sm:px-3.5 sm:text-sm',
         VARIANTS[variant],
         className,
       )}

@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, RefreshCw, CalendarDays } from 'lucide-react';
 import type { AppointmentDTO, AppointmentDisplayStatus } from '@addendum/shared';
 import { api } from '../api/client';
-import { useAppointments, useIntegrations, useRefreshAll, useStaff } from '../api/hooks';
+import { useAppointments, useIntegrations, useMe, useRefreshAll, useStaff } from '../api/hooks';
 import {
   addDaysKey, dateShort, dayKey, hourOfDay, labelOfKey, relative, startOfDayKey, time, weekdayOfKey,
 } from '../lib/format';
@@ -24,6 +24,7 @@ export function AppointmentsPage() {
   const status = params.get('status') ?? '';
   const listRange = params.get('range') ?? 'upcoming';
   const { data: staff } = useStaff();
+  const { data: me } = useMe();
   const { data: integ } = useIntegrations();
   const refresh = useRefreshAll();
   const toast = useToast();
@@ -101,7 +102,7 @@ export function AppointmentsPage() {
         )}
         <div className="ml-auto flex flex-wrap gap-2">
           <select className="field h-9 w-auto py-1 text-sm" value={staffId} onChange={(e) => set({ staff: e.target.value })} aria-label="Stylist">
-            <option value="">All stylists</option>{staff?.filter((s) => s.squareTeamMemberId).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            <option value="">{me?.calendarStaffIds ? 'Everyone I can see' : 'All stylists'}</option>{staff?.filter((s) => s.squareTeamMemberId && (!me?.calendarStaffIds || s.id === me.id || me.calendarStaffIds.includes(s.id))).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
           <select className="field h-9 w-auto py-1 text-sm" value={status} onChange={(e) => set({ status: e.target.value })} aria-label="Status">
             <option value="">All statuses</option>{Object.entries(APPT_STYLE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}

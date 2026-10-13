@@ -1,4 +1,4 @@
-import { PERMISSION_KEYS, ROLE_DEFAULT_PERMISSIONS, ROLES } from '@addendum/shared';
+import { PERMISSION_KEYS, PREVIOUS_ROLE_DEFAULTS, ROLE_DEFAULT_PERMISSIONS, ROLES } from '@addendum/shared';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -132,6 +132,18 @@ export async function syncRoleTemplates(d: Db) {
         }
       }
       await q.query('UPDATE role_templates SET known_permissions = $2 WHERE role = $1', [role, [...known, ...fresh]]);
+    });
+  }
+  // Untouched templates follow updated built-in defaults; edited ones are never changed.
+  for (const role of ROLES) {
+    const old = PREVIOUS_ROLE_DEFAULTS[role];
+    if (!old) continue;
+    const have = (await d.query<{ permission: string }>('SELECT permission FROM role_permissions WHERE role = $1', [role])).map((r) => r.permission).sort();
+    const same = (list: string[]) => list.length === have.length && [...list].sort().every((p, i) => p === have[i]);
+    if (!old.some(same)) continue;
+    await d.tx(async (q) => {
+      await q.query('DELETE FROM role_permissions WHERE role = $1', [role]);
+      for (const p of ROLE_DEFAULT_PERMISSIONS[role]) await q.query('INSERT INTO role_permissions(role, permission) VALUES ($1,$2)', [role, p]);
     });
   }
 }

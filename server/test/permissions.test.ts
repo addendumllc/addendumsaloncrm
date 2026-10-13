@@ -30,12 +30,16 @@ async function signIn(email: string, password = 'addendum-demo') {
 }
 const tokenFrom = (url: string) => new URL(url).searchParams.get('token')!;
 
-/** Creates an account through the API and sets its password through the one-time link, like a new employee would. */
+/**
+ * Creates an account through the API, sets its password through the one-time link like a new employee would, and has
+ * the Admin approve it (new logins wait for approval).
+ */
 async function newEmployee(name: string, email: string, extra: object = {}) {
   const r = await admin.post('/api/admin/users', { name, email, ...extra });
   expect(r.status).toBe(201);
   const set = await request(app).post('/api/auth/reset').set('X-Requested-With', 'addendum-crm').send({ token: tokenFrom(r.body.setupLink), password: 'Welcome-2026!' });
   expect(set.status).toBe(200);
+  expect((await admin.post(`/api/admin/users/${r.body.user.id}/approve`, { confirm: true })).status).toBe(200);
   return { id: r.body.user.id as string, user: r.body.user, api: await signIn(email, 'Welcome-2026!') };
 }
 
@@ -243,8 +247,11 @@ describe('Record-level privacy', () => {
   it('a stylist allowed “their own customers” sees only those, whatever the URL', async () => {
     const jen = await signIn('jennifer@addendumsalon.com');
     const jenId = (await jen.get('/api/auth/me')).body.user.id;
-    expect((await jen.get('/api/clients')).status).toBe(403);
-    await admin.put(`/api/admin/users/${jenId}/access`, { overrides: { 'clients:read_assigned': true, 'clients:history': true } });
+    // Stylists get "their own customers" by default, never everyone's.
+    const perms = (await jen.get('/api/auth/me')).body.user.permissions;
+    expect(perms).toContain('clients:read_assigned');
+    expect(perms).not.toContain('clients:read');
+    expect(jenId).toBeTruthy();
     const mine = (await jen.get('/api/clients?limit=500')).body.clients;
     const all = (await admin.get('/api/clients?limit=500')).body.clients;
     expect(mine.length).toBeGreaterThan(0);

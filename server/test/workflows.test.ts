@@ -313,7 +313,9 @@ describe('Security', () => {
     expect(login.status).toBe(200);
     expect((await staffAgent.get('/api/analytics')).status).toBe(403);
     expect((await staffAgent.patch('/api/settings').set('X-Requested-With', 'addendum-crm').send({ ai: { autoSend: true } })).status).toBe(403);
-    expect((await staffAgent.get('/api/clients')).status).toBe(403);
+    expect((await staffAgent.get('/api/leads')).status).toBe(403);
+    expect((await staffAgent.get('/api/users')).status).not.toBe(200);
+    expect((await staffAgent.get('/api/admin/users')).status).toBe(403);
   });
 
   it('verifies Square webhook signatures', () => {

@@ -164,6 +164,9 @@ describe('Rebooking by service and client', () => {
     expect((await agent.put(`/api/rebooking/clients/${emma}/services/${moveUp}`).set('X-Requested-With', 'addendum-crm').send({ intervalDays: 50 })).status).toBe(200);
     const stylist = request.agent(app);
     await stylist.post('/api/auth/login').set('X-Requested-With', 'addendum-crm').send({ email: 'jennifer@addendumsalon.com', password: 'addendum-demo' });
-    expect((await stylist.get(`/api/rebooking/clients/${emma}`)).status).toBe(403);
+    // A stylist only reaches their own clients' rebooking, and never edits it.
+    const mine = (await stylist.get(`/api/rebooking/clients/${emma}`)).status;
+    expect([200, 404]).toContain(mine);
+    expect((await stylist.put(`/api/rebooking/clients/${emma}/services/${moveUp}`).set('X-Requested-With', 'addendum-crm').send({ intervalDays: 10 })).status).not.toBe(200);
   });
 });

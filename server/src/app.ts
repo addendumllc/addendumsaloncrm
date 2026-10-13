@@ -24,12 +24,15 @@ import { messagesRouter } from './routes/messages.js';
 import { miscRouter } from './routes/misc.js';
 import { serveFont, serveLogo, settingsRouter } from './routes/settings.js';
 import { tasksRouter } from './routes/tasks.js';
+import { accessRouter } from './routes/access.js';
+import { networkGate } from './auth/access.js';
 import { webhooksRouter } from './routes/webhooks.js';
 
 export function createApp() {
   const c = config();
   const app = express();
-  app.set('trust proxy', 1);
+  const tp = c.TRUST_PROXY.trim();
+  app.set('trust proxy', /^\d+$/.test(tp) ? Number(tp) : tp === 'true' ? true : tp === 'false' ? false : tp);
   app.disable('x-powered-by');
 
   const embedOrigins = c.ALLOWED_EMBED_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean);
@@ -90,9 +93,11 @@ export function createApp() {
   });
   app.use('/api', rateLimit({ windowMs: 60_000, limit: 600, standardHeaders: true, legacyHeaders: false }));
   app.use('/api', loadUser);
+  app.use('/api', networkGate);
   app.use('/api/auth', authRouter);
   app.use('/api', requireAuth);
   app.use('/api', apiGate);
+  app.use('/api/access', accessRouter);
   app.use('/api', miscRouter);
   app.use('/api', settingsRouter);
   app.use('/api/clients', clientsRouter);

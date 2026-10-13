@@ -7,6 +7,9 @@ export class ApiError extends Error {
 
 type Json = object | undefined;
 
+/** Touch-first devices (iPads report a desktop browser) follow the phone rules in Location & Access. */
+const touchFirst = typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches && !window.matchMedia?.('(any-pointer: fine)').matches;
+
 async function request<T>(method: string, url: string, body?: Json): Promise<T> {
   let res: Response;
   try {
@@ -18,6 +21,7 @@ async function request<T>(method: string, url: string, body?: Json): Promise<T> 
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         // Required by the server for any change (CSRF protection).
         'X-Requested-With': 'addendum-crm',
+        ...(touchFirst ? { 'X-Addendum-Device': 'touch' } : {}),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
@@ -30,6 +34,8 @@ async function request<T>(method: string, url: string, body?: Json): Promise<T> 
   // Refused: the user's role may have just changed, so the app re-checks who they are.
   if (res.status === 403) window.dispatchEvent(new CustomEvent('addendum:forbidden'));
   const data = await res.json().catch(() => ({}));
+  // This computer isn't on the salon network (Location & Access): the app shows how to get access.
+  if (res.status === 403 && data?.error?.code === 'network_restricted') window.dispatchEvent(new CustomEvent('addendum:network'));
   if (!res.ok) {
     throw new ApiError(res.status, data?.error?.message ?? 'Something went wrong. Please try again.', data?.error?.code, data?.error?.details);
   }

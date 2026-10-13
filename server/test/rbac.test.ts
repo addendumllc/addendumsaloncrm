@@ -46,20 +46,26 @@ describe('Roles', () => {
   });
 });
 
-describe('Stylists: only Order Hair and their own calendar', () => {
+describe('Stylists: their own calendar, clients and follow-ups, plus Order Hair', () => {
   it('are refused every other section, whatever the URL', async () => {
     const blocked: [string, string][] = [
-      ['get', '/api/dashboard'], ['get', '/api/clients'], ['get', '/api/leads'], ['get', '/api/tasks'],
-      ['get', '/api/messages/conversations'], ['get', '/api/analytics'], ['get', '/api/search?q=a'], ['get', '/api/updates'],
-      ['get', '/api/notifications'], ['get', '/api/staff'], ['get', '/api/tags'], ['get', '/api/services'], ['get', '/api/audit'],
+      ['get', '/api/dashboard'], ['get', '/api/leads'],
+      ['get', '/api/messages/conversations'], ['get', '/api/analytics'], ['get', '/api/updates'],
+      ['get', '/api/notifications'], ['get', '/api/staff'], ['get', '/api/audit'],
       ['get', '/api/integrations/status'], ['get', '/api/integrations/setup-info'], ['get', '/api/privacy/export'],
-      ['post', '/api/leads'], ['post', '/api/clients'], ['post', '/api/tasks'], ['post', '/api/messages/handoff'],
+      ['post', '/api/leads'], ['post', '/api/clients'], ['post', '/api/messages/handoff'],
       ['patch', '/api/settings'], ['post', '/api/integrations/square/sync'], ['post', '/api/demo/reset'],
     ];
     for (const [m, url] of blocked) {
       const r = await (stylist as any)[m](url, {});
       expect([url, r.status]).toEqual([url, 403]);
     }
+  });
+
+  it('search finds only their own clients, never leads or messages', async () => {
+    const r = (await stylist.get('/api/search?q=a')).body;
+    expect(r.leads ?? []).toEqual([]);
+    expect(r.conversations ?? []).toEqual([]);
   });
 
   it('only ever get their own appointments, even when asking for someone else', async () => {
@@ -143,11 +149,11 @@ describe('Administrators', () => {
 
 describe('Role changes apply immediately', () => {
   it('uses the current role on every request, without signing in again', async () => {
-    expect((await stylist.get('/api/clients')).status).toBe(403);
+    expect((await stylist.get('/api/leads')).status).toBe(403);
     await db().query("UPDATE staff SET role = 'receptionist' WHERE id = $1", [stylistId]);
-    expect((await stylist.get('/api/clients')).status).toBe(200);
+    expect((await stylist.get('/api/leads')).status).toBe(200);
     expect((await stylist.get('/api/auth/me')).body.user.permissions).toContain('clients:read');
     await db().query("UPDATE staff SET role = 'stylist' WHERE id = $1", [stylistId]);
-    expect((await stylist.get('/api/clients')).status).toBe(403);
+    expect((await stylist.get('/api/leads')).status).toBe(403);
   });
 });

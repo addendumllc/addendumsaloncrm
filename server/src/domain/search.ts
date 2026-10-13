@@ -1,6 +1,6 @@
 import type { CurrentUser } from '@addendum/shared';
 import { can } from '../auth/permissions.js';
-import { assignedClientSql, clientScope, maskContact } from '../auth/scope.js';
+import { assignedClientSql, calendarScope, clientScope, maskContact } from '../auth/scope.js';
 import { db } from '../db/index.js';
 
 const none = Promise.resolve([] as any[]);
@@ -15,8 +15,9 @@ export async function globalSearch(q: string, user: CurrentUser) {
   const seesClients = can(user, 'clients:read') || can(user, 'clients:read_assigned');
   const scope = clientScope(user);
   const contact = can(user, 'clients:contact');
-  const apptOwn = !can(user, 'appointments:read') && can(user, 'appointments:read_own');
-  const seesAppts = can(user, 'appointments:read') || apptOwn;
+  const cal = calendarScope(user);
+  const apptIds = cal && 'ids' in cal ? cal.ids : null;
+  const seesAppts = !!cal;
   const like = `%${term}%`;
   const digits = term.replace(/\D/g, '');
   const phoneLike = digits.length >= 3 ? `%${digits}%` : '__no_match__';
@@ -40,9 +41,9 @@ export async function globalSearch(q: string, user: CurrentUser) {
               string_agg(x.service_name, ', ') AS services
          FROM appointments a LEFT JOIN clients c ON c.id = a.client_id LEFT JOIN appointment_services x ON x.appointment_id = a.id
         WHERE (x.service_name ILIKE $1 OR (c.first_name || ' ' || c.last_name) ILIKE $1 OR a.square_booking_id = $2)
-          ${apptOwn ? 'AND a.staff_id = $3' : ''}
+          ${apptIds ? 'AND a.staff_id = ANY($3::uuid[])' : ''}
         GROUP BY a.id, c.first_name, c.last_name ORDER BY abs(extract(epoch FROM a.start_at - now())) LIMIT 8`,
-      apptOwn ? [like, term, user.id] : [like, term],
+      apptIds ? [like, term, apptIds] : [like, term],
     ),
     !can(user, 'messages:read') ? none : db().query(
       `SELECT m.id, m.body, m.created_at AS "createdAt", m.conversation_id AS "conversationId",

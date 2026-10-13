@@ -34,3 +34,17 @@ export function maskContact<T extends { phone?: string | null; email?: string | 
   if (can(user, 'clients:contact')) return obj;
   return { ...obj, ...('phone' in obj ? { phone: null } : {}), ...('email' in obj ? { email: null } : {}), contactHidden: true };
 }
+
+/**
+ * Whose appointments someone may see. "Can view team calendars" = everyone, or only the team members chosen on their
+ * account (plus their own); otherwise "their own calendar" only. null = no calendar access. Viewing never allows changes
+ * (appointments are a read-only copy of Square).
+ */
+export function calendarScope(user: CurrentUser | undefined): { all: true } | { ids: string[] } | null {
+  if (!user) return null;
+  if (can(user, 'appointments:read')) {
+    return user.calendarStaffIds ? { ids: [...new Set([user.id, ...user.calendarStaffIds])] } : { all: true };
+  }
+  if (can(user, 'appointments:read_own')) return { ids: [user.id] };
+  return null;
+}

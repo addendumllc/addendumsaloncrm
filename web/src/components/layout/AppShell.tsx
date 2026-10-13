@@ -15,10 +15,12 @@ import { Notifications, useUpdates } from './Notifications';
 import { SETTINGS_PERMS } from '../../lib/access';
 
 /** Sidebar items and the permissions that show them (any one). The server enforces the same rules on every request. */
-export const NAV: { to: string; label: string; icon: typeof Home; end?: boolean; badge?: string; anyOf: string[] }[] = [
+export const NAV: { to: string; label: string; icon: typeof Home; end?: boolean; badge?: string; anyOf: string[]; hideIf?: string }[] = [
   { to: '/', label: 'Dashboard', icon: Home, end: true, anyOf: ['dashboard:view'] },
   { to: '/follow-ups', label: 'Follow-Ups', icon: CheckSquare, anyOf: ['tasks:read_all', 'tasks:read_own'] },
-  { to: '/appointments', label: 'Appointments', icon: CalendarDays, anyOf: ['appointments:read', 'appointments:read_own'] },
+  { to: '/appointments', label: 'Appointments', icon: CalendarDays, anyOf: ['appointments:read'] },
+  // Only their own calendar (assistants by default, until an Owner/Admin allows team calendars).
+  { to: '/my-calendar', label: 'My Calendar', icon: CalendarDays, anyOf: ['appointments:read_own'], hideIf: 'appointments:read' },
   { to: '/messages', label: 'Messages', icon: MessageSquare, badge: 'messages', anyOf: ['messages:read'] },
   { to: '/clients', label: 'Clients', icon: Users, anyOf: ['clients:read', 'clients:read_assigned'] },
   { to: '/leads', label: 'New Clients', icon: Sparkles, anyOf: ['leads:read'] },
@@ -30,7 +32,8 @@ export const NAV: { to: string; label: string; icon: typeof Home; end?: boolean;
   { to: '/analytics', label: 'Analytics', icon: BarChart3, anyOf: ['analytics:read'] },
   { to: '/settings', label: 'Settings', icon: Settings, anyOf: SETTINGS_PERMS },
 ];
-const MOBILE_TABS = ['/', '/follow-ups', '/appointments', '/messages'];
+/** Phone tab bar: the first four of these the person can open (by role); everything else is under More. */
+const MOBILE_TABS = ['/', '/appointments', '/my-calendar', '/follow-ups', '/messages', '/clients', '/leads', '/inventory', '/my-commission'];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { data: me } = useMe();
@@ -48,7 +51,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [loc.pathname]);
 
   const can = (p?: string) => !p || !!me?.permissions.includes(p);
-  const items = NAV.filter((n) => n.anyOf.some((p) => can(p)));
+  const items = NAV.filter((n) => n.anyOf.some((p) => can(p)) && !(n.hideIf && can(n.hideIf)));
   const unread = updates?.unreadMessages ?? 0;
   // The inbox manages its own scrolling panes like a messaging app.
   const fullBleed = loc.pathname.startsWith('/messages');
@@ -66,7 +69,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           key={n.to}
           to={n.to}
           end={n.end}
-          className={({ isActive }) => cx('flex items-center gap-3 rounded-lg px-3 py-2 text-[14.5px] transition-colors', isActive ? 'bg-white font-medium text-ink shadow-sm' : 'text-ink-soft hover:bg-white/60')}
+          className={({ isActive }) => cx('flex min-h-[48px] items-center gap-3 rounded-lg px-3 py-2 text-[16px] transition-colors lg:min-h-0 lg:text-[14.5px]', isActive ? 'bg-white font-medium text-ink shadow-sm' : 'text-ink-soft hover:bg-white/60')}
         >
           <n.icon className="h-[18px] w-[18px] text-stone" />
           <span className="flex-1">{n.label}</span>
@@ -143,14 +146,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         {/* Mobile tab bar */}
         <nav className="fixed inset-x-0 bottom-0 z-30 grid auto-cols-fr grid-flow-col border-t border-line bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
-          {items.filter((n) => MOBILE_TABS.includes(n.to)).slice(0, 4).map((n) => (
-            <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => cx('relative flex flex-col items-center gap-0.5 py-2 text-[11px]', isActive ? 'text-plum' : 'text-stone')}>
+          {MOBILE_TABS.map((to) => items.find((n) => n.to === to)).filter((n): n is (typeof items)[number] => !!n).slice(0, 4).map((n) => (
+            <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => cx('relative flex min-h-[56px] flex-col items-center justify-center gap-0.5 py-2 text-[12px]', isActive ? 'text-plum' : 'text-stone')}>
               <n.icon className="h-5 w-5" />
               {n.label}
               {n.badge && unread > 0 && <span className="absolute right-[22%] top-1 h-2 w-2 rounded-full bg-plum" />}
             </NavLink>
           ))}
-          <button onClick={() => setDrawer(true)} className="flex flex-col items-center gap-0.5 py-2 text-[11px] text-stone"><MenuIcon className="h-5 w-5" />More</button>
+          <button onClick={() => setDrawer(true)} className="flex min-h-[56px] flex-col items-center justify-center gap-0.5 py-2 text-[12px] text-stone"><MenuIcon className="h-5 w-5" />More</button>
         </nav>
       </div>
     </div>

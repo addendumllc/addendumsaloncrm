@@ -7,6 +7,8 @@ import {
   ROLE_LABELS,
   ROLES,
   SENSITIVE_PERMISSIONS,
+  isBuiltinRole,
+  type AccountStatus,
   type CurrentUser,
   type PermissionPreviewDTO,
   type Role,
@@ -14,10 +16,11 @@ import {
   type StaffAccountDetailDTO,
   type StaffAccountDTO,
 } from '@addendum/shared';
-import { computeEffective, permissionBreakdown, rolePermissions, staffOverrides } from '../auth/permissions.js';
+import { computeEffective, isApprover, permissionBreakdown, rolePermissions, staffOverrides } from '../auth/permissions.js';
 import { config } from '../config.js';
 import { db } from '../db/index.js';
 import { emailService } from '../integrations/registry.js';
+import { getSettings } from '../repos/settings.js';
 import { randomToken, sha256 } from '../lib/crypto.js';
 import { AppError, badRequest, forbidden, notFound } from '../lib/errors.js';
 import { iso } from '../lib/time.js';
@@ -32,6 +35,8 @@ import { iso } from '../lib/time.js';
  *  - Changing someone's role drops the extra permissions they were individually granted, so nothing elevated
  *    carries over by accident. Individual restrictions are kept unless you ask to clear them.
  *  - There must always be at least one active person who can sign in and manage permissions (no lock-outs).
+ *  - A new login never grants access by itself: it waits as "pending" until an Admin approves it (approveAccount).
+ *    Pending and rejected accounts can't sign in, and no session of theirs is accepted (auth/session.ts).
  */
 
 const SENSITIVE = new Set(SENSITIVE_PERMISSIONS);
@@ -46,6 +51,8 @@ export class ConfirmRequired extends AppError {
 // ---------- Reading ----------
 const ACCOUNT_SELECT = `
   SELECT s.*, ARRAY(SELECT permission FROM role_permissions rp WHERE rp.role = s.role) AS role_perms,
+         (SELECT COALESCE(t.label, '') FROM role_templates t WHERE t.role = s.role) AS role_label,
+         (SELECT a.name FROM staff a WHERE a.id = s.approved_by_staff_id) AS approved_by_name,
          COALESCE((SELECT json_agg(json_build_object('permission', o.permission, 'granted', o.granted))
                      FROM staff_permission_overrides o WHERE o.staff_id = s.id), '[]'::json) AS overrides
     FROM staff s`;
@@ -53,16 +60,28 @@ const ACCOUNT_SELECT = `
 const overridesOf = (r: any): { permission: string; granted: boolean }[] =>
   (typeof r.overrides === 'string' ? JSON.parse(r.overrides) : r.overrides) ?? [];
 
+export const statusOf = (r: { approval_status: string; active: boolean }): AccountStatus =>
+  r.approval_status === 'pending' ? 'pending' : r.approval_status === 'rejected' ? 'rejected' : r.active ? 'active' : 'disabled';
+export const roleLabel = (role: string, custom?: string | null) => (isBuiltinRole(role) ? ROLE_LABELS[role] : custom || role);
+
 function toAccount(r: any): StaffAccountDTO {
   const effective = computeEffective(r.role_perms ?? [], overridesOf(r));
+  const status = statusOf(r);
   return {
     id: r.id,
     name: r.name,
     email: r.email,
     role: r.role,
+    roleLabel: roleLabel(r.role, r.role_label),
+    status,
+    selfRequested: !!r.self_requested,
+    requestedAt: iso(r.approval_requested_at),
+    approvedAt: iso(r.approved_at),
+    approvedByName: r.approved_by_name ?? null,
+    calendarStaffIds: r.calendar_staff_ids ?? null,
     active: r.active,
     color: r.color,
-    canSignIn: !!r.password_hash && r.active,
+    canSignIn: !!r.password_hash && status === 'active',
     squareTeamMemberId: r.square_team_member_id,
     lastLoginAt: iso(r.last_login_at),
     createdAt: iso(r.created_at)!,
@@ -73,7 +92,7 @@ function toAccount(r: any): StaffAccountDTO {
 }
 
 export async function listAccounts(): Promise<StaffAccountDTO[]> {
-  return (await db().query(`${ACCOUNT_SELECT} ORDER BY s.active DESC, lower(s.name)`)).map(toAccount);
+  return (await db().query(`${ACCOUNT_SELECT} ORDER BY (s.approval_status = 'pending') DESC, s.active DESC, lower(s.name)`)).map(toAccount);
 }
 
 export async function getAccount(id: string): Promise<StaffAccountDetailDTO> {
@@ -90,17 +109,27 @@ async function effectiveOf(id: string) {
 }
 
 export async function roleTemplates(): Promise<RoleTemplateDTO[]> {
-  const counts = new Map((await db().query<{ role: string; n: number }>('SELECT role, count(*)::int AS n FROM staff WHERE active GROUP BY role')).map((r) => [r.role, r.n]));
+  const counts = new Map((await db().query<{ role: string; n: number; total: number }>(
+    'SELECT role, count(*) FILTER (WHERE active)::int AS n, count(*)::int AS total FROM staff GROUP BY role')).map((r) => [r.role, r]));
+  const rows = await db().query<{ role: string; label: string | null; description: string | null; builtin: boolean }>('SELECT role, label, description, builtin FROM role_templates');
+  const order = (r: string) => (isBuiltinRole(r) ? ROLES.indexOf(r) : ROLES.length);
+  rows.sort((a, b) => order(a.role) - order(b.role) || roleLabel(a.role, a.label).localeCompare(roleLabel(b.role, b.label)));
   const out: RoleTemplateDTO[] = [];
-  for (const role of ROLES) {
-    const perms = new Set(await rolePermissions(role));
+  for (const t of rows) {
+    const perms = new Set(await rolePermissions(t.role));
+    const builtin = isBuiltinRole(t.role);
     out.push({
-      role, label: ROLE_LABELS[role], description: ROLE_DESCRIPTIONS[role],
+      role: t.role, label: roleLabel(t.role, t.label), description: builtin ? ROLE_DESCRIPTIONS[t.role as keyof typeof ROLE_DESCRIPTIONS] : t.description ?? '',
       permissions: PERMISSION_KEYS.filter((k) => perms.has(k)),
-      defaults: ROLE_DEFAULT_PERMISSIONS[role], members: counts.get(role) ?? 0,
+      defaults: builtin ? ROLE_DEFAULT_PERMISSIONS[t.role as keyof typeof ROLE_DEFAULT_PERMISSIONS] : [], builtin,
+      members: counts.get(t.role)?.n ?? 0, totalMembers: counts.get(t.role)?.total ?? 0,
     });
   }
   return out;
+}
+
+async function assertRoleExists(role: string) {
+  if (!(await db().one('SELECT 1 FROM role_templates WHERE role = $1', [role]))) throw badRequest('Choose one of the role templates.');
 }
 
 // ---------- Guards ----------
@@ -176,7 +205,7 @@ function planAccess(current: { role: Role; overrides: { permission: string; gran
 
 async function rolePermMap() {
   const m = new Map<Role, string[]>();
-  for (const r of ROLES) m.set(r, await rolePermissions(r));
+  for (const r of await db().query<{ role: string }>('SELECT role FROM role_templates')) m.set(r.role, await rolePermissions(r.role));
   return m;
 }
 
@@ -195,7 +224,7 @@ export async function previewAccess(targetId: string, change: AccessChange): Pro
 export async function changeAccess(actor: CurrentUser, targetId: string, change: AccessChange & { confirm?: boolean }) {
   assertNotSelf(actor, targetId, 'role or permissions');
   await assertCanManage(actor, targetId);
-  if (change.role && !ROLES.includes(change.role)) throw badRequest('Choose Admin, Reception, Stylist or Assistant.');
+  if (change.role) await assertRoleExists(change.role);
   const cur = await effectiveOf(targetId);
   const plan = planAccess(cur, await rolePermMap(), change);
   assertCanGrant(actor, plan.added);
@@ -215,7 +244,7 @@ export async function changeAccess(actor: CurrentUser, targetId: string, change:
 
 // ---------- Role templates ----------
 export async function updateRoleTemplate(actor: CurrentUser, role: Role, permissions: string[], confirm: boolean) {
-  if (!ROLES.includes(role)) throw notFound('That role');
+  if (!(await db().one('SELECT 1 FROM role_templates WHERE role = $1', [role]))) throw notFound('That role');
   const wanted = [...new Set(permissions)];
   for (const p of wanted) if (!KNOWN.has(p)) throw badRequest(`Unknown permission: ${p}`);
   const current = await rolePermissions(role);
@@ -235,6 +264,44 @@ export async function updateRoleTemplate(actor: CurrentUser, role: Role, permiss
   return { added, removed };
 }
 
+/** A new template, empty or copied from another one. You can only include permissions you hold yourself. */
+export async function createRoleTemplate(actor: CurrentUser, t: { label: string; description?: string | null; copyFrom?: string | null }, confirm: boolean) {
+  const label = t.label.trim();
+  const taken = (await roleTemplates()).some((x) => x.label.toLowerCase() === label.toLowerCase());
+  if (taken) throw badRequest('A template with that name already exists.');
+  if (t.copyFrom) await assertRoleExists(t.copyFrom);
+  const perms = t.copyFrom ? await rolePermissions(t.copyFrom) : [];
+  assertCanGrant(actor, perms);
+  const sensitive = perms.filter((p) => SENSITIVE.has(p));
+  if (sensitive.length && !confirm) throw new ConfirmRequired(sensitive);
+  const role = `custom-${randomToken(6).replace(/[^a-z0-9]/gi, '').toLowerCase().slice(0, 8) || Date.now().toString(36)}`;
+  await db().tx(async (q) => {
+    // known_permissions = everything: future features are never switched on in a custom template by themselves.
+    await q.query('INSERT INTO role_templates(role, label, description, builtin, known_permissions, updated_by_staff_id) VALUES ($1,$2,$3,false,$4,$5)',
+      [role, label, t.description?.trim() || null, PERMISSION_KEYS, actor.id]);
+    for (const p of perms) await q.query('INSERT INTO role_permissions(role, permission) VALUES ($1,$2)', [role, p]);
+  });
+  return { role };
+}
+
+export async function renameRoleTemplate(actor: CurrentUser, role: string, t: { label?: string; description?: string | null }) {
+  const row = await db().one<{ builtin: boolean }>('SELECT builtin FROM role_templates WHERE role = $1', [role]);
+  if (!row) throw notFound('That role');
+  if (isBuiltinRole(role)) throw badRequest('Built-in templates keep their names. Create your own template to name it.');
+  if (t.label && (await roleTemplates()).some((x) => x.role !== role && x.label.toLowerCase() === t.label!.trim().toLowerCase())) throw badRequest('A template with that name already exists.');
+  await db().query('UPDATE role_templates SET label = COALESCE($2, label), description = CASE WHEN $3::boolean THEN $4 ELSE description END, updated_by_staff_id = $5, updated_at = now() WHERE role = $1',
+    [role, t.label?.trim() || null, t.description !== undefined, t.description?.trim() || null, actor.id]);
+}
+
+/** Only custom templates nobody uses (including pending and deactivated accounts) can be deleted. */
+export async function deleteRoleTemplate(role: string) {
+  if (isBuiltinRole(role)) throw badRequest('Built-in templates can’t be deleted.');
+  if (!(await db().one('SELECT 1 FROM role_templates WHERE role = $1', [role]))) throw notFound('That role');
+  const n = (await db().one<{ n: number }>('SELECT count(*)::int AS n FROM staff WHERE role = $1', [role]))!.n;
+  if (n) throw badRequest(`${n} ${n === 1 ? 'person uses' : 'people use'} this template. Move them to another template first.`);
+  await db().query('DELETE FROM role_templates WHERE role = $1', [role]);
+}
+
 // ---------- Accounts ----------
 export interface NewAccount {
   name: string;
@@ -242,11 +309,15 @@ export interface NewAccount {
   role?: Role;
   color?: string;
   squareTeamMemberId?: string | null;
+  /** An Admin adding someone can approve them in the same step; otherwise the account waits as pending. */
+  approveNow?: boolean;
 }
 
 export async function createAccount(actor: CurrentUser, a: NewAccount, confirm = false) {
   // Every new account starts as Assistant. Choosing another role needs permission to assign roles.
   const role = a.role ?? DEFAULT_ROLE;
+  await assertRoleExists(role);
+  if (a.approveNow && !isApprover(actor)) throw forbidden('Only an Admin can approve accounts.');
   if (role !== DEFAULT_ROLE) {
     if (!actor.permissions.includes('users:permissions')) throw forbidden('Only people who can assign roles can create accounts with a role other than Assistant.');
     const perms = await rolePermissions(role);
@@ -258,11 +329,15 @@ export async function createAccount(actor: CurrentUser, a: NewAccount, confirm =
   if (a.squareTeamMemberId && (await db().one('SELECT 1 FROM staff WHERE square_team_member_id = $1', [a.squareTeamMemberId]))) {
     throw badRequest('That Square team member is already linked to another account.');
   }
+  const approved = !!a.approveNow;
   const row = await db().one<{ id: string }>(
-    `INSERT INTO staff(name, email, role, color, square_team_member_id) VALUES ($1,$2,$3,COALESCE($4,'#9A8478'),$5) RETURNING id`,
-    [a.name.trim(), email, role, a.color ?? null, a.squareTeamMemberId ?? null],
+    `INSERT INTO staff(name, email, role, color, square_team_member_id, approval_status, active, approval_requested_at, approved_at, approved_by_staff_id)
+     VALUES ($1,$2,$3,COALESCE($4,'#9A8478'),$5,$6,$7, now(), $8, $9) RETURNING id`,
+    [a.name.trim(), email, role, a.color ?? null, a.squareTeamMemberId ?? null, approved ? 'approved' : 'pending', approved,
+      approved ? new Date() : null, approved ? actor.id : null],
   );
-  return { id: row!.id, role };
+  if (!approved) await notifyApprovers(row!.id, a.name.trim(), `Added by ${actor.name}`, actor.id);
+  return { id: row!.id, role, approved };
 }
 
 export interface AccountPatch {
@@ -295,7 +370,8 @@ export async function updateAccount(actor: CurrentUser, id: string, p: AccountPa
 
 export async function setActive(actor: CurrentUser, id: string, active: boolean) {
   assertNotSelf(actor, id, 'account status');
-  await getAccount(id);
+  const acct = await getAccount(id);
+  if (acct.status === 'pending' || acct.status === 'rejected') throw badRequest('This person hasn’t been approved. Approve or reject their request instead.');
   await assertCanManage(actor, id);
   await db().tx(async (q) => {
     await q.query('UPDATE staff SET active = $2, deactivated_at = CASE WHEN $2 THEN NULL ELSE now() END, updated_at = now() WHERE id = $1', [id, active]);
@@ -305,6 +381,103 @@ export async function setActive(actor: CurrentUser, id: string, active: boolean)
       await q.query('UPDATE password_reset_tokens SET used_at = now() WHERE staff_id = $1 AND used_at IS NULL', [id]);
     }
     await assertNotLockedOut(q);
+  });
+}
+
+/**
+ * Which team members' calendars someone may view with "Can view team calendars": null = everyone, or a list (their own
+ * is always included). Same rules as other access changes: not your own account, only people within your access.
+ */
+export async function setCalendarAccess(actor: CurrentUser, id: string, staffIds: string[] | null) {
+  assertNotSelf(actor, id, 'calendar access');
+  await getAccount(id);
+  await assertCanManage(actor, id);
+  const ids = staffIds === null ? null : [...new Set(staffIds)].filter((x) => x !== id);
+  if (ids?.length) {
+    const found = await db().query<{ id: string }>('SELECT id FROM staff WHERE id = ANY($1::uuid[])', [ids]);
+    if (found.length !== ids.length) throw badRequest('One of those team members wasn’t found.');
+  }
+  await db().query('UPDATE staff SET calendar_staff_ids = $2, updated_at = now() WHERE id = $1', [id, ids]);
+  return ids;
+}
+
+// ---------- Approval ----------
+/** Tells every Admin who can approve (in the app, and by email when it's set up). */
+async function notifyApprovers(staffId: string, name: string, how: string, exceptId: string | null = null) {
+  const approvers = await db().query<{ id: string; email: string | null; name: string }>(
+    `SELECT s.id, s.email, s.name FROM staff s WHERE s.active AND s.role = 'admin' AND s.id IS DISTINCT FROM $1
+       AND ((EXISTS (SELECT 1 FROM role_permissions rp WHERE rp.role = s.role AND rp.permission = 'users:manage')
+             AND NOT EXISTS (SELECT 1 FROM staff_permission_overrides o WHERE o.staff_id = s.id AND o.permission = 'users:manage' AND NOT o.granted))
+            OR EXISTS (SELECT 1 FROM staff_permission_overrides o WHERE o.staff_id = s.id AND o.permission = 'users:manage' AND o.granted))`,
+    [exceptId],
+  );
+  const link = `/settings?tab=users&open=${staffId}`;
+  for (const a of approvers) {
+    await db().query('INSERT INTO notifications(staff_id, kind, title, body, link) VALUES ($1,$2,$3,$4,$5)',
+      [a.id, 'account_pending', `${name} is waiting for approval`, `${how}. Approve or reject in Settings → Users & Permissions.`, link]);
+  }
+  const mail = emailService();
+  if (!mail) return;
+  const url = `${config().APP_URL.replace(/\/$/, '')}${link}`;
+  for (const a of approvers.filter((x) => x.email)) {
+    await mail.send({
+      to: a.email!, subject: `${name} is waiting for approval in the Addendum Salon CRM`,
+      text: `Hi ${a.name.split(' ')[0]},\n\n${name} has a CRM login waiting for approval (${how.toLowerCase()}). They can't see anything until an Admin approves them.\n\nReview it here: ${url}`,
+    }).catch(() => undefined);
+  }
+}
+
+/** Sign-in screen: someone asks for an account. It's created as pending; nothing is visible to them until approved. */
+export async function requestAccess(r: { name: string; email: string; password: string }) {
+  if (!(await getSettings()).accounts.allowAccessRequests) throw badRequest('Access requests are turned off. Ask an administrator to add you.');
+  const email = r.email.trim().toLowerCase();
+  // Same answer whether or not the email has an account, so this can't be used to find out who works here.
+  if (await db().one('SELECT 1 FROM staff WHERE lower(email) = $1', [email])) return { created: false };
+  const hash = await bcrypt.hash(r.password, 12);
+  const row = await db().one<{ id: string }>(
+    `INSERT INTO staff(name, email, password_hash, role, approval_status, active, self_requested, approval_requested_at)
+     VALUES ($1,$2,$3,$4,'pending',false,true, now()) RETURNING id`,
+    [r.name.trim(), email, hash, DEFAULT_ROLE],
+  );
+  await notifyApprovers(row!.id, r.name.trim(), 'Requested access from the sign-in screen');
+  return { created: true, id: row!.id };
+}
+
+/**
+ * An Admin approves a pending (or previously rejected) account, optionally choosing its role template.
+ * They must hold every permission the account will get, and admin-level access needs confirming.
+ */
+export async function approveAccount(actor: CurrentUser, id: string, opts: { role?: Role; confirm?: boolean }) {
+  if (!isApprover(actor)) throw forbidden('Only an Admin can approve accounts.');
+  assertNotSelf(actor, id, 'account status');
+  const acct = await getAccount(id);
+  if (acct.status !== 'pending' && acct.status !== 'rejected') throw badRequest('This account is already approved.');
+  const role = opts.role ?? acct.role;
+  await assertRoleExists(role);
+  const perms = computeEffective(await rolePermissions(role), role === acct.role ? await staffOverrides(id) : []);
+  assertCanGrant(actor, perms);
+  const sensitive = perms.filter((p) => SENSITIVE.has(p));
+  if ((role === 'admin' || sensitive.length) && !opts.confirm) throw new ConfirmRequired(sensitive);
+  await db().tx(async (q) => {
+    if (role !== acct.role) await q.query('DELETE FROM staff_permission_overrides WHERE staff_id = $1', [id]);
+    await q.query(
+      `UPDATE staff SET approval_status = 'approved', active = true, role = $2, approved_at = now(), approved_by_staff_id = $3,
+         rejected_at = NULL, deactivated_at = NULL, updated_at = now() WHERE id = $1`,
+      [id, role, actor.id],
+    );
+  });
+  return { role, permissions: perms.length };
+}
+
+export async function rejectAccount(actor: CurrentUser, id: string) {
+  if (!isApprover(actor)) throw forbidden('Only an Admin can reject accounts.');
+  assertNotSelf(actor, id, 'account status');
+  const acct = await getAccount(id);
+  if (acct.status !== 'pending') throw badRequest('Only pending requests can be rejected. Deactivate an approved account instead.');
+  await db().tx(async (q) => {
+    await q.query(`UPDATE staff SET approval_status = 'rejected', active = false, rejected_at = now(), updated_at = now() WHERE id = $1`, [id]);
+    await q.query('DELETE FROM sessions WHERE staff_id = $1', [id]);
+    await q.query('UPDATE password_reset_tokens SET used_at = now() WHERE staff_id = $1 AND used_at IS NULL', [id]);
   });
 }
 
@@ -349,7 +522,7 @@ export async function emailPasswordLink(staffId: string, link: { url: string; ex
 export async function checkPasswordToken(token: string) {
   const r = await db().one<any>(
     `SELECT t.staff_id, t.purpose, s.name, s.email FROM password_reset_tokens t JOIN staff s ON s.id = t.staff_id
-      WHERE t.id = $1 AND t.used_at IS NULL AND t.expires_at > now() AND s.active`,
+      WHERE t.id = $1 AND t.used_at IS NULL AND t.expires_at > now() AND (s.active OR s.approval_status = 'pending')`,
     [sha256(token)],
   );
   return r;

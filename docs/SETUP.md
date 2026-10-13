@@ -77,8 +77,31 @@ Then sign in and follow the setup wizard. Team logins are added manually (§2).
 
 ## 2. Team members, roles & permissions
 
-Everyone signs in with their own account — no shared logins. Manage the team in
-**Settings → Admin → Users & Permissions**:
+Everyone signs in with their own account — no shared logins. Sign-in is the CRM's own email and password; a Square
+account is never needed (linking someone to their Square team member is optional and only matches their bookings and
+sales).
+
+**New logins wait for approval.** Creating a login never grants access by itself:
+- An employee added in Users & Permissions, or someone who uses **Request access** on the sign-in screen, gets a login
+  in **Pending approval**. They can choose a password but can't sign in or see anything yet.
+- Every Admin is notified (in the app, and by email when it's set up). Pending people are listed at the top of
+  **Users & Permissions**: choose their role template and **Approve**, or **Reject**. Only Admins can approve or reject,
+  and never their own account. An Admin adding someone can tick **Approve their access now**.
+- Statuses: Pending approval → Active, or Rejected (can still be approved later); an active account can be
+  Deactivated and Reactivated. Turn off **Request access** under Users & Permissions if you don't want it.
+- Existing accounts and Square-imported team members are already approved.
+
+**Calendars**: everyone sees their own calendar. **Can view team calendars** (a permission in role templates or on a
+person) shows other team members' appointments — for everyone, or only the people ticked under **Team calendars** on
+that person's account. Assistants see only their own until an Owner/Admin grants it. Viewing never allows changing,
+cancelling or rescheduling: appointments are changed in Square.
+
+**Role templates** have their own screen (**Settings → Role templates**), built for phones too: create your own
+templates (empty or copied from another), rename them, switch permissions on and off, see who uses each one and assign it
+to people. Built-in templates (Admin, Reception, Stylist, Assistant) can be edited but not renamed or deleted; a custom
+template can be deleted once nobody uses it.
+
+Manage the team in **Settings → Admin → Users & Permissions**:
 
 - **Add employee**: name + email. New accounts always start as **Assistant** (least access). The person gets an
   email with a one-time link to choose their password (or you copy the link and send it yourself if email isn't set
@@ -123,6 +146,25 @@ npm run users -w server -- set-password --email owner@addendumsalon.com
 first start from `OWNER_EMAIL` / `OWNER_PASSWORD`.
 
 ---
+
+## 2a. Location & Access (salon network)
+
+**Settings → Admin → Location & Access** (Owners/Admins only; saving asks for your password):
+- **Salon network**: register the salon's public IP address — tap **Use this connection's IP** while on the salon
+  Wi-Fi. "This connection" shows the address the server sees and whether you're on the salon network.
+- **Allow Access Anywhere** (default **OFF**): when OFF, *computers* can only use the CRM on the salon network; phones
+  and tablets keep working as usual (or turn on **Restrict phones and tablets too**). When ON, the CRM works from any
+  network. Changes apply immediately.
+- Nothing is restricted until a salon IP is registered, so publishing this never locks anyone out by itself.
+- These rules never change permissions: everyone signs in with their own login and their role decides what they can
+  do — being at the salon adds nothing. Enforced by the server on every request.
+- **Check the IP is right**: "This connection" must match your public IP (search "what is my IP"). If it doesn't, your
+  host has extra proxy layers: set `TRUST_PROXY=2` (or the number of layers) on the server.
+- **If the salon's IP changes**: an Admin's phone works off the salon network, so connect the phone to the salon Wi-Fi
+  and tap **Use this connection's IP** (remove the old one), then save. If no Admin can get in at all, set
+  `ACCESS_ALLOW_ANYWHERE=true` on the server, restart, fix the IP, then remove it.
+- The phone-or-computer check uses what the browser reports, which a determined person could fake; turn on **Restrict
+  phones and tablets too** for IP-only control.
 
 ## 2b. API keys & integrations
 

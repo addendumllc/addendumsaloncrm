@@ -6,6 +6,7 @@ import { setTimezone } from './lib/format';
 import { applyAppearance } from './lib/theme';
 import { AppShell } from './components/layout/AppShell';
 import { StylistShell } from './components/layout/StylistShell';
+import { NetworkBlocked, useAccessStatus } from './components/layout/NetworkBlocked';
 import { ActionsProvider } from './components/domain/ActionsProvider';
 import { EmptyState, PageLoading } from './components/ui';
 import { ShieldOff } from 'lucide-react';
@@ -66,12 +67,15 @@ export function App() {
 function SignedIn() {
   const { data: settings } = useSettings();
   const { data: me } = useMe();
+  const { data: access } = useAccessStatus();
   const loc = useLocation();
   useEffect(() => {
     if (settings?.settings.business?.timezone) setTimezone(settings.settings.business.timezone);
     if (settings) applyAppearance(settings.settings.appearance);
   }, [settings]);
   if (!settings) return <div className="flex h-screen items-center justify-center"><PageLoading /></div>;
+  // Not on the salon network on a computer (Location & Access): the server refuses everything, so say why.
+  if (access?.restricted) return <NetworkBlocked status={access} />;
   // Each page opens for the permissions listed (any one). The server checks every request as well.
   const can = (p: string) => !!me && me.permissions.includes(p);
   const canAny = (...ps: string[]) => ps.some(can);
@@ -81,7 +85,7 @@ function SignedIn() {
       <Route path="/" element={canAny('dashboard:view') ? <DashboardPage /> : <Navigate to={home} replace />} />
       <Route path="/follow-ups" element={guard(['tasks:read_all', 'tasks:read_own'], <FollowUpsPage />)} />
       <Route path="/tasks" element={guard(['tasks:read_all', 'tasks:read_own'], <TasksPage />)} />
-      <Route path="/appointments" element={guard(['appointments:read'], <AppointmentsPage />)} />
+      <Route path="/appointments" element={!can('appointments:read') && can('appointments:read_own') ? <Navigate to="/my-calendar" replace /> : guard(['appointments:read'], <AppointmentsPage />)} />
       <Route path="/my-calendar" element={canAny('appointments:read') && canAny('dashboard:view') ? <Navigate to="/appointments" replace /> : guard(['appointments:read_own', 'appointments:read'], <MyCalendarPage />)} />
       <Route path="/clients" element={guard(['clients:read', 'clients:read_assigned'], <ClientsPage />)} />
       <Route path="/clients/:id" element={guard(['clients:read', 'clients:read_assigned'], <ClientProfilePage />)} />

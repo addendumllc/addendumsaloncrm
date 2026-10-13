@@ -1,21 +1,25 @@
 // Shared types and constants used by both the server API and the web app.
 // Keep this file free of runtime dependencies so it can be imported anywhere.
 
-export type Role = 'admin' | 'receptionist' | 'stylist' | 'assistant';
+/** The four built-in role templates. Administrators can add their own templates too (see RoleTemplateDTO). */
+export type BuiltinRole = 'admin' | 'receptionist' | 'stylist' | 'assistant';
+/** A role template key: one of the built-in ones, or a custom template's key. */
+export type Role = BuiltinRole | (string & {});
 
-export const ROLES: Role[] = ['admin', 'receptionist', 'stylist', 'assistant'];
+export const ROLES: BuiltinRole[] = ['admin', 'receptionist', 'stylist', 'assistant'];
+export const isBuiltinRole = (r: string): r is BuiltinRole => (ROLES as string[]).includes(r);
 
 /** New employee accounts start as Assistant (least access) unless an administrator chooses otherwise. */
-export const DEFAULT_ROLE: Role = 'assistant';
+export const DEFAULT_ROLE: BuiltinRole = 'assistant';
 
-export const ROLE_LABELS: Record<Role, string> = {
+export const ROLE_LABELS: Record<BuiltinRole, string> = {
   admin: 'Admin',
   receptionist: 'Reception',
   stylist: 'Stylist',
   assistant: 'Assistant',
 };
 
-export const ROLE_DESCRIPTIONS: Record<Role, string> = {
+export const ROLE_DESCRIPTIONS: Record<BuiltinRole, string> = {
   admin: 'Business administrators: settings, team, integrations, reports.',
   receptionist: 'Front desk: calendar, clients, leads, texting and follow-ups.',
   stylist: 'Service providers: their own calendar, hair orders and commission.',
@@ -80,7 +84,7 @@ export const PERMISSIONS_CATALOG: PermissionDef[] = [
   { key: 'messages:read', category: 'New Clients and messages', action: 'view', label: 'Read messages', description: 'Text message inbox.' },
   { key: 'messages:send', category: 'New Clients and messages', action: 'create', label: 'Send messages', description: 'Draft and send texts to customers.' },
 
-  { key: 'appointments:read', category: 'Appointments and calendar', action: 'view', label: 'View the full calendar', description: 'Everyone’s appointments.' },
+  { key: 'appointments:read', category: 'Appointments and calendar', action: 'view', label: 'Can view team calendars', description: 'Other team members’ appointments: everyone’s, or only the people chosen on their account. Viewing never allows changes.' },
   { key: 'appointments:read_own', category: 'Appointments and calendar', action: 'view', label: 'View their own calendar', description: 'Only appointments where they are the provider.' },
   { key: 'square:sync', category: 'Appointments and calendar', action: 'edit', label: 'Refresh from Square', description: 'Pull the latest bookings from Square now.' },
 
@@ -137,7 +141,7 @@ export const SENSITIVE_PERMISSIONS = PERMISSIONS_CATALOG.filter((p) => p.sensiti
  * Role template defaults (starting points; administrators can edit the templates and each person).
  * Reception and Stylist match what those roles could do before per-person permissions existed, plus "own commission".
  */
-export const ROLE_DEFAULT_PERMISSIONS: Record<Role, string[]> = {
+export const ROLE_DEFAULT_PERMISSIONS: Record<BuiltinRole, string[]> = {
   admin: PERMISSION_KEYS,
   receptionist: [
     'dashboard:view', 'clients:read', 'clients:write', 'clients:contact', 'clients:history', 'clients:notes',
@@ -146,11 +150,31 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<Role, string[]> = {
     'staff:read', 'highlevel:push', 'square:sync',
     'inventory:view', 'inventory:order', 'inventory:read_all', 'inventory:order_for_others', 'commission:own',
   ],
-  stylist: ['appointments:read_own', 'inventory:view', 'inventory:order', 'commission:own'],
+  // Their own appointments, their own clients (contact, history, notes), their own follow-ups, hair orders, commission.
+  stylist: [
+    'appointments:read_own', 'clients:read_assigned', 'clients:contact', 'clients:history', 'clients:notes', 'services:read',
+    'tasks:read_own', 'tasks:write', 'inventory:view', 'inventory:order', 'commission:own',
+  ],
+  // Their own calendar (team calendars when an Owner/Admin allows it), assigned follow-ups, needed client details.
   assistant: [
+    'dashboard:view', 'appointments:read_own', 'clients:read', 'clients:contact', 'clients:history', 'services:read',
+    'tasks:read_own', 'tasks:write', 'rebooking:client', 'inventory:view', 'staff:read', 'commission:own',
+  ],
+};
+
+/**
+ * Earlier built-in defaults. A template that still matches one of these exactly (nobody edited it) is moved to the
+ * current defaults on start-up; a template an administrator changed is left alone.
+ */
+export const PREVIOUS_ROLE_DEFAULTS: Partial<Record<BuiltinRole, string[][]>> = {
+  stylist: [['appointments:read_own', 'inventory:view', 'inventory:order', 'commission:own']],
+  assistant: [[
     'dashboard:view', 'appointments:read', 'clients:read', 'clients:contact', 'clients:history', 'services:read',
     'tasks:read_own', 'tasks:read_all', 'tasks:write', 'rebooking:client', 'inventory:view', 'staff:read', 'commission:own',
-  ],
+  ], [
+    'dashboard:view', 'appointments:read', 'clients:read', 'clients:contact', 'clients:history', 'services:read',
+    'tasks:read_own', 'tasks:write', 'rebooking:client', 'inventory:view', 'staff:read', 'commission:own',
+  ]],
 };
 
 export type PermissionSource = 'role' | 'granted' | 'denied' | 'none';
@@ -163,11 +187,27 @@ export interface EffectivePermissionDTO {
   source: PermissionSource;
 }
 
+/**
+ * pending: has a login but is waiting for an Admin to approve it (can't use the CRM). active: approved and working.
+ * rejected: the request was turned down. disabled: approved before, deactivated since.
+ */
+export type AccountStatus = 'pending' | 'active' | 'rejected' | 'disabled';
+export const ACCOUNT_STATUS_LABEL: Record<AccountStatus, string> = { pending: 'Pending approval', active: 'Active', rejected: 'Rejected', disabled: 'Deactivated' };
+
 export interface StaffAccountDTO {
   id: string;
   name: string;
   email: string | null;
   role: Role;
+  roleLabel: string;
+  status: AccountStatus;
+  /** Asked for access from the sign-in screen (rather than being added by an administrator). */
+  selfRequested: boolean;
+  requestedAt: string | null;
+  approvedAt: string | null;
+  approvedByName: string | null;
+  /** Team calendars they may view (null = everyone, when they have "Can view team calendars"). */
+  calendarStaffIds: string[] | null;
   active: boolean;
   color: string;
   canSignIn: boolean;
@@ -188,8 +228,14 @@ export interface RoleTemplateDTO {
   label: string;
   description: string;
   permissions: string[];
+  /** Built-in defaults (empty for custom templates). */
   defaults: string[];
+  /** Built-in templates can't be renamed or deleted; custom ones can. */
+  builtin: boolean;
+  /** Active people using it. */
   members: number;
+  /** Everyone using it, including pending and deactivated accounts (a template in use can't be deleted). */
+  totalMembers: number;
 }
 
 export interface PermissionPreviewDTO {
@@ -809,10 +855,43 @@ export interface AppSettings {
     catalog: string[];
   };
   appearance: Appearance;
+  /** Where the CRM can be used from (Settings → Location & Access). Changed only through PUT /api/access. */
+  access: AccessSettings;
+  /** Sign-in screen: let people ask for an account. Requests always wait for an Admin's approval. */
+  accounts: { allowAccessRequests: boolean };
   onboardingComplete: boolean;
 }
 
 export const DEFAULT_ACCENT = '#6B3F55';
+
+/**
+ * Location & Access. With "Allow Access Anywhere" off and at least one salon IP registered, desktop browsers can only
+ * use the CRM from the salon's internet connection. Phones and tablets follow their existing rules unless
+ * restrictMobile is on. It never changes anyone's permissions.
+ */
+export interface AccessSettings {
+  allowAnywhere: boolean;
+  /** The salon's public IP address(es) (IPv4 and/or IPv6). */
+  salonIps: string[];
+  restrictMobile: boolean;
+}
+
+export interface AccessStatusDTO {
+  /** This connection's public IP, as the server sees it. */
+  ip: string;
+  mobile: boolean;
+  onSalonNetwork: boolean;
+  allowAnywhere: boolean;
+  /** A salon IP is registered (until then nothing is restricted). */
+  configured: boolean;
+  /** The server's recovery switch (ACCESS_ALLOW_ANYWHERE) is on. */
+  overridden: boolean;
+  /** This request would be refused. */
+  restricted: boolean;
+  canManage: boolean;
+  salonIps?: string[];
+  restrictMobile?: boolean;
+}
 
 /** Settings → Appearance: brand, logo and colours, applied for everyone (and on the sign-in screen). */
 export interface Appearance {
@@ -907,6 +986,8 @@ export interface CurrentUser {
   email: string;
   role: Role;
   permissions: string[];
+  /** With "Can view team calendars": null = everyone's calendar, a list = only these team members (plus their own). */
+  calendarStaffIds?: string[] | null;
 }
 
 // ---------------- Inventory order requests ----------------
