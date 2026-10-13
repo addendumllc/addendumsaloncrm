@@ -103,6 +103,8 @@ export const API_RULES: { method: string; path: RegExp; anyOf: string[] }[] = [
   { method: '*', path: /^\/inventory(\/.*)?$/, anyOf: ['inventory:view', 'inventory:order', 'inventory:read_all', 'inventory:manage'] },
   { method: '*', path: /^\/commission(\/.*)?$/, anyOf: ['commission:own', 'commission:team', 'commission:manage', 'commission:approve', 'commission:export'] },
 
+  { method: '*', path: /^\/settings\/logo$/, anyOf: ['settings:write'] },
+  { method: '*', path: /^\/settings\/font\/(heading|body)$/, anyOf: ['settings:write'] },
   { method: 'PATCH', path: /^\/settings$/, anyOf: ['settings:rules', 'settings:write', 'integrations:manage', 'inventory:sync'] },
   { method: 'GET', path: /^\/staff$/, anyOf: ['staff:read', 'users:manage', 'tasks:assign', 'inventory:order_for_others', 'commission:team'] },
   { method: 'PATCH', path: /^\/staff\/[^/]+$/, anyOf: ['users:manage'] },

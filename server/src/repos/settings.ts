@@ -1,4 +1,4 @@
-import { DEFAULT_ACCENT, type AppSettings } from '@addendum/shared';
+import { DEFAULT_APPEARANCE, type AppSettings } from '@addendum/shared';
 import { db } from '../db/index.js';
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -98,7 +98,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     },
   },
   inventory: { orderEmail: 'gaby@addendumhair.com', ccRequester: true, catalog: [] },
-  appearance: { accent: DEFAULT_ACCENT },
+  appearance: { ...DEFAULT_APPEARANCE },
   onboardingComplete: false,
 };
 

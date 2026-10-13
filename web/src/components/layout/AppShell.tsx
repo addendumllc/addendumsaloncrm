@@ -9,6 +9,7 @@ import { useIntegrations, useMe, useCanDo } from '../../api/hooks';
 import { relative } from '../../lib/format';
 import { Menu, cx } from '../ui';
 import { useActions } from '../domain/ActionsProvider';
+import { BrandMark, useAppearance } from './Brand';
 import { GlobalSearch } from './GlobalSearch';
 import { Notifications, useUpdates } from './Notifications';
 import { SETTINGS_PERMS } from '../../lib/access';
@@ -98,7 +99,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-[100dvh] overflow-hidden">
       {/* Desktop sidebar */}
-      <aside className="hidden w-[232px] shrink-0 flex-col border-r border-line bg-mist/70 px-3 py-5 lg:flex">
+      <aside className="hidden w-[232px] shrink-0 flex-col border-r border-line bg-sidebar px-3 py-5 lg:flex">
         <Wordmark />
         <div className="mt-6 flex-1 overflow-y-auto">{navList}</div>
         <SidebarFooter name={me?.name} onSignOut={signOut} />
@@ -157,10 +158,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 }
 
 export function Wordmark() {
+  const a = useAppearance();
   return (
     <div className="px-3">
-      <p className="font-display text-[26px] font-semibold leading-none tracking-[0.02em] text-ink">Addendum</p>
-      <p className="mt-1 text-[12px] text-stone">Salon command center</p>
+      <BrandMark a={a} size="sidebar" />
+      {a.tagline && <p className="mt-1 text-[12px] text-stone">{a.tagline}</p>}
     </div>
   );
 }

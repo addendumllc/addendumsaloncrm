@@ -10,7 +10,7 @@ export function InventorySettings() {
   const { data: integ } = useIntegrations();
   const can = useCan();
   const { data: info } = useSetupInfo(can('settings:read'));
-  const locked = !can('*');
+  const locked = !can('settings:write');
   const [catalogText, setCatalogText] = useState('');
   const toast = useToast();
   const [testing, setTesting] = useState(false);
@@ -49,7 +49,7 @@ export function InventorySettings() {
             placeholder={'Signature Hand-Tied Weft\nK-Tip Extensions\nTape-In Extensions'}
           />
         </Field>
-        {locked && <p className="mt-3 text-[13px] text-stone">Only the owner can change where requests are sent.</p>}
+        {locked && <p className="mt-3 text-[13px] text-stone">Only administrators (with “Edit business settings”) can change where requests are sent.</p>}
       </Card>
 
       <Card title="Shopify inventory" description="Square is the source of truth for stock. Administrators can push Square's counts to Shopify by hand from Order Hair → Square inventory; products are matched by SKU. Nothing is sent to Shopify automatically, and hair orders never change Shopify.">

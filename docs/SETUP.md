@@ -397,10 +397,16 @@ plan you set in **Settings → Commission**:
 
 ## 8. Colours
 
-**Settings → Appearance & colours**:
-- **Accent colour** (owner): pick a preset or any custom colour. It changes highlights, badges,
-  switches and the banner for everyone. Colours too light for white text are automatically deepened so
-  buttons stay readable.
+**Settings → Brand & appearance** (administrators):
+- **Logo**: upload a PNG, JPG or WebP (up to 400 KB). Choose logo and name, logo only or name only for the header, and
+  optionally use the logo as the browser tab / home-screen icon. Shown on the sign-in screen too.
+- **Name and tagline** shown in the sidebar and phone header.
+- **Accent colour** (preset or any custom colour): highlights, badges, switches and buttons. Colours too light for white
+  text are automatically deepened so buttons stay readable.
+- **Background** (warm, white, cool or tinted with the accent), **sidebar** (soft grey, white or accent tint) and
+  **fonts**: built-in serif or sans-serif headings, or upload your own brand fonts for headings and/or body text
+  (WOFF2, WOFF, TTF or OTF up to 1.5 MB; check your font licence allows web use). Changes preview live and apply to
+  everyone when saved; uploads take effect straight away.
 - **Stylist colours** (owner/manager): each stylist's colour on the appointment calendar. Saved as soon as you pick one.
 
 ---

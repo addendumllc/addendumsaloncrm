@@ -4,11 +4,13 @@ export default {
   theme: {
     extend: {
       colors: {
-        paper: '#FAFAF8',
+        // Background tones are themeable too (Settings → Appearance → Background); see src/lib/theme.ts.
+        paper: 'rgb(var(--paper) / <alpha-value>)',
+        sidebar: 'rgb(var(--sidebar) / <alpha-value>)',
         ink: { DEFAULT: '#1D1C1A', soft: '#3A3835' },
         stone: { DEFAULT: '#75716B', light: '#A29E97' },
-        line: { DEFAULT: '#E7E4DF', strong: '#D6D2CB' },
-        mist: '#F2F1EE',
+        line: { DEFAULT: 'rgb(var(--line) / <alpha-value>)', strong: 'rgb(var(--line-strong) / <alpha-value>)' },
+        mist: 'rgb(var(--mist) / <alpha-value>)',
         // Accent colour is themeable (Settings → Appearance); values are RGB channels set in src/lib/theme.ts.
         plum: {
           DEFAULT: 'rgb(var(--accent) / <alpha-value>)',
@@ -21,8 +23,8 @@ export default {
         amber: { DEFAULT: '#A87A2F', tint: '#F6EEDD' },
       },
       fontFamily: {
-        display: ['"Cormorant Garamond"', 'Georgia', 'serif'],
-        sans: ['"Instrument Sans"', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
+        display: ['var(--font-display)'],
+        sans: ['var(--font-body)'],
       },
       fontSize: {
         '2xs': ['0.6875rem', { lineHeight: '1rem' }],

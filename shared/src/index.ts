@@ -808,14 +808,56 @@ export interface AppSettings {
     /** Products offered as quick picks when building a request (one per line in Settings). */
     catalog: string[];
   };
-  appearance: {
-    /** Accent colour used for highlights, toggles and badges (hex). */
-    accent: string;
-  };
+  appearance: Appearance;
   onboardingComplete: boolean;
 }
 
 export const DEFAULT_ACCENT = '#6B3F55';
+
+/** Settings → Appearance: brand, logo and colours, applied for everyone (and on the sign-in screen). */
+export interface Appearance {
+  /** Accent colour used for highlights, toggles and badges (hex). */
+  accent: string;
+  /** Page background: warm off-white (default), plain white, cool grey, or a faint tint of the accent. */
+  background: 'warm' | 'white' | 'cool' | 'tinted';
+  /** Sidebar: soft grey (default), white, or a tint of the accent. */
+  sidebar: 'soft' | 'white' | 'accent';
+  /** Headings: elegant serif (default), clean sans-serif, or the salon's own uploaded font. */
+  headingFont: 'serif' | 'sans' | 'custom';
+  /** Body text: the built-in sans-serif (default) or the salon's own uploaded font. */
+  bodyFont: 'default' | 'custom';
+  /** Uploaded fonts, set by the server (name shown in Settings; version changes with every upload). Null = none. */
+  headingFontName: string | null;
+  headingFontVersion: string | null;
+  bodyFontName: string | null;
+  bodyFontVersion: string | null;
+  /** Name shown in the sidebar, phone header and sign-in screen. */
+  brandName: string;
+  tagline: string;
+  /** What the header shows when a logo is uploaded. */
+  logoMode: 'name' | 'logo' | 'logo_name';
+  /** Also use the logo as the browser tab / home-screen icon. */
+  logoAsIcon: boolean;
+  /** Set by the server when a logo is uploaded (changes with every upload); null = no logo. */
+  logoVersion: string | null;
+}
+
+export const DEFAULT_APPEARANCE: Appearance = {
+  accent: DEFAULT_ACCENT, background: 'warm', sidebar: 'soft', headingFont: 'serif', bodyFont: 'default',
+  headingFontName: null, headingFontVersion: null, bodyFontName: null, bodyFontVersion: null,
+  brandName: 'Addendum', tagline: 'Salon command center', logoMode: 'logo_name', logoAsIcon: false, logoVersion: null,
+};
+
+/** Logo files: PNG, JPEG or WebP up to this size (SVG isn't accepted: it can carry scripts). */
+export const LOGO_MAX_BYTES = 400 * 1024;
+/** Font files: WOFF2 (best), WOFF, TTF or OTF up to this size. */
+export const FONT_MAX_BYTES = 1536 * 1024;
+export type FontSlot = 'heading' | 'body';
+export const fontUrl = (a: Appearance, slot: FontSlot) => {
+  const v = slot === 'heading' ? a.headingFontVersion : a.bodyFontVersion;
+  return v ? `/brand/font/${slot}?v=${encodeURIComponent(v)}` : null;
+};
+export const logoUrl = (a: Pick<Appearance, 'logoVersion'>) => (a.logoVersion ? `/brand/logo?v=${encodeURIComponent(a.logoVersion)}` : null);
 
 export type HighLevelAutomationKey =
   | 'new_lead'

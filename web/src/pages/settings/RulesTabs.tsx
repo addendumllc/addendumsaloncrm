@@ -10,7 +10,7 @@ export function BusinessSettings({ onSaved }: { onSaved?: () => void }) {
   const can = useCan();
   if (!b.draft) return null;
   const d = b.draft;
-  const locked = !can('*');
+  const locked = !can('settings:write');
   return (
     <Card
       title="Salon details"
@@ -31,7 +31,7 @@ export function BusinessSettings({ onSaved }: { onSaved?: () => void }) {
         </Field>
         <Field label="Hours" className="sm:col-span-2"><textarea className="field min-h-[64px]" value={d.hours} disabled={locked} onChange={(e) => b.set('hours', e.target.value)} placeholder="Tue–Fri 10–7, Sat 9–5, closed Sun & Mon" /></Field>
       </div>
-      {locked && <p className="mt-3 text-[13px] text-stone">Only the owner can change salon details.</p>}
+      {locked && <p className="mt-3 text-[13px] text-stone">Only administrators (with “Edit business settings”) can change salon details.</p>}
     </Card>
   );
 }

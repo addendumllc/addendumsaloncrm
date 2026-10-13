@@ -3,7 +3,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
-import { applyAccent } from '../lib/theme';
+import { applyAppearance } from '../lib/theme';
+import { BrandMark } from '../components/layout/Brand';
+import { DEFAULT_APPEARANCE, type Appearance } from '@addendum/shared';
 import { Button, Field } from '../components/ui';
 
 export function LoginPage() {
@@ -16,7 +18,7 @@ export function LoginPage() {
   const [forgotMsg, setForgotMsg] = useState('');
   const qc = useQueryClient();
   const nav = useNavigate();
-  const { data: cfg } = useQuery({ queryKey: ['auth-config'], queryFn: () => api.get<{ demoMode: boolean; accent?: string }>('/auth/config').then((c) => { applyAccent(c.accent); return c; }), staleTime: Infinity });
+  const { data: cfg } = useQuery({ queryKey: ['auth-config'], queryFn: () => api.get<{ demoMode: boolean; accent?: string; appearance?: Appearance }>('/auth/config').then((c) => { applyAppearance(c.appearance ?? { accent: c.accent }); return c; }), staleTime: Infinity });
   const embedded = typeof window !== 'undefined' && window.self !== window.top;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -41,7 +43,7 @@ export function LoginPage() {
   return (
     <div className="flex min-h-[100dvh] items-center justify-center bg-paper px-5">
       <div className="w-full max-w-[380px]">
-        <p className="text-center font-display text-[44px] font-semibold leading-none tracking-[0.02em]">Addendum</p>
+        <BrandMark a={{ ...DEFAULT_APPEARANCE, ...(cfg?.appearance ?? {}) }} size="login" />
         <p className="mt-2 text-center text-[15px] text-stone">Sign in to the salon command center</p>
         <form onSubmit={submit} className="panel mt-8 space-y-4 p-6 shadow-lift">
           <Field label="Email"><input className="field" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></Field>

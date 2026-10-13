@@ -17,7 +17,10 @@ const loginLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 10, skipSuccessfu
   message: { error: { code: 'rate_limited', message: 'Too many sign-in attempts. Please wait a few minutes.' } } });
 
 /** Public, non-sensitive: lets the sign-in screen show demo hints only in Demo Mode. */
-authRouter.get('/config', ah(async (_req, res) => res.json({ demoMode: isDemo(), accent: (await getSettings()).appearance.accent })));
+authRouter.get('/config', ah(async (_req, res) => {
+  const { appearance } = await getSettings();
+  res.json({ demoMode: isDemo(), accent: appearance.accent, appearance });
+}));
 
 authRouter.post('/login', loginLimiter, ah(async (req, res) => {
   const { email, password } = parse(z.object({ email: z.string().email(), password: z.string().min(1).max(200) }), req.body);

@@ -1,11 +1,12 @@
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
+import { FONT_MAX_BYTES, LOGO_MAX_BYTES, type FontSlot } from '@addendum/shared';
 import { z } from 'zod';
 import { can } from '../auth/permissions.js';
 import { requirePermission } from '../auth/session.js';
 import { db } from '../db/index.js';
-import { forbidden } from '../lib/errors.js';
+import { badRequest, forbidden } from '../lib/errors.js';
 import { listAudit } from '../repos/audit.js';
-import { getSettings, updateSettings } from '../repos/settings.js';
+import { getKV, getSettings, setKV, updateSettings } from '../repos/settings.js';
 import { listStaff } from '../repos/staff.js';
 import { runRules } from '../domain/rulesEngine.js';
 import { ah, logAction, parse } from './util.js';
@@ -57,7 +58,17 @@ const settingsPatch = z.object({
     ccRequester: z.boolean(),
     catalog: z.array(z.string().trim().min(1).max(120)).max(300),
   }).partial().optional(),
-  appearance: z.object({ accent: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'must be a colour like #6B3F55') }).partial().optional(),
+  appearance: z.object({
+    accent: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'must be a colour like #6B3F55'),
+    background: z.enum(['warm', 'white', 'cool', 'tinted']),
+    sidebar: z.enum(['soft', 'white', 'accent']),
+    headingFont: z.enum(['serif', 'sans', 'custom']),
+    bodyFont: z.enum(['default', 'custom']),
+    brandName: z.string().trim().min(1, 'enter a name to show').max(40),
+    tagline: z.string().trim().max(60),
+    logoMode: z.enum(['name', 'logo', 'logo_name']),
+    logoAsIcon: z.boolean(),
+  }).partial().optional(),
   onboardingComplete: z.boolean().optional(),
 });
 
@@ -77,6 +88,101 @@ settingsRouter.patch('/settings', ah(async (req, res) => {
   if (patch.rules || patch.reminders) await runRules();
   res.json({ settings });
 }));
+
+// ---------- Logo (Settings → Appearance) ----------
+const LOGO_KEY = 'branding.logo';
+const sniff = (b: Buffer) =>
+  b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) ? 'image/png'
+    : b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff ? 'image/jpeg'
+      : b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP' ? 'image/webp' : null;
+
+/** Upload a logo as a data URL. The file's real type is checked from its bytes, not just its name. */
+settingsRouter.put('/settings/logo', requirePermission('settings:write'), ah(async (req, res) => {
+  const { dataUrl } = parse(z.object({ dataUrl: z.string().max(Math.ceil(LOGO_MAX_BYTES * 1.4) + 100, 'the logo must be 400 KB or smaller') }), req.body);
+  const m = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+  if (!m) throw badRequest('Upload a PNG, JPG or WebP image.');
+  const bytes = Buffer.from(m[2], 'base64');
+  if (bytes.length > LOGO_MAX_BYTES) throw badRequest('The logo must be 400 KB or smaller.');
+  const mime = sniff(bytes);
+  if (!mime) throw badRequest('That file isn’t a PNG, JPG or WebP image.');
+  await setKV(LOGO_KEY, { mime, data: bytes.toString('base64') });
+  const settings = await updateSettings({ appearance: { logoVersion: Date.now().toString(36) } });
+  await logAction(req, 'settings.logo', 'settings', null, { bytes: bytes.length, mime });
+  res.json({ settings });
+}));
+
+settingsRouter.delete('/settings/logo', requirePermission('settings:write'), ah(async (req, res) => {
+  await db().query('DELETE FROM settings WHERE key = $1', [LOGO_KEY]);
+  const settings = await updateSettings({ appearance: { logoVersion: null } });
+  await logAction(req, 'settings.logo_removed', 'settings', null);
+  res.json({ settings });
+}));
+
+/** Public (the sign-in screen and browser tab use it). Versioned URLs are cached for good. */
+export async function serveLogo(req: Request, res: Response) {
+  const logo = await getKV<{ mime: string; data: string }>(LOGO_KEY);
+  if (!logo) return res.status(404).end();
+  res.setHeader('Content-Type', logo.mime);
+  res.setHeader('Cache-Control', req.query.v ? 'public, max-age=31536000, immutable' : 'no-cache');
+  res.setHeader('Content-Security-Policy', "default-src 'none'");
+  res.send(Buffer.from(logo.data, 'base64'));
+}
+
+// ---------- Custom fonts (Settings → Appearance) ----------
+const FONT_KEY = (slot: FontSlot) => `branding.font.${slot}`;
+const fontSlot = z.enum(['heading', 'body']);
+const sniffFont = (b: Buffer) => {
+  const tag = b.subarray(0, 4).toString('latin1');
+  if (tag === 'wOF2') return 'font/woff2';
+  if (tag === 'wOFF') return 'font/woff';
+  if (tag === 'OTTO') return 'font/otf';
+  if (tag === 'true' || b.subarray(0, 4).equals(Buffer.from([0, 1, 0, 0]))) return 'font/ttf';
+  return null;
+};
+const FONT_FIELDS = {
+  heading: { name: 'headingFontName', version: 'headingFontVersion', use: 'headingFont', on: 'custom', off: 'serif' },
+  body: { name: 'bodyFontName', version: 'bodyFontVersion', use: 'bodyFont', on: 'custom', off: 'default' },
+} as const;
+const fontFields = (slot: FontSlot) => FONT_FIELDS[slot];
+
+/** Upload a font (data URL). Checked from its bytes; it's switched on for that slot straight away. */
+settingsRouter.put('/settings/font/:slot', requirePermission('settings:write'), ah(async (req, res) => {
+  const slot = parse(fontSlot, req.params.slot);
+  const b = parse(z.object({
+    dataUrl: z.string().max(Math.ceil(FONT_MAX_BYTES * 1.4) + 200, 'the font file must be 1.5 MB or smaller'),
+    name: z.string().trim().min(1).max(80),
+  }), req.body);
+  const m = /^data:[\w./+-]*;base64,([A-Za-z0-9+/=]+)$/.exec(b.dataUrl);
+  if (!m) throw badRequest('Upload a WOFF2, WOFF, TTF or OTF font file.');
+  const bytes = Buffer.from(m[1], 'base64');
+  if (bytes.length > FONT_MAX_BYTES) throw badRequest('The font file must be 1.5 MB or smaller.');
+  const mime = sniffFont(bytes);
+  if (!mime) throw badRequest('That file isn’t a WOFF2, WOFF, TTF or OTF font.');
+  await setKV(FONT_KEY(slot), { mime, data: bytes.toString('base64') });
+  const f = fontFields(slot);
+  const name = b.name.replace(/\.(woff2?|ttf|otf)$/i, '');
+  const settings = await updateSettings({ appearance: { [f.name]: name, [f.version]: Date.now().toString(36), [f.use]: f.on } });
+  await logAction(req, 'settings.font', 'settings', null, { slot, bytes: bytes.length, mime });
+  res.json({ settings });
+}));
+
+settingsRouter.delete('/settings/font/:slot', requirePermission('settings:write'), ah(async (req, res) => {
+  const slot = parse(fontSlot, req.params.slot);
+  await db().query('DELETE FROM settings WHERE key = $1', [FONT_KEY(slot)]);
+  const f = fontFields(slot);
+  const settings = await updateSettings({ appearance: { [f.name]: null, [f.version]: null, [f.use]: f.off } });
+  await logAction(req, 'settings.font_removed', 'settings', null, { slot });
+  res.json({ settings });
+}));
+
+export async function serveFont(req: Request, res: Response) {
+  const slot = fontSlot.safeParse(req.params.slot);
+  const font = slot.success ? await getKV<{ mime: string; data: string }>(FONT_KEY(slot.data)) : null;
+  if (!font) return res.status(404).end();
+  res.setHeader('Content-Type', font.mime);
+  res.setHeader('Cache-Control', req.query.v ? 'public, max-age=31536000, immutable' : 'no-cache');
+  res.send(Buffer.from(font.data, 'base64'));
+}
 
 // ---------- Staff ----------
 settingsRouter.get('/staff', requirePermission('staff:read'), ah(async (_req, res) => res.json({ staff: await listStaff() })));

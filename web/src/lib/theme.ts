@@ -1,4 +1,4 @@
-import { DEFAULT_ACCENT } from '@addendum/shared';
+import { DEFAULT_ACCENT, DEFAULT_APPEARANCE, fontUrl, logoUrl, type Appearance, type FontSlot } from '@addendum/shared';
 
 /** Accent colour theming (Settings → Appearance). Derives the tint/soft/dark shades from one colour. */
 type RGB = [number, number, number];
@@ -48,7 +48,61 @@ export function applyAccent(hex: string | undefined | null) {
   root.setProperty('--accent-dark', ch(d.dark));
   root.setProperty('--accent-tint', ch(d.tint));
   root.setProperty('--accent-soft', ch(d.soft));
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#FAFAF8');
+}
+
+/** Background tones: page, light fills, borders. "tinted" is a whisper of the accent. */
+const BACKGROUNDS: Record<Exclude<Appearance['background'], 'tinted'>, { paper: RGB; mist: RGB; line: RGB; strong: RGB }> = {
+  warm: { paper: [250, 250, 248], mist: [242, 241, 238], line: [231, 228, 223], strong: [214, 210, 203] },
+  white: { paper: [255, 255, 255], mist: [244, 244, 245], line: [230, 230, 232], strong: [212, 212, 216] },
+  cool: { paper: [246, 248, 250], mist: [238, 241, 244], line: [225, 229, 234], strong: [205, 211, 218] },
+};
+const SERIF = '"Cormorant Garamond", Georgia, serif';
+const SANS = '"Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif';
+const FAMILY: Record<FontSlot, string> = { heading: 'Salon Heading', body: 'Salon Body' };
+
+/** Registers an uploaded font with the browser (once per version). Text uses the fallback until it has loaded. */
+const loaded = new Map<FontSlot, string>();
+function loadCustomFont(slot: FontSlot, url: string | null) {
+  if (!url || loaded.get(slot) === url || typeof FontFace === 'undefined') return;
+  loaded.set(slot, url);
+  const face = new FontFace(FAMILY[slot], `url(${url})`, { display: 'swap' });
+  face.load().then((f) => {
+    // A replaced upload: drop the previous file so only the new one is used.
+    document.fonts.forEach((x) => { if (x.family.replace(/"/g, '') === FAMILY[slot] && x !== f) document.fonts.delete(x); });
+    document.fonts.add(f);
+  }).catch(() => loaded.delete(slot));
+}
+
+/** Applies the whole look (Settings → Appearance) to the page. Missing values fall back to the defaults. */
+export function applyAppearance(input: Partial<Appearance> | undefined | null) {
+  const a = { ...DEFAULT_APPEARANCE, ...(input ?? {}) };
+  applyAccent(a.accent);
+  const accent = deriveAccent(current).accent;
+  const bg = a.background === 'tinted'
+    ? { paper: mix(accent, WHITE, 0.965), mist: mix(accent, WHITE, 0.925), line: mix(accent, WHITE, 0.86), strong: mix(accent, WHITE, 0.77) }
+    : BACKGROUNDS[a.background] ?? BACKGROUNDS.warm;
+  const sidebar = a.sidebar === 'white' ? WHITE : a.sidebar === 'accent' ? mix(accent, WHITE, 0.9) : mix(bg.mist, bg.paper, 0.3);
+  const root = document.documentElement.style;
+  const ch = (c: RGB) => c.map((v) => Math.round(v)).join(' ');
+  root.setProperty('--paper', ch(bg.paper));
+  root.setProperty('--mist', ch(bg.mist));
+  root.setProperty('--line', ch(bg.line));
+  root.setProperty('--line-strong', ch(bg.strong));
+  root.setProperty('--sidebar', ch(sidebar));
+  const headingUrl = a.headingFont === 'custom' ? fontUrl(a, 'heading') : null;
+  const bodyUrl = a.bodyFont === 'custom' ? fontUrl(a, 'body') : null;
+  loadCustomFont('heading', headingUrl);
+  loadCustomFont('body', bodyUrl);
+  root.setProperty('--font-display', headingUrl ? `"${FAMILY.heading}", ${SERIF}` : a.headingFont === 'sans' ? SANS : SERIF);
+  root.setProperty('--font-body', bodyUrl ? `"${FAMILY.body}", ${SANS}` : SANS);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', rgbToHex(bg.paper));
+  // Browser tab icon: the uploaded logo if chosen, otherwise the built-in one.
+  const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  const logo = a.logoAsIcon ? logoUrl(a) : null;
+  if (icon) {
+    icon.href = logo ?? '/favicon.svg';
+    if (logo) icon.removeAttribute('type'); else icon.type = 'image/svg+xml';
+  }
 }
 
 /** Curated accents that suit a salon brand and all pass contrast with white text. */

@@ -6,6 +6,7 @@ import { api } from '../../api/client';
 import { useMe } from '../../api/hooks';
 import { cx } from '../ui';
 import { SidebarFooter, Wordmark } from './AppShell';
+import { BrandMark, useAppearance } from './Brand';
 
 /**
  * The simplified layout for people without the dashboard (stylists by default): only the sections their permissions
@@ -21,6 +22,7 @@ const ALL = [
 
 export function StylistShell({ children }: { children: ReactNode }) {
   const { data: me } = useMe();
+  const appearance = useAppearance();
   const NAV = ALL.filter((n) => n.anyOf.some((p) => me?.permissions.includes(p)));
   const nav = useNavigate();
   const qc = useQueryClient();
@@ -34,7 +36,7 @@ export function StylistShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-[100dvh] overflow-hidden">
-      <aside className="hidden w-[232px] shrink-0 flex-col border-r border-line bg-mist/70 px-3 py-5 lg:flex">
+      <aside className="hidden w-[232px] shrink-0 flex-col border-r border-line bg-sidebar px-3 py-5 lg:flex">
         <Wordmark />
         <nav className="mt-6 flex flex-1 flex-col gap-0.5">
           {NAV.map((n) => <NavLink key={n.to} to={n.to} className={link}><n.icon className="h-[18px] w-[18px] text-stone" />{n.label}</NavLink>)}
@@ -43,7 +45,7 @@ export function StylistShell({ children }: { children: ReactNode }) {
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-line bg-paper/90 px-4 py-3 lg:hidden">
-          <p className="font-display text-[22px] font-semibold leading-none text-ink">Addendum</p>
+          <BrandMark a={appearance} size="header" />
           <button onClick={signOut} className="inline-flex items-center gap-1.5 rounded-lg p-1.5 text-sm text-stone hover:text-ink" aria-label="Sign out"><LogOut className="h-4 w-4" /><span>Sign out</span></button>
         </header>
         <main className="flex-1 overflow-y-auto pb-24 lg:pb-10">

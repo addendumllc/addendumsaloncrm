@@ -36,7 +36,7 @@ const TABS: Tab[] = [
   ) },
   { id: 'reminders', label: 'Reminders & reviews', group: 'Automation', perm: 'settings:read', render: () => <RemindersSettings /> },
   { id: 'notifications', label: 'Notifications', group: 'Automation', perm: 'settings:read', render: () => <NotificationSettings /> },
-  { id: 'appearance', label: 'Appearance & colours', group: 'Salon', perm: 'settings:read', render: () => <AppearanceSettings /> },
+  { id: 'appearance', label: 'Brand & appearance', group: 'Salon', perm: 'settings:read', render: () => <AppearanceSettings /> },
   { id: 'inventory', label: 'Order Hair', group: 'Salon', perm: 'settings:read', render: () => <InventorySettings /> },
   { id: 'tags', label: 'Client tags', group: 'People', perm: ['settings:rules', 'clients:write'], render: () => <TagSettings /> },
   { id: 'privacy', label: 'Privacy & activity', group: 'People', perm: 'settings:read', render: () => <PrivacySettings /> },

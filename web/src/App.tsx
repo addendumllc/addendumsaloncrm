@@ -3,7 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import { useQueryClient } from '@tanstack/react-query';
 import { useMe, useSettings } from './api/hooks';
 import { setTimezone } from './lib/format';
-import { applyAccent } from './lib/theme';
+import { applyAppearance } from './lib/theme';
 import { AppShell } from './components/layout/AppShell';
 import { StylistShell } from './components/layout/StylistShell';
 import { ActionsProvider } from './components/domain/ActionsProvider';
@@ -69,7 +69,7 @@ function SignedIn() {
   const loc = useLocation();
   useEffect(() => {
     if (settings?.settings.business?.timezone) setTimezone(settings.settings.business.timezone);
-    if (settings) applyAccent(settings.settings.appearance?.accent);
+    if (settings) applyAppearance(settings.settings.appearance);
   }, [settings]);
   if (!settings) return <div className="flex h-screen items-center justify-center"><PageLoading /></div>;
   // Each page opens for the permissions listed (any one). The server checks every request as well.
