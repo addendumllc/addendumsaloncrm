@@ -1,0 +1,6 @@
+# HTTPS in front of the CRM. Caddy gets and renews the certificates itself (Let's Encrypt),
+# as soon as GoDaddy DNS points both names at this server. The app sends www to the main address.
+addendumsalon.info, www.addendumsalon.info {
+	encode gzip
+	reverse_proxy app:4000
+}

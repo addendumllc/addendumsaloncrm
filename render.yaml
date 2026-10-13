@@ -1,0 +1,76 @@
+# Render Blueprint: creates the CRM web service and its PostgreSQL database.
+# Render → New → Blueprint → pick this repository. Values marked `sync: false` are asked for once, in the
+# Render dashboard; they are never stored in this file.
+# The CRM's address is https://addendumsalon.info. DNS at GoDaddy: A record @ → 216.24.57.1 and
+# CNAME www → the service's onrender.com address. Render issues the HTTPS certificate and sends www to the root.
+services:
+  - type: web
+    name: addendum-salon-crm
+    runtime: node
+    region: oregon
+    # Dev dependencies are needed to build (NODE_ENV=production would otherwise skip them).
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    domains:
+      - addendumsalon.info
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DEMO_MODE
+        value: "false"
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: APP_URL
+        value: https://addendumsalon.info
+      # The old subdomain forwards here if it is ever pointed at this service (Render already handles www).
+      - key: REDIRECT_HOSTS
+        value: app.addendumsalon.com
+      - key: PUBLIC_WEBHOOK_BASE_URL
+        value: https://addendumsalon.info
+      - key: SQUARE_WEBHOOK_URL
+        value: https://addendumsalon.info/api/webhooks/square
+      - key: DATABASE_URL
+        fromDatabase:
+          name: addendum-salon-crm-db
+          property: connectionString
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: ALLOWED_EMBED_ORIGINS
+        value: https://addendumsalon.com,https://www.addendumsalon.com
+      # First administrator login (created on the very first start).
+      - key: OWNER_EMAIL
+        value: owner@addendumsalon.com
+      - key: OWNER_PASSWORD
+        sync: false
+      # Square
+      - key: SQUARE_ENVIRONMENT
+        value: production
+      - key: SQUARE_ACCESS_TOKEN
+        sync: false
+      # Email (Microsoft 365) for hair order requests
+      - key: SMTP_HOST
+        value: smtp.office365.com
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_SECURE
+        value: "false"
+      - key: SMTP_USER
+        value: info@addendumsalon.com
+      - key: SMTP_PASS
+        sync: false
+      - key: EMAIL_FROM
+        value: Addendum Salon <info@addendumsalon.com>
+      # GoHighLevel
+      - key: HIGHLEVEL_PRIVATE_TOKEN
+        sync: false
+      - key: HIGHLEVEL_LOCATION_ID
+        sync: false
+
+databases:
+  - name: addendum-salon-crm-db
+    databaseName: addendum
+    user: addendum
+    region: oregon
+    postgresMajorVersion: "17"

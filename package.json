@@ -1,0 +1,26 @@
+{
+  "name": "addendum-salon-crm",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "shared",
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web,open -c blue,magenta,green --kill-others-on-fail \"npm:dev -w server\" \"npm:dev -w web\" \"node scripts/open-chrome.mjs http://localhost:5173 http://localhost:4000/api/health http://localhost:5173/\"",
+    "dev:nobrowser": "concurrently -n server,web -c blue,magenta \"npm:dev -w server\" \"npm:dev -w web\"",
+    "build": "npm run build -w web && npm run build -w server",
+    "start": "node scripts/start.mjs",
+    "app": "npm run build && concurrently -n app,open -c blue,green \"npm:start\" \"node scripts/open-chrome.mjs http://localhost:4000\"",
+    "test": "npm test -w server",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
+    "users": "npm run users -w server --"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

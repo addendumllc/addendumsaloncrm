@@ -1,0 +1,94 @@
+import type { NextFunction, Request, Response } from 'express';
+import type { CurrentUser, Role } from '@addendum/shared';
+import { config } from '../config.js';
+import { db } from '../db/index.js';
+import { randomToken, sha256 } from '../lib/crypto.js';
+import { forbidden } from '../lib/errors.js';
+import { apiAllowed, can, computeEffective } from './permissions.js';
+
+export const SESSION_COOKIE = 'addendum_session';
+
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      user?: CurrentUser;
+    }
+  }
+}
+
+export async function createSession(res: Response, staffId: string, userAgent?: string) {
+  const token = randomToken(32);
+  const days = config().SESSION_DAYS;
+  await db().query('INSERT INTO sessions(id, staff_id, expires_at, user_agent) VALUES ($1,$2,$3,$4)', [
+    sha256(token), staffId, new Date(Date.now() + days * 86400_000), userAgent?.slice(0, 200) ?? null,
+  ]);
+  res.cookie(SESSION_COOKIE, token, cookieOptions(days * 86400_000));
+}
+
+/** Cookies are HttpOnly; when embedded in an iframe on HTTPS they must be SameSite=None + Secure. */
+export function cookieOptions(maxAge?: number) {
+  const secure = config().COOKIE_SECURE;
+  return {
+    httpOnly: true,
+    secure,
+    sameSite: (secure ? 'none' : 'lax') as 'none' | 'lax',
+    path: '/',
+    ...(maxAge ? { maxAge } : {}),
+  };
+}
+
+export async function destroySession(req: Request, res: Response) {
+  const token = req.cookies?.[SESSION_COOKIE];
+  if (token) await db().query('DELETE FROM sessions WHERE id = $1', [sha256(token)]);
+  res.clearCookie(SESSION_COOKIE, cookieOptions());
+}
+
+export async function loadUser(req: Request, _res: Response, next: NextFunction) {
+  try {
+    const token = req.cookies?.[SESSION_COOKIE];
+    if (token) {
+      // Permissions are read fresh on every request, so role or permission changes apply immediately.
+      const row = await db().one<any>(
+        `SELECT s.id, s.name, s.email, s.role,
+                ARRAY(SELECT permission FROM role_permissions rp WHERE rp.role = s.role) AS role_perms,
+                COALESCE((SELECT json_agg(json_build_object('permission', o.permission, 'granted', o.granted))
+                            FROM staff_permission_overrides o WHERE o.staff_id = s.id), '[]'::json) AS overrides
+           FROM sessions x JOIN staff s ON s.id = x.staff_id
+          WHERE x.id = $1 AND x.expires_at > now() AND s.active`,
+        [sha256(token)],
+      );
+      if (row) {
+        const overrides = typeof row.overrides === 'string' ? JSON.parse(row.overrides) : row.overrides;
+        req.user = { id: row.id, name: row.name, email: row.email, role: row.role as Role, permissions: computeEffective(row.role_perms ?? [], overrides) };
+      }
+    }
+    next();
+  } catch (e) {
+    next(e);
+  }
+}
+
+export function requireAuth(req: Request, res: Response, next: NextFunction) {
+  if (!req.user) return res.status(401).json({ error: { code: 'unauthenticated', message: 'Please sign in to continue.' } });
+  next();
+}
+
+/**
+ * Deny-by-default gate in front of every API route: the path must be listed in API_RULES and the person must hold
+ * one of its permissions. Routes then apply their own finer checks.
+ */
+export function apiGate(req: Request, _res: Response, next: NextFunction) {
+  if (!apiAllowed(req.user, req.method, req.path)) return next(forbidden());
+  next();
+}
+
+export const requirePermission = (permission: string) => (req: Request, _res: Response, next: NextFunction) => {
+  if (!req.user || !can(req.user, permission)) return next(forbidden());
+  next();
+};
+
+export const requireAnyPermission = (...permissions: string[]) => (req: Request, _res: Response, next: NextFunction) => {
+  if (!req.user || !permissions.some((p) => can(req.user, p))) return next(forbidden());
+  next();
+};

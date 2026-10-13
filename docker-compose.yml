@@ -1,0 +1,33 @@
+# Production stack for a single server (e.g. a GoDaddy VPS): the app, PostgreSQL, and Caddy for HTTPS.
+# POSTGRES_PASSWORD is read from .env (letters and numbers only: it goes inside the database URL).
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: addendum
+      POSTGRES_USER: addendum
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes: [pgdata:/var/lib/postgresql/data]
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://addendum:${POSTGRES_PASSWORD}@db:5432/addendum
+    # Only reachable from this server; the public goes through Caddy.
+    ports: ["127.0.0.1:4000:4000"]
+    depends_on: [db]
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [app]
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

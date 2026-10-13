@@ -1,0 +1,44 @@
+import { config } from '../config.js';
+import { squareService } from '../integrations/registry.js';
+import { getIntegration } from '../repos/integrations.js';
+import { processHighLevelQueue } from './highlevelPush.js';
+import { retryInventoryEmails } from './inventory.js';
+import { maybeAutoSyncCommission } from './commission.js';
+import { maybeAutoSync } from './inventorySync.js';
+import { runRules } from './rulesEngine.js';
+import { syncSquareInventory } from './squareInventory.js';
+import { runSquareSync } from './squareSync.js';
+
+/**
+ * In-process background jobs (fine for a single salon on one server):
+ *  - every minute: HighLevel retry queue, inventory order email retries, automatic Square ↔ Shopify stock sync and
+ *    commission sales sync (each only when turned on and due)
+ *  - every 5 minutes: follow-up rules (texts are never sent in the background; staff send them from Apple Messages)
+ *  - every SQUARE_SYNC_INTERVAL_MINUTES: Square safety-net sync (webhooks handle real-time changes) + retail inventory
+ */
+export function startScheduler() {
+  let tick = 0;
+  const guard = (name: string, fn: () => Promise<unknown>) => fn().catch((e) => console.error(`[scheduler] ${name} failed:`, e?.message ?? e));
+  const timer = setInterval(async () => {
+    tick++;
+    await guard('highlevel-queue', () => processHighLevelQueue());
+    await guard('inventory-email', () => retryInventoryEmails());
+    await guard('inventory-sync', () => maybeAutoSync()); // only when automatic Square ↔ Shopify sync is on and due
+    await guard('commission-sync', () => maybeAutoSyncCommission()); // only when commission is on and the interval has passed
+    if (tick % 5 === 0) {
+      await guard('rules', () => runRules());
+    }
+    if (tick % Math.max(1, config().SQUARE_SYNC_INTERVAL_MINUTES) === 0) {
+      await guard('square-sync', async () => {
+        const svc = await squareService();
+        const row = await getIntegration('square');
+        if (svc && row?.status !== 'needs_reconnect') {
+          await runSquareSync();
+          await syncSquareInventory(); // retail stock for Order Hair search
+        }
+      });
+    }
+  }, 60_000);
+  timer.unref();
+  return () => clearInterval(timer);
+}
