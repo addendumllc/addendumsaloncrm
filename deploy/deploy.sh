@@ -14,6 +14,11 @@ if ! grep -Eq '^ENCRYPTION_KEY=.{32,}' .env; then
   echo "ENCRYPTION_KEY in .env needs 32+ characters (run: openssl rand -base64 48)." >&2
   exit 1
 fi
+# The database on the server needs its password (letters and numbers only: it goes inside the database address).
+if ! grep -Eq '^POSTGRES_PASSWORD=[A-Za-z0-9]{16,}$' .env; then
+  echo "Add a line to .env:  POSTGRES_PASSWORD=<16+ letters and numbers>   (make one with: openssl rand -hex 24)" >&2
+  exit 1
+fi
 
 # One SSH connection for every step, so the server password is asked for once (not per step).
 CTRL_DIR="$(mktemp -d)"
