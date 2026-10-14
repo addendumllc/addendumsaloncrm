@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { CalendarDays, CheckSquare, LogOut, Package, Users, Wallet } from 'lucide-react';
+import { CalendarDays, CheckSquare, ListTodo, LogOut, Package, Users, Wallet } from 'lucide-react';
 import { api } from '../../api/client';
 import { useMe } from '../../api/hooks';
 import { cx } from '../ui';
@@ -12,12 +12,14 @@ import { BrandMark, useAppearance } from './Brand';
  * The simplified layout for people without the dashboard (stylists by default): only the sections their permissions
  * open — My Calendar, Order Hair, My Commission, and anything an administrator has granted them.
  */
+// Same order and labels as the full sidebar.
 const ALL = [
-  { to: '/my-calendar', label: 'My Calendar', icon: CalendarDays, anyOf: ['appointments:read_own', 'appointments:read'] },
+  { to: '/follow-ups', label: 'Follow-Ups', icon: CheckSquare, anyOf: ['tasks:read_own', 'tasks:read_all'] },
+  { to: '/tasks', label: 'Tasks', icon: ListTodo, anyOf: ['tasks:read_own', 'tasks:read_all', 'announcements:read'] },
+  { to: '/my-calendar', label: 'Appointments', icon: CalendarDays, anyOf: ['appointments:read_own', 'appointments:read'] },
+  { to: '/clients', label: 'Clients', icon: Users, anyOf: ['clients:read', 'clients:read_assigned', 'leads:read'] },
   { to: '/inventory', label: 'Order Hair', icon: Package, anyOf: ['inventory:order', 'inventory:view', 'inventory:read_all'] },
   { to: '/my-commission', label: 'My Commission', icon: Wallet, anyOf: ['commission:own'] },
-  { to: '/follow-ups', label: 'Follow-Ups', icon: CheckSquare, anyOf: ['tasks:read_own', 'tasks:read_all'] },
-  { to: '/clients', label: 'My Clients', icon: Users, anyOf: ['clients:read', 'clients:read_assigned'] },
 ];
 
 export function StylistShell({ children }: { children: ReactNode }) {

@@ -157,6 +157,23 @@ export async function migrate(d: Db, opts: { dir?: string } = {}) {
  * template sees it (new features get their defaults); anything an administrator removed stays removed.
  */
 export async function syncRoleTemplates(d: Db) {
+  // 1. A built-in template nobody edited (still exactly an earlier default) moves to the current defaults.
+  for (const role of ROLES) {
+    const old = PREVIOUS_ROLE_DEFAULTS[role];
+    if (!old) continue;
+    const row = await d.one('SELECT 1 FROM role_templates WHERE role = $1', [role]);
+    if (!row) continue;
+    const have = (await d.query<{ permission: string }>('SELECT permission FROM role_permissions WHERE role = $1', [role])).map((r) => r.permission).sort();
+    const same = (list: string[]) => list.length === have.length && [...list].sort().every((p, i) => p === have[i]);
+    if (!old.some(same)) continue;
+    await d.tx(async (q) => {
+      await q.query('DELETE FROM role_permissions WHERE role = $1', [role]);
+      for (const p of ROLE_DEFAULT_PERMISSIONS[role]) await q.query('INSERT INTO role_permissions(role, permission) VALUES ($1,$2)', [role, p]);
+      await q.query('UPDATE role_templates SET known_permissions = $2 WHERE role = $1', [role, PERMISSION_KEYS]);
+    });
+  }
+  // 2. Permissions a template hasn't seen yet (new features) get their defaults once; anything an administrator
+  //    removed stays removed.
   for (const role of ROLES) {
     const row = await d.one<{ known_permissions: string[] }>('SELECT known_permissions FROM role_templates WHERE role = $1', [role]);
     const known = new Set(row?.known_permissions ?? []);
@@ -170,18 +187,6 @@ export async function syncRoleTemplates(d: Db) {
         }
       }
       await q.query('UPDATE role_templates SET known_permissions = $2 WHERE role = $1', [role, [...known, ...fresh]]);
-    });
-  }
-  // Untouched templates follow updated built-in defaults; edited ones are never changed.
-  for (const role of ROLES) {
-    const old = PREVIOUS_ROLE_DEFAULTS[role];
-    if (!old) continue;
-    const have = (await d.query<{ permission: string }>('SELECT permission FROM role_permissions WHERE role = $1', [role])).map((r) => r.permission).sort();
-    const same = (list: string[]) => list.length === have.length && [...list].sort().every((p, i) => p === have[i]);
-    if (!old.some(same)) continue;
-    await d.tx(async (q) => {
-      await q.query('DELETE FROM role_permissions WHERE role = $1', [role]);
-      for (const p of ROLE_DEFAULT_PERMISSIONS[role]) await q.query('INSERT INTO role_permissions(role, permission) VALUES ($1,$2)', [role, p]);
     });
   }
 }

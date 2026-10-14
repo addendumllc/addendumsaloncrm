@@ -12,7 +12,8 @@ import { TaskCard } from '../components/domain/TaskCard';
 const PIPELINE: LeadStatus[] = ['new', 'contacted', 'waiting', 'interested', 'consultation_scheduled', 'booked', 'follow_up_needed', 'won', 'lost'];
 const label = (s: LeadStatus) => LEAD_STATUSES.find((x) => x.value === s)!.label;
 
-export function LeadsPage() {
+/** New-client inquiries (leads). Shown inside Clients → New client inquiries (`embedded`). */
+export function LeadsPage({ embedded = false }: { embedded?: boolean }) {
   const [params, setParams] = useSearchParams();
   const view = params.get('view') ?? 'pipeline';
   const openId = params.get('open');
@@ -41,7 +42,9 @@ export function LeadsPage() {
 
   return (
     <div>
-      <PageHeader title="New Clients" subtitle={leads ? `${leads.filter((l) => !['won', 'lost'].includes(l.status)).length} open` : undefined} actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={newLead}>New lead</Button>} />
+      {embedded
+        ? leads && <p className="-mt-2 mb-3 text-[14px] text-stone">{leads.filter((l) => !['won', 'lost'].includes(l.status)).length} open inquiries</p>
+        : <PageHeader title="New client inquiries" subtitle={leads ? `${leads.filter((l) => !['won', 'lost'].includes(l.status)).length} open` : undefined} actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={newLead}>New lead</Button>} />}
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <Segmented value={view} onChange={(v) => set('view', v === 'pipeline' ? '' : v)} options={[{ value: 'pipeline', label: 'Pipeline' }, { value: 'list', label: 'List' }]} />
         <input className="field h-9 w-full py-1 text-sm sm:w-56" placeholder="Search leads" value={f.q} onChange={(e) => set('q', e.target.value)} />

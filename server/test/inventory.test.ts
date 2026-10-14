@@ -8,6 +8,7 @@ import { MockShopifyService } from '../src/integrations/shopify/ShopifyService.j
 import { setIntegrationOverride } from '../src/integrations/registry.js';
 import { IntegrationError } from '../src/lib/errors.js';
 import { setup } from './helpers.js';
+import { localDate } from '../src/domain/rebookingSchedule.js';
 
 let api: Awaited<ReturnType<typeof setup>>['api'];
 let app: Awaited<ReturnType<typeof setup>>['app'];
@@ -16,14 +17,18 @@ beforeAll(async () => {
 });
 afterEach(() => setIntegrationOverride({ email: new MockEmailService(), shopify: new MockShopifyService() }));
 
+const TZ = 'America/Los_Angeles';
+/** A date `n` days from today in the salon's time zone (orders can't be needed in the past). */
+const D = (n: number) => localDate(new Date(Date.now() + n * 86400_000), TZ);
+const fmt = (d: string) => new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
 const order = {
   note: 'Install moved up.',
   items: [
-    { collection: 'Signature Hand-Tied Weft', size: '20"', color: '#60 Platinum', quantity: 3, neededBy: '2026-10-16' },
-    { collection: 'Bond Remover', quantity: 1, neededBy: '2026-10-12' },
+    { collection: 'Signature Hand-Tied Weft', size: '20"', color: '#60 Platinum', quantity: 3, neededBy: D(6) },
+    { collection: 'Bond Remover', quantity: 1, neededBy: D(2) },
   ],
 };
-const one = (collection: string, extra: object = {}) => ({ items: [{ collection, quantity: 1, ...extra }] });
+const one = (collection: string, extra: object = {}) => ({ neededBy: D(5), items: [{ collection, quantity: 1, ...extra }] });
 
 describe('Inventory order requests → emailed to Addendum Hair', () => {
   it('saves the request and emails gaby@addendumhair.com with every item', async () => {
@@ -35,13 +40,13 @@ describe('Inventory order requests → emailed to Addendum Hair', () => {
     expect(req.email.status).toBe('sent');
     expect(req.totalUnits).toBe(4);
     expect(req.urgency).toBeUndefined();
-    expect(req.neededBy).toBe('2026-10-12'); // earliest item date
-    expect(req.items[0]).toMatchObject({ size: '20"', color: '#60 Platinum', collection: 'Signature Hand-Tied Weft', quantity: 3, neededBy: '2026-10-16' });
+    expect(req.neededBy).toBe(D(2)); // earliest item date
+    expect(req.items[0]).toMatchObject({ size: '20"', color: '#60 Platinum', collection: 'Signature Hand-Tied Weft', quantity: 3, neededBy: D(6) });
     const mail = MockEmailService.outbox.at(-1)!;
     expect(mail.to).toBe('gaby@addendumhair.com');
     expect(mail.subject).toMatch(/^Addendum Hair order request #\d+ — /);
-    expect(mail.text).toContain('Size: 20" | Color: #60 Platinum | Collection: Signature Hand-Tied Weft | QTY: 3 | Needed by: Fri, Oct 16');
-    expect(mail.text).toContain('Size: — | Color: — | Collection: Bond Remover | QTY: 1 | Needed by: Mon, Oct 12');
+    expect(mail.text).toContain(`Size: 20" | Color: #60 Platinum | Collection: Signature Hand-Tied Weft | QTY: 3 | Needed by: ${fmt(D(6))}`);
+    expect(mail.text).toContain(`Size: — | Color: — | Collection: Bond Remover | QTY: 1 | Needed by: ${fmt(D(2))}`);
     expect(mail.text).not.toMatch(/rush|urgency/i);
     expect(mail.html).toMatch(/Size<\/th><th[^>]*>Color<\/th><th[^>]*>Collection<\/th><th[^>]*>QTY<\/th><th[^>]*>Needed By/);
     expect(mail.text).toContain('Install moved up.');
@@ -90,7 +95,7 @@ describe('Inventory order requests → emailed to Addendum Hair', () => {
 
   it('saves requests even when email is not set up, and sends them once it is', async () => {
     setIntegrationOverride({ email: null });
-    const r = await api.post('/api/inventory/requests', { items: [{ collection: 'Weft Thread', quantity: 2 }] });
+    const r = await api.post('/api/inventory/requests', { neededBy: D(4), items: [{ collection: 'Weft Thread', quantity: 2 }] });
     expect(r.body.request.email.status).toBe('not_configured');
     setIntegrationOverride({ email: new MockEmailService() });
     await retryInventoryEmails();
@@ -106,8 +111,8 @@ describe('Inventory order requests → emailed to Addendum Hair', () => {
 
   it('validates input', async () => {
     expect((await api.post('/api/inventory/requests', { items: [] })).status).toBe(400);
-    expect((await api.post('/api/inventory/requests', { items: [{ collection: 'X', quantity: 0 }] })).status).toBe(400);
-    expect((await api.post('/api/inventory/requests', { items: [{ collection: '', quantity: 1 }] })).status).toBe(400);
+    expect((await api.post('/api/inventory/requests', { neededBy: D(3), items: [{ collection: 'X', quantity: 0 }] })).status).toBe(400);
+    expect((await api.post('/api/inventory/requests', { neededBy: D(3), items: [{ collection: '', quantity: 1 }] })).status).toBe(400);
     expect((await api.post('/api/inventory/requests', one('X', { neededBy: 'soon' }))).status).toBe(400);
   });
 
@@ -130,12 +135,12 @@ describe('Inventory order requests → emailed to Addendum Hair', () => {
 
   it('lets the needed-by date be added and changed per item', async () => {
     const r = (await api.post('/api/inventory/requests', one('Clip-In Set'))).body.request;
-    expect(r.items[0].neededBy).toBeNull();
+    expect(r.items[0].neededBy).toBe(D(5)); // the order's Needed By date
     const item = r.items[0].id;
-    let u = await api.patch(`/api/inventory/requests/${r.id}/items/${item}`, { neededBy: '2026-11-02' });
+    let u = await api.patch(`/api/inventory/requests/${r.id}/items/${item}`, { neededBy: D(20) });
     expect(u.status).toBe(200);
-    expect(u.body.request.items[0].neededBy).toBe('2026-11-02');
-    expect(u.body.request.neededBy).toBe('2026-11-02');
+    expect(u.body.request.items[0].neededBy).toBe(D(20));
+    expect(u.body.request.neededBy).toBe(D(20));
     u = await api.patch(`/api/inventory/requests/${r.id}/items/${item}`, { neededBy: '' });
     expect(u.body.request.items[0].neededBy).toBeNull();
     expect((await api.patch(`/api/inventory/requests/${r.id}/items/${item}`, { neededBy: '11/02' })).status).toBe(400);
@@ -164,10 +169,10 @@ describe('Team colours are editable; accounts are managed in Users & Permissions
   });
 });
 
-describe('Order Hair sends the email and never touches Shopify', () => {
+describe('Items typed by hand are emailed without touching Shopify', () => {
   it('has no Shopify switch on orders, and marking Ordered leaves Shopify alone', async () => {
     MockShopifyService.reset();
-    const r = (await api.post('/api/inventory/requests', { items: [{ collection: 'Signature Hand-Tied Weft', size: '20"', color: '#60 Platinum', quantity: 2, shopifyDeduct: true }] })).body.request;
+    const r = (await api.post('/api/inventory/requests', { neededBy: D(3), items: [{ collection: 'Signature Hand-Tied Weft', size: '20"', color: '#60 Platinum', quantity: 2, shopifyDeduct: true }] })).body.request;
     expect(r.items[0].shopify).toBeUndefined();
     expect(r.email.status).toBe('sent');
     const o = await api.patch(`/api/inventory/requests/${r.id}`, { status: 'ordered' });
@@ -297,7 +302,7 @@ describe('Order Hair: inventory search for stylists', () => {
     const before = await snapshot();
     const shopifyWrites = MockShopifyService.sets.length;
     MockEmailService.outbox = [];
-    const r = await jen.post('/api/inventory/requests', { items: [{ collection: 'Signature Hand-Tied Weft', size: '22"', color: '#60 Platinum', quantity: 2, note: 'SKU HTW-22-60' }] });
+    const r = await jen.post('/api/inventory/requests', { neededBy: D(3), items: [{ collection: 'Signature Hand-Tied Weft', size: '22"', color: '#60 Platinum', quantity: 2, note: 'SKU HTW-22-60' }] });
     expect(r.status).toBe(201);
     const mail = MockEmailService.outbox.at(-1)!;
     expect(mail.text).toContain('Size: 22" | Color: #60 Platinum | Collection: Signature Hand-Tied Weft | QTY: 2');

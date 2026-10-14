@@ -1,8 +1,9 @@
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Plus, Users } from 'lucide-react';
-import { useClients, useStaff, useTags } from '../api/hooks';
+import { Plus, Sparkles, Users } from 'lucide-react';
+import { useCanDo, useClients, useStaff, useTags } from '../api/hooks';
+import { LeadsPage } from './Leads';
 import { dateShort, phone, relative } from '../lib/format';
-import { Avatar, Badge, Button, EmptyState, ErrorNote, PageHeader, PageLoading } from '../components/ui';
+import { Avatar, Badge, Button, EmptyState, ErrorNote, PageHeader, PageLoading, Segmented } from '../components/ui';
 import { useActions } from '../components/domain/ActionsProvider';
 
 const LAST_VISIT: Record<string, { label: string; days?: number; dir?: 'before' | 'after' }> = {
@@ -12,10 +13,39 @@ const LAST_VISIT: Record<string, { label: string; days?: number; dir?: 'before' 
   '90+': { label: 'No visit in 3+ months', days: 90, dir: 'before' },
 };
 
+/**
+ * Clients: every client, plus new-client inquiries (the pipeline that used to be the separate "New Clients" tab) in
+ * one place. Each section shows only with its permission; the server checks every request. Records aren't merged or
+ * copied — an inquiry links to its client once they book, so nothing is duplicated.
+ */
 export function ClientsPage() {
+  const canDo = useCanDo();
+  const [params, setParams] = useSearchParams();
+  const { addClient, newLead } = useActions();
+  const seesClients = canDo('clients:read') || canDo('clients:read_assigned');
+  const seesNew = canDo('leads:read');
+  const section = !seesClients || (seesNew && params.get('section') === 'new') ? 'new' : 'all';
+  const switchTo = (s: 'all' | 'new') => setParams(s === 'new' ? { section: 'new' } : {}, { replace: true });
+  return (
+    <div>
+      <PageHeader
+        title="Clients"
+        actions={<>
+          {section === 'new' && canDo('leads:write') && <Button icon={<Sparkles className="h-4 w-4" />} onClick={newLead}>Add inquiry</Button>}
+          {canDo('clients:write') && <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={addClient}>Add New Client</Button>}
+        </>}
+      />
+      {seesClients && seesNew && (
+        <Segmented className="mb-5" value={section} onChange={switchTo} options={[{ value: 'all', label: 'All clients' }, { value: 'new', label: 'New client inquiries' }]} />
+      )}
+      {section === 'new' ? <LeadsPage embedded /> : <ClientList />}
+    </div>
+  );
+}
+
+function ClientList() {
   const [params, setParams] = useSearchParams();
   const nav = useNavigate();
-  const { addClient } = useActions();
   const { data: staff } = useStaff();
   const { data: tags } = useTags();
   const f = {
@@ -37,7 +67,7 @@ export function ClientsPage() {
 
   return (
     <div>
-      <PageHeader title="Clients" subtitle={data ? `${data.total} client${data.total === 1 ? '' : 's'}` : undefined} actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={addClient}>Add client</Button>} />
+      {data && <p className="-mt-2 mb-3 text-[14px] text-stone">{data.total} client{data.total === 1 ? '' : 's'}</p>}
       <div className="mb-5 flex flex-wrap gap-2">
         <input className="field h-9 w-full py-1 text-sm sm:w-64" placeholder="Name, phone or email" value={f.q} onChange={(e) => set('q', e.target.value)} />
         <select className="field h-9 w-auto py-1 text-sm" value={f.tag} onChange={(e) => set('tag', e.target.value)} aria-label="Tag">

@@ -1,12 +1,12 @@
 import { Router } from 'express';
+import { IntegrationError } from '../lib/errors.js';
 import { z } from 'zod';
 import { can } from '../auth/permissions.js';
 import { requirePermission } from '../auth/session.js';
 import { forbidden } from '../lib/errors.js';
 import {
   createInventoryRequest, getInventoryRequest, inventorySuggestions, listInventoryRequests, sendInventoryEmail, setInventoryStatus,
-  updateInventoryItem,
-} from '../domain/inventory.js';
+  updateInventoryItem, shopifyHairProducts } from '../domain/inventory.js';
 import { inventorySyncStatus, pushInventoryToShopify, searchSquareInventory, syncSquareInventory } from '../domain/squareInventory.js';
 import { ah, logAction, parse } from './util.js';
 
@@ -51,7 +51,9 @@ inventoryRouter.get('/requests/:id', ah(async (req, res) => {
 const dateField = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be a date').nullable().or(z.literal('').transform(() => null));
 
 const itemSchema = z.object({
-  collection: z.string().trim().min(1, 'is required').max(160),
+  // Picked from Shopify inventory (the server looks it up) — or typed by hand with a collection name.
+  sku: z.string().trim().max(120).optional().nullable(),
+  collection: z.string().trim().max(160).optional().nullable().transform((v) => v ?? ''),
   size: z.string().trim().max(80).optional().nullable(),
   color: z.string().trim().max(120).optional().nullable(),
   quantity: z.coerce.number().int().min(1).max(999),
@@ -60,17 +62,28 @@ const itemSchema = z.object({
   note: z.string().trim().max(300).optional().nullable(),
 });
 
+/** Shopify hair inventory for the order form (search by SKU or name). Read-only. */
+inventoryRouter.get('/shopify-products', ah(async (req, res) => {
+  try {
+    res.json(await shopifyHairProducts(req.query.fresh === 'true'));
+  } catch (e) {
+    res.json({ connected: true, products: [], error: e instanceof IntegrationError ? e.userMessage : 'Shopify inventory couldn’t be loaded right now.' });
+  }
+}));
+
 inventoryRouter.post('/requests', ah(async (req, res) => {
   const b = parse(z.object({
     forStaffId: z.string().uuid().optional().nullable(),
     note: z.string().trim().max(1000).optional().nullable(),
-    items: z.array(itemSchema).min(1, 'add at least one product').max(60),
+    neededBy: dateField.optional(),
+    submissionId: z.string().uuid().optional().nullable(),
+    items: z.array(itemSchema.refine((i) => !!i.sku || !!i.collection, 'choose a product or type one')).min(1, 'add at least one product').max(60),
   }), req.body);
   // Only people allowed to order for others can pick a different stylist.
   if (!can(req.user, 'inventory:order_for_others')) b.forStaffId = req.user!.id;
-  const r = await createInventoryRequest(b, req.user!.id);
-  await logAction(req, 'inventory.request', 'inventory_request', r.id, { items: r.items.length });
-  res.status(201).json({ request: r });
+  const { request: r, duplicate } = await createInventoryRequest(b, req.user!.id);
+  if (!duplicate) await logAction(req, 'inventory.request', 'inventory_request', r.id, { items: r.items.length, fromInventory: r.items.filter((i) => i.sku).length });
+  res.status(duplicate ? 200 : 201).json({ request: r, duplicate });
 }));
 
 /** Send the email again (e.g. after fixing email settings). */

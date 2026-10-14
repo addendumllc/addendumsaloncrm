@@ -29,6 +29,8 @@ export interface CredentialField {
 
 const myshopify = (v: string) => (/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i.test(v.replace(/^https?:\/\//, '').replace(/\/.*$/, '')) ? null : 'must be the store’s myshopify.com address, e.g. addendumhair.myshopify.com');
 const noSpaces = (v: string) => (/\s/.test(v) ? 'must not contain spaces' : null);
+// Only used to verify Square's signatures (the CRM never sends anything to it), but it must be this app's webhook path.
+const squareWebhookUrl = (v: string) => (/^https:\/\/[^\s/]+\/api\/webhooks\/square$/i.test(v) ? null : 'must be https://<your CRM address>/api/webhooks/square, exactly as registered in Square');
 const portNum = (v: string) => (/^\d{2,5}$/.test(v) ? null : 'must be a number such as 587');
 
 export const CREDENTIAL_SPECS: Record<CredentialProvider, { label: string; fields: CredentialField[]; requirement: string }> = {
@@ -40,6 +42,7 @@ export const CREDENTIAL_SPECS: Record<CredentialProvider, { label: string; field
       { key: 'SQUARE_ACCESS_TOKEN', label: 'Access token', secret: true, group: 'token', validate: noSpaces, help: 'Developer Console → your app → Credentials → Production access token. Simplest for a single salon.' },
       { key: 'SQUARE_APPLICATION_ID', label: 'Application ID', secret: false, group: 'oauth', validate: noSpaces, help: 'Developer Console → your app → Credentials. Public identifier, used for “Connect with Square”.' },
       { key: 'SQUARE_APPLICATION_SECRET', label: 'Application secret', secret: true, group: 'oauth', validate: noSpaces, help: 'Developer Console → your app → OAuth → Application secret.' },
+      { key: 'SQUARE_WEBHOOK_URL', label: 'Webhook notification URL', secret: false, validate: squareWebhookUrl, placeholder: 'https://addendumsalon.info/api/webhooks/square', help: 'Must match the notification URL in Square Developer Console → Webhooks exactly (Square signs each update with it).' },
       { key: 'SQUARE_WEBHOOK_SIGNATURE_KEY', label: 'Webhook signature key', secret: true, validate: noSpaces, help: 'Developer Console → Webhooks → your subscription → Signature key. Optional: enables instant updates.' },
       { key: 'SQUARE_INVENTORY_LOCATION_ID', label: 'Inventory location ID', secret: false, validate: noSpaces, help: 'Only if Square has more than one location: the location whose stock is synced with Shopify.' },
     ],

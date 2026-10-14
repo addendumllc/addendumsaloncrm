@@ -16,9 +16,18 @@ export function useMe() {
 export function useDashboard() {
   return useQuery({
     queryKey: ['dashboard'],
-    queryFn: () => api.get<{ summary: DashboardSummary; actions: RecommendedAction[]; integrations: IntegrationStatusDTO }>('/dashboard'),
+    queryFn: () => api.get<{ summary: DashboardSummary; actions: RecommendedAction[]; integrations: IntegrationStatusDTO; widgets: DashboardWidgets }>('/dashboard'),
     refetchInterval: 60_000,
   });
+}
+
+/** Dashboard widgets the server allowed for this person (each needs its widget permission and the data permission). */
+export interface DashboardWidgets {
+  schedule: boolean; followups: boolean; clients: boolean; analytics: boolean;
+  announcements: { unread: number; latest: { id: string; title: string; important: boolean; pinned: boolean; publishedAt: string | null; authorName: string | null; read: boolean }[] } | null;
+  orders: { scope: 'everyone' | 'mine'; open: number; next: { id: string; number: number; status: string; neededBy: string | null; forName: string | null; units: number }[] } | null;
+  myCommission: { from: string; to: string; totalCents: number } | null;
+  teamCommission: { from: string; to: string; totalCents: number } | null;
 }
 
 export function useIntegrations(enabled = true) {
@@ -47,12 +56,12 @@ export function useServices() {
   return useQuery({ queryKey: ['services'], queryFn: () => api.get<{ services: { id: string; name: string }[] }>('/services').then((r) => r.services), staleTime: 300_000 });
 }
 
-export function useTasks(params: Record<string, string | undefined>) {
-  return useQuery({ queryKey: ['tasks', params], queryFn: () => api.get<{ tasks: TaskDTO[] }>(`/tasks${qs(params)}`).then((r) => r.tasks) });
+export function useTasks(params: Record<string, string | undefined>, enabled = true) {
+  return useQuery({ queryKey: ['tasks', params], queryFn: () => api.get<{ tasks: TaskDTO[] }>(`/tasks${qs(params)}`).then((r) => r.tasks), enabled });
 }
 
-export function useAppointments(params: Record<string, string | undefined>) {
-  return useQuery({ queryKey: ['appointments', params], queryFn: () => api.get<{ appointments: AppointmentDTO[] }>(`/appointments${qs(params)}`).then((r) => r.appointments) });
+export function useAppointments(params: Record<string, string | undefined>, enabled = true) {
+  return useQuery({ queryKey: ['appointments', params], queryFn: () => api.get<{ appointments: AppointmentDTO[] }>(`/appointments${qs(params)}`).then((r) => r.appointments), enabled });
 }
 
 export function useClients(params: Record<string, string | undefined>) {

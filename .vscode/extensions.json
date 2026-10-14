@@ -1,0 +1,8 @@
+{
+  // Suggested when the project is opened in VS Code.
+  "recommendations": [
+    "vitest.explorer",
+    "bradlc.vscode-tailwindcss",
+    "mikestead.dotenv"
+  ]
+}

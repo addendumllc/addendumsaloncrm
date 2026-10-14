@@ -10,6 +10,7 @@ import { globalSearch } from '../domain/search.js';
 import { integrationStatus } from '../integrations/registry.js';
 import { iso } from '../lib/time.js';
 import { calendarScope } from '../auth/scope.js';
+import { dashboardWidgets } from '../domain/dashboardWidgets.js';
 import { ah, parse } from './util.js';
 
 export const miscRouter = Router();
@@ -30,7 +31,16 @@ miscRouter.get('/dashboard', ah(async (req, res) => {
   // Salon-wide appointment counts only for people who see every team calendar.
   const cal = calendarScope(req.user);
   if (!cal || !('all' in cal)) summary.appointmentsToday = summary.cancellations = summary.noShows = summary.pendingConfirmations = null;
-  res.json({ summary, actions: d.actions.filter((a: any) => linkAllowed(req.user, a.link)), integrations: await integrationStatus() });
+  // Dashboard widgets (Settings → Role templates / a person's permissions): each needs its widget permission *and* the
+  // permission for its data. What isn't allowed is left out here, on the server.
+  const w = (k: string) => can(req.user, `dashboard:${k}`);
+  if (!w('schedule')) summary.appointmentsToday = summary.cancellations = summary.noShows = summary.pendingConfirmations = null;
+  if (!w('followups')) summary.followUpsDue = summary.overdueFollowUps = summary.readyToRebook = null;
+  if (!w('clients')) summary.newLeads = summary.unreadMessages = null;
+  // Recommended actions about messages and inquiries belong to "Clients and activity"; the rest to "Follow-ups and tasks".
+  const widgetOf = (link: string) => (/^\/(messages|leads)/.test(link) ? 'clients' : 'followups');
+  const actions = d.actions.filter((a: any) => linkAllowed(req.user, a.link) && w(widgetOf(a.link)));
+  res.json({ summary, actions, integrations: await integrationStatus(), widgets: await dashboardWidgets(req.user!) });
 }));
 
 miscRouter.get('/analytics', requirePermission('analytics:read'), ah(async (req, res) => {

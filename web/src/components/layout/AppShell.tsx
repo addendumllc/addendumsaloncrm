@@ -18,15 +18,16 @@ import { SETTINGS_PERMS } from '../../lib/access';
 
 /** Sidebar items and the permissions that show them (any one). The server enforces the same rules on every request. */
 export const NAV: { to: string; label: string; icon: typeof Home; end?: boolean; badge?: string; anyOf: string[]; hideIf?: string }[] = [
+  // The order and labels the salon asked for. Each item shows only with one of its permissions; pages and the API check too.
   { to: '/', label: 'Dashboard', icon: Home, end: true, anyOf: ['dashboard:view'] },
   { to: '/follow-ups', label: 'Follow-Ups', icon: CheckSquare, anyOf: ['tasks:read_all', 'tasks:read_own'] },
+  { to: '/tasks', label: 'Tasks', icon: ListTodo, anyOf: ['tasks:read_all', 'tasks:read_own', 'announcements:read'] },
   { to: '/appointments', label: 'Appointments', icon: CalendarDays, anyOf: ['appointments:read'] },
   // Only their own calendar (assistants by default, until an Owner/Admin allows team calendars).
-  { to: '/my-calendar', label: 'My Calendar', icon: CalendarDays, anyOf: ['appointments:read_own'], hideIf: 'appointments:read' },
+  { to: '/my-calendar', label: 'Appointments', icon: CalendarDays, anyOf: ['appointments:read_own'], hideIf: 'appointments:read' },
   { to: '/messages', label: 'Messages', icon: MessageSquare, badge: 'messages', anyOf: ['messages:read'] },
-  { to: '/clients', label: 'Clients', icon: Users, anyOf: ['clients:read', 'clients:read_assigned'] },
-  { to: '/leads', label: 'New Clients', icon: Sparkles, anyOf: ['leads:read'] },
-  { to: '/tasks', label: 'Tasks', icon: ListTodo, anyOf: ['tasks:read_all', 'tasks:read_own'] },
+  // Clients and new-client inquiries (formerly a separate "New Clients" tab) in one place.
+  { to: '/clients', label: 'Clients', icon: Users, anyOf: ['clients:read', 'clients:read_assigned', 'leads:read'] },
   { to: '/inventory', label: 'Order Hair', icon: Package, anyOf: ['inventory:order', 'inventory:read_all', 'inventory:view', 'inventory:manage'] },
   { to: '/inventory-sync', label: 'Inventory Sync', icon: ArrowLeftRight, anyOf: ['inventory:sync'] },
   { to: '/my-commission', label: 'My Commission', icon: Wallet, anyOf: ['commission:own'] },
@@ -35,7 +36,7 @@ export const NAV: { to: string; label: string; icon: typeof Home; end?: boolean;
   { to: '/settings', label: 'Settings', icon: Settings, anyOf: SETTINGS_PERMS },
 ];
 /** Phone tab bar: the first four of these the person can open (by role); everything else is under More. */
-const MOBILE_TABS = ['/', '/appointments', '/my-calendar', '/follow-ups', '/messages', '/clients', '/leads', '/inventory', '/my-commission'];
+const MOBILE_TABS = ['/', '/follow-ups', '/appointments', '/my-calendar', '/messages', '/clients', '/tasks', '/inventory', '/my-commission'];
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { data: me } = useMe();

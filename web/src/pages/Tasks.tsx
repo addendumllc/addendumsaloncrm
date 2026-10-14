@@ -1,13 +1,30 @@
 import { useSearchParams } from 'react-router-dom';
 import { Plus, ListTodo } from 'lucide-react';
 import { TASK_TYPE_LABELS } from '@addendum/shared';
-import { useIntegrations, useMe, useStaff, useTasks } from '../api/hooks';
+import { useCanDo, useIntegrations, useMe, useStaff, useTasks } from '../api/hooks';
+import { AnnouncementsSection } from '../components/domain/Announcements';
 import { Button, EmptyState, ErrorNote, PageHeader, PageLoading, Segmented } from '../components/ui';
 import { TaskCard } from '../components/domain/TaskCard';
 import { useActions } from '../components/domain/ActionsProvider';
 
-/** Every follow-up and internal salon task, with full filters. */
+/**
+ * Tasks: team announcements on top (a separate section — publishing one never creates tasks), then every follow-up
+ * and internal salon task with full filters. Each part shows only with its permission.
+ */
 export function TasksPage() {
+  const canDo = useCanDo();
+  const seesAnnouncements = ['announcements:read', 'announcements:publish', 'announcements:manage'].some(canDo);
+  const seesTasks = canDo('tasks:read_all') || canDo('tasks:read_own');
+  return (
+    <div>
+      {!seesTasks && <PageHeader title="Tasks" subtitle="Team announcements." />}
+      {seesAnnouncements && <AnnouncementsSection />}
+      {seesTasks && <TaskList />}
+    </div>
+  );
+}
+
+function TaskList() {
   const [params, setParams] = useSearchParams();
   const { data: me } = useMe();
   const { data: staff } = useStaff();

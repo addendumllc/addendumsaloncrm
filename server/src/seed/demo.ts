@@ -414,7 +414,8 @@ const DEMO_CATALOG = ['Hand-Tied Weft', 'K-Tip Extensions', 'Tape-In Extensions'
 async function seedInventory(now: Date, staff: Record<string, string>) {
   await updateSettings({ inventory: { orderEmail: 'gaby@addendumhair.com', ccRequester: true, catalog: DEMO_CATALOG } });
   const make = async (by: string, forKey: string, daysAgo: number, input: Parameters<typeof createInventoryRequest>[0], status?: 'ordered' | 'received') => {
-    const r = await createInventoryRequest({ ...input, forStaffId: staff[forKey] }, staff[by]);
+    // Demo orders are typed items (not picked from Shopify), so they don't change any stock.
+    const { request: r } = await createInventoryRequest({ neededBy: due, ...input, forStaffId: staff[forKey] }, staff[by]);
     const at = new Date(now.getTime() - daysAgo * DAY);
     await db().query('UPDATE inventory_requests SET created_at = $2, email_sent_at = $2, email_last_attempt_at = $2 WHERE id = $1', [r.id, at]);
     if (status) {

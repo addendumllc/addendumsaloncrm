@@ -1,0 +1,6 @@
+{
+  // Secrets live in .env (git-ignored) — never in these files.
+  "files.associations": { ".env.example": "dotenv" },
+  "search.exclude": { "**/node_modules": true, "**/dist": true, "server/data": true },
+  "typescript.tsdk": "node_modules/typescript/lib"
+}

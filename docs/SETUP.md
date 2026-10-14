@@ -22,6 +22,8 @@ Contents:
 
 > Accounts, passwords, integration keys, backups, key rotation and recovery: see
 > [SECURITY-AND-DATA.md](SECURITY-AND-DATA.md).
+> Developing in VS Code, how integrations are built, what admins can change in the app: see
+> [INTEGRATIONS.md](INTEGRATIONS.md).
 
 The app is one Node service plus a PostgreSQL database. Any host that runs Docker or Node 20+
 works (Render, Railway, Fly.io, DigitalOcean App Platform, AWS, a VPS).
@@ -93,6 +95,18 @@ sales).
 - Statuses: Pending approval → Active, or Rejected (can still be approved later); an active account can be
   Deactivated and Reactivated. Turn off **Request access** under Users & Permissions if you don't want it.
 - Existing accounts and Square-imported team members are already approved.
+
+**Sidebar** (in this order, each tab only with its permission): Dashboard, Follow-Ups, Tasks, Appointments, Messages,
+Clients, Order Hair, Inventory Sync, My Commission, Team Commission, Analytics, Settings. **Clients** holds both the
+client list and *New client inquiries* (formerly the New Clients tab), with **Add New Client**.
+
+**Dashboard widgets** are permissions too (Settings → Role templates, or per person): Schedule, Follow-ups and tasks,
+Clients and activity, Team announcements, Order Hair, My commission, Team commission, Analytics. A widget appears only
+with its widget permission *and* the permission for its data; the server leaves everything else out.
+
+**Team announcements** (top of Tasks, and on the Dashboard): title, message, author, date, optional link, *Important*,
+*Pinned*, for the whole team or chosen roles; people mark them read. Permissions: *View*, *Create and publish* (their
+own), *Manage all*. Publishing never creates tasks.
 
 **Calendars**: everyone sees their own calendar. **Can view team calendars** (a permission in role templates or on a
 person) shows other team members' appointments — for everyone, or only the people ticked under **Team calendars** on
@@ -333,10 +347,27 @@ and review requests have their own separate "send automatically" switches, also 
 
 ## 7. Email, Order Hair & Shopify
 
-Stylists use **Order Hair** in the menu to order from Addendum Hair. Each item has **Size, Color,
-Collection, QTY and Needed By** (the date can be changed later from the order). Each order is **emailed to
-gaby@addendumhair.com** (change it in Settings → Order Hair) and tracked Requested → Ordered →
-Received. Owners and managers see everyone's requests and update their status. Staff see their own.
+Stylists use **Order Hair** in the menu to order from Addendum Hair. **Shopify is the source of truth for hair
+inventory.** The order form has the stylist (unchanged), a required **Needed By** date (not in the past), hair items
+searched in Shopify by **SKU** or name (or chosen from the list) with length/colour/SKU shown, a quantity per item up to
+what's in stock, **Add another item / Remove**, optional **order notes**, and **Submit order**.
+
+On submit the server, in order: checks every quantity against Shopify stock → records the order → takes the chosen items
+out of Shopify stock in one all-or-nothing update (refused if stock changed since it was read, so nothing is oversold;
+an idempotency key makes a double-click or retry count once) → emails **gaby@addendumhair.com** with
+**info@addendumhair.com** (and the stylist) copied: reference number, stylist and email, Needed By, every item with its
+variant/SKU and quantity, and the notes. Success is shown only after the order is recorded and the stock handled.
+- Not enough stock, an unknown SKU, or a missing/past date: a clear message, and nothing is recorded or deducted.
+- Shopify doesn't answer: the order shows **Not finished — Shopify didn't confirm**; pressing Submit again finishes it
+  without deducting twice.
+- Email fails: the order and stock change stand; the email is retried automatically (never re-deducting).
+- Items **typed by hand** (not in Shopify) are emailed but don't touch inventory.
+- Products paired in **Inventory Sync** pass the Shopify deduction on to Square at the next sync (the two-way sync
+  combines changes). Turn **Sync to Shopify** off for a product to keep Square's count separate.
+- Cancelling an order doesn't put stock back automatically — adjust it in Shopify if the hair isn't sent.
+
+Orders are tracked Requested → Ordered → Received. Owners and managers see everyone's requests and update their status.
+Staff see their own.
 
 To send real email, add any SMTP account on the server and restart:
 
@@ -362,7 +393,7 @@ records include your email provider (your provider's setup guide covers this), s
 **Order Hair → Square inventory** lists retail products from Square, the source of truth for stock.
 You can search by product name, size/colour, SKU or barcode, and filter to in-stock items.
 It refreshes with every Square sync (every 15 minutes), or straight away with **Refresh from Square**.
-Hair orders don't touch inventory anywhere. They just send the order email.
+(Order Hair itself orders from Shopify inventory — see above.)
 
 - Reading stock needs Square's `INVENTORY_READ` permission. An access token (`SQUARE_ACCESS_TOKEN`) normally has it.
   If you connected Square with **Connect Square** before this change, reconnect once to grant it.

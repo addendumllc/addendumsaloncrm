@@ -1,9 +1,9 @@
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  AlertTriangle, Bell, CalendarDays, CalendarX, Check, Clock, MessageSquare, RefreshCw, Repeat, Sparkles, Star,
+  AlertTriangle, Bell, CalendarDays, CalendarX, Check, CircleDollarSign, Clock, Megaphone, MessageSquare, Package, RefreshCw, Repeat, Sparkles, Star, Wallet,
 } from 'lucide-react';
 import type { DashboardSummary } from '@addendum/shared';
-import { useAppointments, useCanDo, useDashboard, useMe, useTasks } from '../api/hooks';
+import { useAppointments, useCanDo, useDashboard, useMe, useTasks, type DashboardWidgets } from '../api/hooks';
 import { firstName, time, weekdayDate } from '../lib/format';
 import { Button, EmptyState, ErrorNote, PageLoading, SectionTitle, cx } from '../components/ui';
 import { TaskCard } from '../components/domain/TaskCard';
@@ -33,24 +33,29 @@ function greeting() {
 
 export function DashboardPage() {
   const { data: me } = useMe();
+  const canDoTop = useCanDo();
   const { data, isLoading, error, refetch } = useDashboard();
-  const { data: today } = useAppointments({ range: 'today' });
-  const { data: top } = useTasks({ status: 'open', kind: 'follow_up', due: 'today', priority: 'high' });
+  const w = data?.widgets;
+  const canSchedule = !!w?.schedule && (canDoTop('appointments:read') || canDoTop('appointments:read_own'));
+  const { data: today } = useAppointments({ range: 'today' }, canSchedule);
+  const { data: top } = useTasks({ status: 'open', kind: 'follow_up', due: 'today', priority: 'high' }, !!w?.followups && (canDoTop('tasks:read_all') || canDoTop('tasks:read_own')));
   const nav = useNavigate();
-  const canDo = useCanDo();
 
   if (isLoading) return <PageLoading />;
   if (error || !data) return <ErrorNote error={error} onRetry={refetch} />;
   const { summary, actions } = data;
+  const widgets = data.widgets;
   const nothingToDo = actions.length === 0;
+  const tiles = TILES.filter((t) => summary[t.key] != null);
+  const showWork = widgets.followups || widgets.clients;
 
   return (
     <div className="animate-rise">
       <p className="text-[15px] text-stone">{greeting()}, {firstName(me?.name)} — {weekdayDate(new Date())}</p>
       <h1 className="h-display mt-1 text-[40px] leading-[1.05] sm:text-[52px]">Today's Priorities</h1>
 
-      <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-xl2 border border-line bg-line sm:grid-cols-4">
-        {TILES.filter((t) => summary[t.key] != null).map((t) => {
+      {tiles.length > 0 && <div className="mt-6 grid grid-cols-2 gap-px overflow-hidden rounded-xl2 border border-line bg-line sm:grid-cols-4">
+        {tiles.map((t) => {
           const n = summary[t.key] as number;
           return (
             <Link key={t.key} to={t.link} className="group bg-white px-4 py-4 transition-colors hover:bg-plum-tint/40 sm:px-5">
@@ -59,10 +64,12 @@ export function DashboardPage() {
             </Link>
           );
         })}
-      </div>
+      </div>}
 
-      <div className="mt-10 grid gap-10 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <section>
+      <Widgets w={widgets} />
+
+      {(showWork || canSchedule) && <div className={cx('mt-10 grid gap-10', showWork && canSchedule && 'lg:grid-cols-[minmax(0,1fr)_360px]')}>
+        {showWork && <section>
           <SectionTitle>Recommended actions</SectionTitle>
           {nothingToDo ? (
             <div className="panel"><EmptyState icon={<Check className="h-8 w-8" />} title="You're all caught up">No follow-ups need attention right now. New leads, texts and Square changes will appear here.</EmptyState></div>
@@ -84,15 +91,15 @@ export function DashboardPage() {
             </ol>
           )}
 
-          {top && top.length > 0 && (
+          {widgets.followups && top && top.length > 0 && (
             <div className="mt-10">
               <SectionTitle action={<Link to="/follow-ups" className="text-sm text-plum hover:underline">See all follow-ups</Link>}>Start here</SectionTitle>
               <div className="space-y-3">{top.slice(0, 3).map((t) => <TaskCard key={t.id} task={t} compact />)}</div>
             </div>
           )}
-        </section>
+        </section>}
 
-        <aside>
+        {canSchedule && <aside>
           <SectionTitle action={<Link to="/appointments?view=day" className="text-sm text-plum hover:underline">Calendar</Link>}>In the salon today</SectionTitle>
           <div className="panel overflow-hidden">
             {!today?.length && <EmptyState title="No appointments today">Square bookings for today will show here.</EmptyState>}
@@ -120,10 +127,50 @@ export function DashboardPage() {
           {summary.pendingConfirmations > 0 && (
             <p className="mt-3 text-[13px] text-stone">{summary.pendingConfirmations} booking request{summary.pendingConfirmations === 1 ? ' is' : 's are'} waiting to be accepted in Square.</p>
           )}
-        </aside>
-      </div>
+        </aside>}
+      </div>}
 
-      {canDo('analytics:read') && <NewClientStats />}
+      {widgets.analytics && <NewClientStats />}
     </div>
   );
 }
+
+/** Announcements, hair orders and commission — only those the server included for this person. */
+function Widgets({ w }: { w: DashboardWidgets }) {
+  const cards = [
+    w.announcements && (
+      <Link key="ann" to="/tasks" className="panel block p-4 hover:bg-plum-tint/30">
+        <p className="flex items-center gap-2 text-[13px] font-medium uppercase tracking-wide text-stone"><Megaphone className="h-4 w-4" />Announcements{w.announcements.unread ? <span className="rounded-full bg-plum px-1.5 text-[11px] text-white">{w.announcements.unread} new</span> : null}</p>
+        {w.announcements.latest.length === 0 ? <p className="mt-2 text-[14px] text-stone">Nothing new.</p> : (
+          <ul className="mt-2 space-y-1.5">{w.announcements.latest.map((a) => <li key={a.id} className={cx('truncate text-[14px]', a.read ? 'text-ink-soft' : 'font-medium text-ink')}>{a.pinned ? 'Pinned · ' : ''}{a.title}</li>)}</ul>
+        )}
+      </Link>
+    ),
+    w.orders && (
+      <Link key="orders" to="/inventory" className="panel block p-4 hover:bg-plum-tint/30">
+        <p className="flex items-center gap-2 text-[13px] font-medium uppercase tracking-wide text-stone"><Package className="h-4 w-4" />{w.orders.scope === 'mine' ? 'My hair orders' : 'Hair orders'}</p>
+        <p className="num mt-1 font-display text-[32px] leading-none text-ink">{w.orders.open}</p>
+        <p className="text-[13px] text-stone">open</p>
+        {w.orders.next.slice(0, 2).map((o) => <p key={o.id} className="mt-1 truncate text-[13px] text-ink-soft">#{o.number}{o.forName ? ` · ${o.forName}` : ''}{o.neededBy ? ` · needed ${o.neededBy.slice(5)}` : ''}</p>)}
+      </Link>
+    ),
+    w.myCommission && (
+      <Link key="mine" to="/my-commission" className="panel block p-4 hover:bg-plum-tint/30">
+        <p className="flex items-center gap-2 text-[13px] font-medium uppercase tracking-wide text-stone"><Wallet className="h-4 w-4" />My commission</p>
+        <p className="num mt-1 font-display text-[32px] leading-none text-ink">{usdWhole(w.myCommission.totalCents)}</p>
+        <p className="text-[13px] text-stone">this week (estimated until finalized)</p>
+      </Link>
+    ),
+    w.teamCommission && (
+      <Link key="team" to="/commission" className="panel block p-4 hover:bg-plum-tint/30">
+        <p className="flex items-center gap-2 text-[13px] font-medium uppercase tracking-wide text-stone"><CircleDollarSign className="h-4 w-4" />Team commission</p>
+        <p className="num mt-1 font-display text-[32px] leading-none text-ink">{usdWhole(w.teamCommission.totalCents)}</p>
+        <p className="text-[13px] text-stone">this week, everyone</p>
+      </Link>
+    ),
+  ].filter(Boolean);
+  if (!cards.length) return null;
+  return <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{cards}</div>;
+}
+
+const usdWhole = (cents: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(cents / 100);

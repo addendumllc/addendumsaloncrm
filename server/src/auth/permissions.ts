@@ -96,6 +96,7 @@ export const API_RULES: { method: string; path: RegExp; anyOf: string[] }[] = [
   { method: '*', path: /^\/appointments(\/[^/]+)?$/, anyOf: ['appointments:read', 'appointments:read_own'] },
   { method: '*', path: /^\/messages(\/.*)?$/, anyOf: ['messages:read', 'messages:send'] },
   { method: '*', path: /^\/tasks(\/.*)?$/, anyOf: ['tasks:read_all', 'tasks:read_own'] },
+  { method: '*', path: /^\/announcements(\/.*)?$/, anyOf: ['announcements:read', 'announcements:publish', 'announcements:manage'] },
   { method: '*', path: /^\/rebooking(\/.*)?$/, anyOf: ['clients:read', 'clients:read_assigned', 'rebooking:defaults'] },
 
   { method: 'GET', path: /^\/integrations\/status$/, anyOf: ['dashboard:view', 'settings:read', 'integrations:manage', 'inventory:manage'] },

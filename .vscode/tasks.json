@@ -1,0 +1,9 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    { "label": "Run the app (dev)", "type": "npm", "script": "dev:nobrowser", "isBackground": true, "problemMatcher": [] },
+    { "label": "Run all tests", "type": "npm", "script": "test", "group": { "kind": "test", "isDefault": true }, "problemMatcher": [] },
+    { "label": "Type check", "type": "npm", "script": "typecheck", "group": "build", "problemMatcher": ["$tsc"] },
+    { "label": "Build for production", "type": "npm", "script": "build", "group": { "kind": "build", "isDefault": true }, "problemMatcher": [] }
+  ]
+}

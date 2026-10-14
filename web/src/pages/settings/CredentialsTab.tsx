@@ -38,6 +38,29 @@ export function CredentialsSettings() {
         <Lock className="mt-0.5 h-4 w-4 shrink-0 text-stone" />
         <p>Keys and secrets are stored encrypted on the salon’s server. After saving, secrets are never shown again — not here, not in the browser, not in logs. To change one, type the new value. Values set in the server’s environment file are used unless you save one here.{data.demoMode && ' Demo Mode is on: the CRM uses demo data, but Test connection always checks the real service.'}</p>
       </div>
+      <details className="rounded-xl2 border border-line bg-white px-4 py-3 text-[13px] text-ink-soft">
+        <summary className="cursor-pointer font-medium text-ink">What you can change here — and what needs a developer</summary>
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          <div>
+            <p className="font-medium text-sage">Here, any time (applies straight away)</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5">
+              <li>Keys, tokens and passwords for Square, Shopify, GoHighLevel, email and AI — replacing one tests it first</li>
+              <li>Shopify store address and inventory location; Square environment, location and webhook settings</li>
+              <li>Turning an integration off or on, and testing connections</li>
+              <li>Where hair orders are emailed (Settings → Order Hair), salon network access, reminders and rules</li>
+            </ul>
+          </div>
+          <div>
+            <p className="font-medium text-amber">Needs a developer or the provider first</p>
+            <ul className="mt-1 list-disc space-y-0.5 pl-5">
+              <li>A brand-new integration or a new kind of data from an existing one</li>
+              <li>New API permissions/scopes — granted in the Square, Shopify or HighLevel app, then tested here</li>
+              <li>Server settings: database, encryption key, app address, Demo Mode</li>
+              <li>Changing how inventory is checked or deducted (Shopify stays the source of truth for hair)</li>
+            </ul>
+          </div>
+        </div>
+      </details>
       {data.integrations.map((i) => <IntegrationCard key={i.provider} integration={i} />)}
       <ChangeHistory integrations={data.integrations} />
     </div>

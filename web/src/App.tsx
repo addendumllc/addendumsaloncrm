@@ -84,12 +84,13 @@ function SignedIn() {
     <Routes>
       <Route path="/" element={canAny('dashboard:view') ? <DashboardPage /> : <Navigate to={home} replace />} />
       <Route path="/follow-ups" element={guard(['tasks:read_all', 'tasks:read_own'], <FollowUpsPage />)} />
-      <Route path="/tasks" element={guard(['tasks:read_all', 'tasks:read_own'], <TasksPage />)} />
+      <Route path="/tasks" element={guard(['tasks:read_all', 'tasks:read_own', 'announcements:read', 'announcements:publish', 'announcements:manage'], <TasksPage />)} />
       <Route path="/appointments" element={!can('appointments:read') && can('appointments:read_own') ? <Navigate to="/my-calendar" replace /> : guard(['appointments:read'], <AppointmentsPage />)} />
       <Route path="/my-calendar" element={canAny('appointments:read') && canAny('dashboard:view') ? <Navigate to="/appointments" replace /> : guard(['appointments:read_own', 'appointments:read'], <MyCalendarPage />)} />
-      <Route path="/clients" element={guard(['clients:read', 'clients:read_assigned'], <ClientsPage />)} />
+      <Route path="/clients" element={guard(['clients:read', 'clients:read_assigned', 'leads:read'], <ClientsPage />)} />
       <Route path="/clients/:id" element={guard(['clients:read', 'clients:read_assigned'], <ClientProfilePage />)} />
-      <Route path="/leads" element={guard(['leads:read'], <LeadsPage />)} />
+      {/* New Clients is now part of Clients: old links (bookmarks, search, dashboard) land in the right place. */}
+      <Route path="/leads" element={guard(['leads:read'], <LeadsRedirect />)} />
       <Route path="/messages" element={guard(['messages:read'], <MessagesPage />)} />
       <Route path="/messages/:id" element={guard(['messages:read'], <MessagesPage />)} />
       <Route path="/inventory" element={guard(['inventory:order', 'inventory:read_all', 'inventory:view', 'inventory:manage'], <InventoryPage />)} />
@@ -123,6 +124,13 @@ function SignedIn() {
       </AppShell>
     </ActionsProvider>
   );
+}
+
+function LeadsRedirect() {
+  const loc = useLocation();
+  const p = new URLSearchParams(loc.search);
+  p.set('section', 'new');
+  return <Navigate to={`/clients?${p.toString()}`} replace />;
 }
 
 function NoAccess() {

@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { db } from '../src/db/index.js';
 import { setup } from './helpers.js';
+import { localDate } from '../src/domain/rebookingSchedule.js';
 
 /** Each role signs in with its own account and is checked against the API directly, not just the UI. */
 let app: Awaited<ReturnType<typeof setup>>['app'];
@@ -82,7 +83,7 @@ describe('Stylists: their own calendar, clients and follow-ups, plus Order Hair'
   });
 
   it('manage only their own hair orders', async () => {
-    const r = await stylist.post('/api/inventory/requests', { forStaffId: otherStylistId, items: [{ collection: 'K-Tip Extensions', quantity: 1 }] });
+    const r = await stylist.post('/api/inventory/requests', { forStaffId: otherStylistId, neededBy: localDate(new Date(Date.now() + 5 * 86400_000), 'America/Los_Angeles'), items: [{ collection: 'K-Tip Extensions', quantity: 1 }] });
     expect(r.status).toBe(201);
     expect(r.body.request.forStaffId).toBe(stylistId); // can't order "for" someone else
     const item = r.body.request.items[0].id;
@@ -128,7 +129,7 @@ describe('Receptionists: the CRM, without administration', () => {
   });
 
   it('see every hair order and can order for a stylist, but not mark orders or touch Shopify', async () => {
-    const r = await receptionist.post('/api/inventory/requests', { forStaffId: stylistId, items: [{ collection: 'Tape-In Extensions', quantity: 2 }] });
+    const r = await receptionist.post('/api/inventory/requests', { forStaffId: stylistId, neededBy: localDate(new Date(Date.now() + 5 * 86400_000), 'America/Los_Angeles'), items: [{ collection: 'Tape-In Extensions', quantity: 2 }] });
     expect(r.body.request.forStaffId).toBe(stylistId);
     expect((await receptionist.get('/api/inventory/requests')).body.requests.length).toBeGreaterThan(1);
     const item = r.body.request.items[0].id;

@@ -44,6 +44,8 @@ export interface PermissionDef {
 
 export const PERMISSION_CATEGORIES = [
   'Dashboard and analytics',
+  'Dashboard widgets',
+  'Team announcements',
   'Customers',
   'Customer contact information',
   'Service history and private notes',
@@ -66,6 +68,21 @@ export const PERMISSION_CATEGORIES = [
 
 export const PERMISSIONS_CATALOG: PermissionDef[] = [
   { key: 'dashboard:view', category: 'Dashboard and analytics', action: 'view', label: 'Dashboard', description: 'Today’s work: follow-ups, appointments, messages. No revenue figures.' },
+  // What the Dashboard shows. A widget also needs the permission for its data (e.g. Team commission needs
+  // "View team commission"), so these can only narrow what someone sees, never widen it.
+  { key: 'dashboard:schedule', category: 'Dashboard widgets', action: 'view', label: 'Schedule', description: 'Today’s appointments and the day’s booking counts.' },
+  { key: 'dashboard:followups', category: 'Dashboard widgets', action: 'view', label: 'Follow-ups and tasks', description: 'Recommended actions, follow-ups due and overdue, ready to rebook.' },
+  { key: 'dashboard:clients', category: 'Dashboard widgets', action: 'view', label: 'Clients and activity', description: 'New client inquiries and unread messages.' },
+  { key: 'dashboard:announcements', category: 'Dashboard widgets', action: 'view', label: 'Team announcements', description: 'The latest announcements for them.' },
+  { key: 'dashboard:orders', category: 'Dashboard widgets', action: 'view', label: 'Order Hair', description: 'Open hair orders (their own, or everyone’s with “View all hair orders”).' },
+  { key: 'dashboard:my_commission', category: 'Dashboard widgets', action: 'view', label: 'My commission', description: 'Their own commission this week.' },
+  { key: 'dashboard:team_commission', category: 'Dashboard widgets', action: 'view', label: 'Team commission', description: 'Everyone’s commission this week.', sensitive: true },
+  { key: 'dashboard:analytics', category: 'Dashboard widgets', action: 'view', label: 'Analytics', description: 'New clients and rebooking performance.', sensitive: true },
+
+  { key: 'announcements:read', category: 'Team announcements', action: 'view', label: 'View announcements', description: 'Announcements published for everyone or their role.' },
+  { key: 'announcements:publish', category: 'Team announcements', action: 'create', label: 'Create and publish announcements', description: 'Write, publish, edit and delete their own announcements.' },
+  { key: 'announcements:manage', category: 'Team announcements', action: 'edit', label: 'Manage all announcements', description: 'Edit, pin, unpublish or delete anyone’s announcements.' },
+
   { key: 'analytics:read', category: 'Dashboard and analytics', action: 'view', label: 'Business analytics', description: 'Analytics page: bookings, conversion and business performance.', sensitive: true },
 
   { key: 'clients:read', category: 'Customers', action: 'view', label: 'View all customers', description: 'Customer list, search and profiles.' },
@@ -149,16 +166,21 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<BuiltinRole, string[]> = {
     'tasks:read_own', 'tasks:read_all', 'tasks:write', 'tasks:assign', 'rebooking:client',
     'staff:read', 'highlevel:push', 'square:sync',
     'inventory:view', 'inventory:order', 'inventory:read_all', 'inventory:order_for_others', 'commission:own',
+    'announcements:read', 'announcements:publish',
+    'dashboard:schedule', 'dashboard:followups', 'dashboard:clients', 'dashboard:announcements', 'dashboard:orders', 'dashboard:my_commission',
   ],
   // Their own appointments, their own clients (contact, history, notes), their own follow-ups, hair orders, commission.
   stylist: [
     'appointments:read_own', 'clients:read_assigned', 'clients:contact', 'clients:history', 'clients:notes', 'services:read',
-    'tasks:read_own', 'tasks:write', 'inventory:view', 'inventory:order', 'commission:own',
+    'tasks:read_own', 'tasks:write', 'inventory:view', 'inventory:order', 'commission:own', 'announcements:read',
+    // Used if an administrator gives stylists the Dashboard.
+    'dashboard:schedule', 'dashboard:followups', 'dashboard:announcements', 'dashboard:orders', 'dashboard:my_commission',
   ],
   // Their own calendar (team calendars when an Owner/Admin allows it), assigned follow-ups, needed client details.
   assistant: [
     'dashboard:view', 'appointments:read_own', 'clients:read', 'clients:contact', 'clients:history', 'services:read',
-    'tasks:read_own', 'tasks:write', 'rebooking:client', 'inventory:view', 'staff:read', 'commission:own',
+    'tasks:read_own', 'tasks:write', 'rebooking:client', 'inventory:view', 'staff:read', 'commission:own', 'announcements:read',
+    'dashboard:schedule', 'dashboard:followups', 'dashboard:announcements', 'dashboard:my_commission',
   ],
 };
 
@@ -1020,6 +1042,9 @@ export interface InventoryItemDTO {
   clientId: string | null;
   clientName: string | null;
   note: string | null;
+  /** Picked from Shopify inventory: its SKU and the variant name as Shopify has it (null when typed by hand). */
+  sku: string | null;
+  shopifyLabel: string | null;
 }
 
 // ---------------- Square inventory (search) + admin push to Shopify ----------------
@@ -1065,6 +1090,10 @@ export interface InventoryRequestDTO {
   requestedByName: string | null;
   items: InventoryItemDTO[];
   totalUnits: number;
+  /** none: nothing taken from inventory · reserving: Shopify not confirmed yet (submit again to finish) · reserved: done. */
+  inventoryStatus: 'none' | 'reserving' | 'reserved';
+  /** The stylist's email, for the team to get in touch. */
+  forStaffEmail: string | null;
   email: {
     to: string;
     /** Who the email was copied to, as sent (empty until it has been sent). */
