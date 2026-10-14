@@ -5,6 +5,7 @@ import { getSettings } from '../repos/settings.js';
 import { listAnnouncements, unreadAnnouncements } from './announcements.js';
 import { listEntries, summarize } from './commission.js';
 import { addDaysToDate, localDate } from './rebookingSchedule.js';
+import { projectionHighlights } from './projections.js';
 
 /**
  * The Dashboard's extra widgets. Each is included only with its widget permission (dashboard:*) AND the permission for
@@ -46,7 +47,11 @@ export async function dashboardWidgets(user: CurrentUser) {
     ? { ...week, totalCents: summarize((await listEntries({ staffId: 'all', ...week })).filter((e) => e.staffId), week.from, week.to, null).totalCommissionCents }
     : null;
 
+  // Projected service revenue: Admin/Owner by default; both the widget and the data permission are needed.
+  const projections = w('projections') && can(user, 'revenue:projections') ? await projectionHighlights() : null;
+
   return {
+    projections,
     schedule: w('schedule'),
     followups: w('followups'),
     clients: w('clients'),

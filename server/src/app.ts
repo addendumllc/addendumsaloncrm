@@ -26,6 +26,7 @@ import { serveFont, serveLogo, settingsRouter } from './routes/settings.js';
 import { tasksRouter } from './routes/tasks.js';
 import { accessRouter } from './routes/access.js';
 import { announcementsRouter } from './routes/announcements.js';
+import { projectionsRouter } from './routes/projections.js';
 import { networkGate } from './auth/access.js';
 import { webhooksRouter } from './routes/webhooks.js';
 
@@ -100,6 +101,7 @@ export function createApp() {
   app.use('/api', apiGate);
   app.use('/api/access', accessRouter);
   app.use('/api/announcements', announcementsRouter);
+  app.use('/api/projections', projectionsRouter);
   app.use('/api', miscRouter);
   app.use('/api', settingsRouter);
   app.use('/api/clients', clientsRouter);

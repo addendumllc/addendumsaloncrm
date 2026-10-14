@@ -104,6 +104,15 @@ client list and *New client inquiries* (formerly the New Clients tab), with **Ad
 Clients and activity, Team announcements, Order Hair, My commission, Team commission, Analytics. A widget appears only
 with its widget permission *and* the permission for its data; the server leaves everything else out.
 
+**Projected service revenue** (Analytics → top, and Dashboard cards) — *Admins/Owners only by default* (permission
+"Projected service revenue", plus the Dashboard widget of the same name; only people who hold it can grant it).
+Weekly (day by day), monthly (week by week) and future (next 7/30/90 days or a custom range) projections from
+**confirmed** salon appointments at their booked service prices, grouped by the salon's time zone: projected revenue,
+unique clients, appointments, average per client and per appointment, plus the appointments behind them.
+Cancelled appointments and no-shows are left out; booking requests awaiting confirmation are shown separately;
+appointments without a known price are flagged **Unestimated** and not added. These are projections — not collected
+sales — and never include hair product, retail or commission figures.
+
 **Team announcements** (top of Tasks, and on the Dashboard): title, message, author, date, optional link, *Important*,
 *Pinned*, for the whole team or chosen roles; people mark them read. Permissions: *View*, *Create and publish* (their
 own), *Manage all*. Publishing never creates tasks.

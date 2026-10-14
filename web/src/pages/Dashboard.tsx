@@ -66,6 +66,7 @@ export function DashboardPage() {
         })}
       </div>}
 
+      {widgets.projections && <ProjectionCards p={widgets.projections} />}
       <Widgets w={widgets} />
 
       {(showWork || canSchedule) && <div className={cx('mt-10 grid gap-10', showWork && canSchedule && 'lg:grid-cols-[minmax(0,1fr)_360px]')}>
@@ -174,3 +175,34 @@ function Widgets({ w }: { w: DashboardWidgets }) {
 }
 
 const usdWhole = (cents: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(cents / 100);
+
+/** Admin-only: projected service revenue from booked appointments (not collected sales, not products or commission). */
+function ProjectionCards({ p }: { p: NonNullable<DashboardWidgets['projections']> }) {
+  const unestimated = p.week.unestimatedAppointments + p.month.unestimatedAppointments;
+  const cards: [string, string, string][] = [
+    ['Weekly projected revenue', usdWhole(p.week.revenueCents), 'This week'],
+    ['Monthly projected revenue', usdWhole(p.month.revenueCents), 'This month'],
+    ['Clients booked this week', String(p.week.clients), `${p.week.appointments} appointments`],
+    ['Clients booked this month', String(p.month.clients), `${p.month.appointments} appointments`],
+    ['Avg revenue per client', p.week.avgPerClientCents == null ? '—' : usdWhole(p.week.avgPerClientCents), 'This week'],
+    ['Future booked revenue', usdWhole(p.future.revenueCents), 'Next 90 days'],
+  ];
+  return (
+    <section className="mt-6">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-[13px] font-medium uppercase tracking-wide text-stone">Projected service revenue <span className="normal-case tracking-normal text-stone-light">· projections, not collected sales · admins only</span></p>
+        <Link to="/analytics#projections" className="text-sm text-plum hover:underline">Details</Link>
+      </div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+        {cards.map(([label, value, sub]) => (
+          <Link key={label} to="/analytics#projections" className="panel block px-4 py-3 hover:bg-plum-tint/30">
+            <span className="block text-[12px] text-stone">{label}</span>
+            <span className="num mt-1 block font-display text-[26px] leading-none text-ink">{value}</span>
+            <span className="mt-1 block text-[12px] text-stone">{sub}</span>
+          </Link>
+        ))}
+      </div>
+      {unestimated > 0 && <p className="mt-2 text-[12px] text-amber">Some booked appointments have no known price, so they aren’t in these totals.</p>}
+    </section>
+  );
+}

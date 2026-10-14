@@ -21,12 +21,16 @@ export function useDashboard() {
   });
 }
 
+export interface ProjectionTotals { from: string; to: string; revenueCents: number; clients: number; appointments: number; unestimatedAppointments: number; avgPerClientCents: number | null; avgPerAppointmentCents: number | null }
+
 /** Dashboard widgets the server allowed for this person (each needs its widget permission and the data permission). */
 export interface DashboardWidgets {
   schedule: boolean; followups: boolean; clients: boolean; analytics: boolean;
   announcements: { unread: number; latest: { id: string; title: string; important: boolean; pinned: boolean; publishedAt: string | null; authorName: string | null; read: boolean }[] } | null;
   orders: { scope: 'everyone' | 'mine'; open: number; next: { id: string; number: number; status: string; neededBy: string | null; forName: string | null; units: number }[] } | null;
   myCommission: { from: string; to: string; totalCents: number } | null;
+  /** Admins/Owners by default ("revenue:projections" + the widget). Projections, not collected sales. */
+  projections: { week: ProjectionTotals; month: ProjectionTotals; future: ProjectionTotals } | null;
   teamCommission: { from: string; to: string; totalCents: number } | null;
 }
 

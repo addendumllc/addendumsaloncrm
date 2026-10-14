@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Info, Table2, BarChart3 } from 'lucide-react';
 import { api } from '../api/client';
-import { useIntegrations } from '../api/hooks';
+import { useCanDo, useIntegrations } from '../api/hooks';
+import { ProjectionsSection } from '../components/domain/Projections';
 import { dateShort, money, pct } from '../lib/format';
 import { ErrorNote, PageHeader, PageLoading, Segmented, SectionTitle, cx } from '../components/ui';
 
@@ -28,14 +29,25 @@ const SERIES = [
 const AXIS = { fontSize: 12, fill: '#75716B' };
 
 export function AnalyticsPage() {
+  const canDo = useCanDo();
+  // Each part shows only with its permission; the server checks both.
+  return (
+    <div className="animate-rise">
+      {canDo('revenue:projections') && <><PageHeader title="Analytics" /><ProjectionsSection /></>}
+      {canDo('analytics:read') && <BusinessAnalytics showTitle={!canDo('revenue:projections')} />}
+    </div>
+  );
+}
+
+function BusinessAnalytics({ showTitle }: { showTitle: boolean }) {
   const [days, setDays] = useState('30');
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['analytics', days], queryFn: () => api.get<Analytics>(`/analytics?days=${days}`) });
   const { data: integ } = useIntegrations();
 
   return (
-    <div className="animate-rise">
+    <div>
       <PageHeader
-        title="Analytics"
+        title={showTitle ? 'Analytics' : <span className="text-[26px]">Bookings & clients</span>}
         subtitle={integ?.demoMode ? 'Calculated from demo data.' : 'Calculated from Square appointments, leads and follow-ups.'}
         actions={<Segmented value={days} onChange={setDays} options={[{ value: '30', label: '30 days' }, { value: '90', label: '90 days' }, { value: '365', label: '12 months' }]} />}
       />

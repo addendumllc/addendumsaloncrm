@@ -1,3 +1,10 @@
+# Original file to send to Servers
+# ─────────────────────────────────────────────────────────────────────────────
+# Addendum Salon CRM — server configuration
+# Copy to `.env2` (never commit it). Every secret here stays on the server;
+# nothing in this file is ever sent to the browser.
+# ─────────────────────────────────────────────────────────────────────────────
+
 NODE_ENV=production
 PORT=4000
 DEMO_MODE=false

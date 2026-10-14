@@ -77,12 +77,14 @@ export const PERMISSIONS_CATALOG: PermissionDef[] = [
   { key: 'dashboard:orders', category: 'Dashboard widgets', action: 'view', label: 'Order Hair', description: 'Open hair orders (their own, or everyone’s with “View all hair orders”).' },
   { key: 'dashboard:my_commission', category: 'Dashboard widgets', action: 'view', label: 'My commission', description: 'Their own commission this week.' },
   { key: 'dashboard:team_commission', category: 'Dashboard widgets', action: 'view', label: 'Team commission', description: 'Everyone’s commission this week.', sensitive: true },
+  { key: 'dashboard:projections', category: 'Dashboard widgets', action: 'view', label: 'Projected service revenue', description: 'This week’s, this month’s and future projected service revenue.', sensitive: true },
   { key: 'dashboard:analytics', category: 'Dashboard widgets', action: 'view', label: 'Analytics', description: 'New clients and rebooking performance.', sensitive: true },
 
   { key: 'announcements:read', category: 'Team announcements', action: 'view', label: 'View announcements', description: 'Announcements published for everyone or their role.' },
   { key: 'announcements:publish', category: 'Team announcements', action: 'create', label: 'Create and publish announcements', description: 'Write, publish, edit and delete their own announcements.' },
   { key: 'announcements:manage', category: 'Team announcements', action: 'edit', label: 'Manage all announcements', description: 'Edit, pin, unpublish or delete anyone’s announcements.' },
 
+  { key: 'revenue:projections', category: 'Dashboard and analytics', action: 'view', label: 'Projected service revenue', description: 'Expected revenue from booked salon services: weekly, monthly and future forecasts, averages and appointment details.', sensitive: true },
   { key: 'analytics:read', category: 'Dashboard and analytics', action: 'view', label: 'Business analytics', description: 'Analytics page: bookings, conversion and business performance.', sensitive: true },
 
   { key: 'clients:read', category: 'Customers', action: 'view', label: 'View all customers', description: 'Customer list, search and profiles.' },

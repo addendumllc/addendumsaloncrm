@@ -97,7 +97,7 @@ function SignedIn() {
       <Route path="/inventory-sync" element={guard(['inventory:sync'], <InventorySyncPage />)} />
       <Route path="/my-commission" element={guard(['commission:own'], <MyCommissionPage />)} />
       <Route path="/commission" element={guard(['commission:team', 'commission:approve'], <TeamCommissionPage />)} />
-      <Route path="/analytics" element={guard(['analytics:read'], <AnalyticsPage />)} />
+      <Route path="/analytics" element={guard(['analytics:read', 'revenue:projections'], <AnalyticsPage />)} />
       <Route path="/settings" element={guard(SETTINGS_PERMS, <SettingsPage />)} />
       <Route path="/login" element={<Navigate to="/" replace />} />
       <Route path="*" element={<Navigate to={home} replace />} />

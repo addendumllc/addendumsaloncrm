@@ -32,7 +32,7 @@ export const NAV: { to: string; label: string; icon: typeof Home; end?: boolean;
   { to: '/inventory-sync', label: 'Inventory Sync', icon: ArrowLeftRight, anyOf: ['inventory:sync'] },
   { to: '/my-commission', label: 'My Commission', icon: Wallet, anyOf: ['commission:own'] },
   { to: '/commission', label: 'Team Commission', icon: CircleDollarSign, anyOf: ['commission:team', 'commission:approve'] },
-  { to: '/analytics', label: 'Analytics', icon: BarChart3, anyOf: ['analytics:read'] },
+  { to: '/analytics', label: 'Analytics', icon: BarChart3, anyOf: ['analytics:read', 'revenue:projections'] },
   { to: '/settings', label: 'Settings', icon: Settings, anyOf: SETTINGS_PERMS },
 ];
 /** Phone tab bar: the first four of these the person can open (by role); everything else is under More. */
