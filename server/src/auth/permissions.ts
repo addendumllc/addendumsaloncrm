@@ -101,6 +101,8 @@ export const API_RULES: { method: string; path: RegExp; anyOf: string[] }[] = [
   { method: 'GET', path: /^\/integrations\/status$/, anyOf: ['dashboard:view', 'settings:read', 'integrations:manage', 'inventory:manage'] },
   { method: '*', path: /^\/integrations(\/.*)?$/, anyOf: ['integrations:manage', 'settings:read', 'square:sync'] },
   { method: '*', path: /^\/admin\/credentials(\/.*)?$/, anyOf: ['integrations:manage'] },
+  { method: 'GET', path: /^\/admin\/system$/, anyOf: ['settings:write', 'integrations:manage'] },
+  { method: 'GET', path: /^\/admin\/locations$/, anyOf: ['users:manage'] },
   { method: '*', path: /^\/admin\/(users|roles|permissions)(\/.*)?$/, anyOf: ['users:manage', 'users:permissions'] },
   { method: '*', path: /^\/inventory-sync(\/.*)?$/, anyOf: ['inventory:sync'] },
   { method: '*', path: /^\/inventory(\/.*)?$/, anyOf: ['inventory:view', 'inventory:order', 'inventory:read_all', 'inventory:manage'] },

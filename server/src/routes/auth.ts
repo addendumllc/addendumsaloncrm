@@ -3,8 +3,11 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { createSession, destroySession, requireAuth } from '../auth/session.js';
+import { markReauthenticated, REAUTH_MINUTES } from '../auth/reauth.js';
 import { db } from '../db/index.js';
+import { sha256 } from '../lib/crypto.js';
 import { checkPasswordToken, createPasswordLink, emailPasswordLink, requestAccess, usePasswordToken } from '../domain/users.js';
+import { checkCode } from '../domain/loginCodes.js';
 import { audit } from '../repos/audit.js';
 import { findStaffByEmail } from '../repos/staff.js';
 import { isDemo } from '../integrations/registry.js';
@@ -41,10 +44,56 @@ authRouter.post('/login', loginLimiter, ah(async (req, res) => {
   }
   await createSession(res, staff.id, req.get('user-agent'));
   await db().query('UPDATE staff SET last_login_at = now() WHERE id = $1', [staff.id]);
+  // Passwords hashed with a lower cost by an older version are upgraded now (the password is only in memory here).
+  if (!isDemo() && bcrypt.getRounds(staff.password_hash) < 12) {
+    await db().query('UPDATE staff SET password_hash = $2 WHERE id = $1', [staff.id, await bcrypt.hash(password, 12)]);
+  }
   req.user = { id: staff.id, name: staff.name, email: staff.email, role: staff.role, permissions: [] };
   await logAction(req, 'auth.login', 'staff', staff.id);
   res.json({ ok: true });
 }));
+
+/**
+ * Sign in with email + custom code (set by an Owner). The email ties every guess to one account, which locks after a
+ * few wrong codes; a network limit and Admin alerts sit on top. The code is never logged or recorded.
+ */
+const codeLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 20, skipSuccessfulRequests: true, standardHeaders: true, legacyHeaders: false,
+  message: { error: { code: 'rate_limited', message: 'Too many sign-in attempts. Please wait a few minutes.' } } });
+authRouter.post('/login-code', codeLimiter, ah(async (req, res) => {
+  const { email, code } = parse(z.object({ email: z.string().email(), code: z.string().min(1).max(64) }), req.body);
+  const staff = await findStaffByEmail(email);
+  const r = await checkCode(staff?.id ?? null, code);
+  if (!r.ok && r.reason === 'locked') {
+    if (r.justLocked) {
+      await logAction(req, 'auth.code_locked', 'staff', staff!.id);
+      await alertAdminsLocked(staff!.id, staff!.name);
+    }
+    const until = new Date(r.lockedUntil!).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: (await getSettings()).business.timezone });
+    return res.status(429).json({ error: { code: 'code_locked', message: `Too many wrong codes, so code sign-in is locked until ${until}. Sign in with your password, or ask an Owner to reset your code.` } });
+  }
+  if (!r.ok) {
+    await logAction(req, 'auth.code_failed', staff ? 'staff' : undefined, staff?.id ?? null);
+    return res.status(401).json({ error: { code: 'invalid_login', message: "That email and code don't match." } });
+  }
+  // Same rules as a password: a correct code doesn't get round approval or deactivation.
+  if (staff.approval_status === 'pending') return res.status(403).json({ error: { code: 'pending_approval', message: 'Your account is waiting for an administrator to approve it.' } });
+  if (staff.approval_status === 'rejected') return res.status(403).json({ error: { code: 'access_rejected', message: 'Your access request wasn’t approved.' } });
+  if (!staff.active) return res.status(401).json({ error: { code: 'invalid_login', message: "That email and code don't match." } });
+  await createSession(res, staff.id, req.get('user-agent'), 'code');
+  await db().query('UPDATE staff SET last_login_at = now() WHERE id = $1', [staff.id]);
+  req.user = { id: staff.id, name: staff.name, email: staff.email, role: staff.role, permissions: [] };
+  await logAction(req, 'auth.login_code', 'staff', staff.id);
+  res.json({ ok: true });
+}));
+
+/** Someone's code just locked after repeated wrong tries: tell the Admins (in the app). */
+async function alertAdminsLocked(staffId: string, name: string) {
+  const admins = await db().query<{ id: string }>("SELECT id FROM staff WHERE role = 'admin' AND active AND approval_status = 'approved'");
+  for (const a of admins) {
+    await db().query('INSERT INTO notifications(staff_id, kind, title, body, link) VALUES ($1,$2,$3,$4,$5)',
+      [a.id, 'code_locked', `Code sign-in locked for ${name}`, 'Several wrong codes were tried for this account. If it wasn’t them, reset or revoke their code.', `/settings?tab=users&open=${staffId}`]);
+  }
+}
 
 authRouter.post('/logout', ah(async (req, res) => {
   await destroySession(req, res);
@@ -52,6 +101,19 @@ authRouter.post('/logout', ah(async (req, res) => {
 }));
 
 authRouter.get('/me', requireAuth, (req, res) => res.json({ user: req.user }));
+
+/** Re-enter your password before sensitive changes (integration credentials). Covers the next few minutes. */
+authRouter.post('/confirm-password', requireAuth, loginLimiter, ah(async (req, res) => {
+  const { password } = parse(z.object({ password: z.string().min(1).max(200) }), req.body);
+  const row = await db().one<{ password_hash: string | null }>('SELECT password_hash FROM staff WHERE id = $1', [req.user!.id]);
+  if (!row?.password_hash || !(await bcrypt.compare(password, row.password_hash))) {
+    await logAction(req, 'auth.reauth_failed', 'staff', req.user!.id);
+    return res.status(400).json({ error: { code: 'invalid_password', message: 'That password isn’t right.' } });
+  }
+  await markReauthenticated(req);
+  await logAction(req, 'auth.reauth', 'staff', req.user!.id);
+  res.json({ ok: true, minutes: REAUTH_MINUTES });
+}));
 
 // ---------- Password recovery ----------
 const tooMany = { error: { code: 'rate_limited', message: 'Too many requests. Please wait a few minutes.' } };
@@ -61,7 +123,9 @@ const forgotPerEmail = rateLimit({ windowMs: 15 * 60_000, limit: 3, standardHead
 const forgotPerIp = rateLimit({ windowMs: 15 * 60_000, limit: 30, standardHeaders: true, legacyHeaders: false, message: tooMany });
 // Link checks and password sets: only failed attempts count, which stops anyone guessing links.
 const resetLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 10, skipSuccessfulRequests: true, standardHeaders: true, legacyHeaders: false, message: tooMany });
+// bcrypt only uses the first 72 bytes, so longer passwords are refused rather than silently shortened.
 const strongPassword = z.string().min(10, 'must be at least 10 characters').max(200)
+  .refine((p) => Buffer.byteLength(p, 'utf8') <= 72, 'must be 72 characters or fewer (fewer with emoji or accents)')
   .refine((p) => /[a-zA-Z]/.test(p) && /[^a-zA-Z]/.test(p), 'needs letters and at least one number or symbol');
 
 /** Always answers the same way, so it can't be used to find out who has an account. */
@@ -90,6 +154,24 @@ authRouter.post('/request-access', requestLimiter, ah(async (req, res) => {
   const r = await requestAccess(b);
   if (r.created) await audit(r.id!, 'auth.access_requested', 'staff', r.id!, undefined, req.ip);
   res.json({ ok: true, message: 'Request sent. An administrator needs to approve it before you can sign in. You can try signing in later with the password you just chose.' });
+}));
+
+/** Change your own password (current one required). Signs you out on every other device. */
+authRouter.post('/change-password', requireAuth, loginLimiter, ah(async (req, res) => {
+  const b = parse(z.object({ current: z.string().min(1).max(200), password: strongPassword }), req.body);
+  const row = await db().one<{ password_hash: string | null }>('SELECT password_hash FROM staff WHERE id = $1', [req.user!.id]);
+  if (!row?.password_hash || !(await bcrypt.compare(b.current, row.password_hash))) {
+    await logAction(req, 'auth.password_change_failed', 'staff', req.user!.id);
+    return res.status(400).json({ error: { code: 'invalid_password', message: 'Your current password isn’t right.' } });
+  }
+  const token = req.cookies?.addendum_session as string | undefined;
+  await db().tx(async (q) => {
+    await q.query('UPDATE staff SET password_hash = $2, updated_at = now() WHERE id = $1', [req.user!.id, await bcrypt.hash(b.password, 12)]);
+    await q.query('DELETE FROM sessions WHERE staff_id = $1 AND id <> $2', [req.user!.id, token ? sha256(token) : '']);
+    await q.query('UPDATE password_reset_tokens SET used_at = now() WHERE staff_id = $1 AND used_at IS NULL', [req.user!.id]);
+  });
+  await logAction(req, 'auth.password_changed', 'staff', req.user!.id);
+  res.json({ ok: true });
 }));
 
 authRouter.get('/reset/:token', resetLimiter, ah(async (req, res) => {

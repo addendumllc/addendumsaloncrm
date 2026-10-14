@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, CheckCircle2, CircleDashed, Eye, EyeOff, KeyRound, Lock, PlugZap, Trash2, XCircle } from 'lucide-react';
-import { api } from '../../api/client';
+import { AlertTriangle, CheckCircle2, CircleDashed, Eye, EyeOff, History, KeyRound, Lock, PlugZap, Power, PowerOff, Trash2, XCircle } from 'lucide-react';
+import { api, ApiError } from '../../api/client';
+import { useReauth } from '../../components/domain/Reauth';
 import { relative } from '../../lib/format';
 import { Badge, Button, Modal, Spinner, cx, useToast } from '../../components/ui';
 import { Card } from './shared';
@@ -11,7 +12,7 @@ interface CredField {
   options: string[] | null; set: boolean; source: 'saved' | 'environment' | 'none'; value: string | null;
 }
 interface Integration {
-  provider: string; label: string; requirement: string; status: 'connected' | 'not_configured' | 'error' | 'untested'; missing: string[];
+  provider: string; label: string; requirement: string; status: 'connected' | 'not_configured' | 'error' | 'untested' | 'disabled'; disabled: boolean; missing: string[];
   unreadable: boolean; lastTestAt: string | null; lastTestOk: boolean | null; lastTestMessage: string | null; lastSuccessAt: string | null;
   updatedAt: string | null; fields: CredField[]; usedFor: string[];
 }
@@ -21,6 +22,7 @@ const STATUS: Record<Integration['status'], { label: string; tone: 'sage' | 'neu
   untested: { label: 'Saved — not tested yet', tone: 'amber', icon: CircleDashed },
   error: { label: 'Connection error', tone: 'rose', icon: XCircle },
   not_configured: { label: 'Not configured', tone: 'neutral', icon: CircleDashed },
+  disabled: { label: 'Turned off', tone: 'neutral', icon: PowerOff },
 };
 
 /**
@@ -37,7 +39,37 @@ export function CredentialsSettings() {
         <p>Keys and secrets are stored encrypted on the salon’s server. After saving, secrets are never shown again — not here, not in the browser, not in logs. To change one, type the new value. Values set in the server’s environment file are used unless you save one here.{data.demoMode && ' Demo Mode is on: the CRM uses demo data, but Test connection always checks the real service.'}</p>
       </div>
       {data.integrations.map((i) => <IntegrationCard key={i.provider} integration={i} />)}
+      <ChangeHistory integrations={data.integrations} />
     </div>
+  );
+}
+
+const ACTION: Record<string, string> = {
+  'credentials.update': 'changed', 'credentials.update_rejected': 'tried to change (test failed — kept the working settings)',
+  'credentials.remove': 'removed all saved keys for', 'credentials.disable': 'turned off', 'credentials.enable': 'turned on',
+  'credentials.test': 'tested', 'integration.square_connected': 'connected', 'integration.square_disconnected': 'disconnected',
+};
+
+/** Who changed which integration, and when — names of fields only, never values. */
+function ChangeHistory({ integrations }: { integrations: Integration[] }) {
+  const { data } = useQuery({ queryKey: ['credentials-history'], queryFn: () => api.get<{ history: { action: string; provider: string | null; fields: string[]; at: string; by: string | null }[] }>('/admin/credentials/history').then((r) => r.history) });
+  const rows = (data ?? []).filter((h) => h.action !== 'credentials.test').slice(0, 20);
+  const labelOf = (p: string | null) => integrations.find((i) => i.provider === p)?.label ?? (p ? p : 'Square');
+  const fieldLabel = (p: string | null, k: string) => integrations.find((i) => i.provider === p)?.fields.find((f) => f.key === k)?.label ?? k;
+  return (
+    <Card title={<span className="flex items-center gap-2"><History className="h-5 w-5 text-stone" />Recent changes</span>} description="Who changed which keys, and when. Values are never recorded.">
+      {!rows.length ? <p className="text-[14px] text-stone">No changes yet.</p> : (
+        <ul className="divide-y divide-line text-[14px]">
+          {rows.map((h, n) => (
+            <li key={n} className="py-2">
+              <span className="text-ink">{h.by ?? 'Someone'}</span> <span className="text-ink-soft">{ACTION[h.action] ?? h.action}</span> <span className="text-ink">{labelOf(h.provider)}</span>
+              {h.fields.length > 0 && <span className="text-ink-soft">: {h.fields.map((k) => fieldLabel(h.provider, k)).join(', ')}</span>}
+              <span className="block text-[12px] text-stone">{relative(h.at)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   );
 }
 
@@ -49,26 +81,33 @@ function IntegrationCard({ integration: i }: { integration: Integration }) {
   const [reveal, setReveal] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [verifyFail, setVerifyFail] = useState<string | null>(null);
+  const reauth = useReauth();
   const st = STATUS[i.status];
   const dirty = Object.values(values).some((v) => v.trim() !== '') || clear.size > 0;
   const update = (next: Integration) => {
     qc.setQueryData<{ integrations: Integration[]; demoMode: boolean }>(['credentials'], (old) => old && { ...old, integrations: old.integrations.map((x) => (x.provider === next.provider ? next : x)) });
     qc.invalidateQueries({ queryKey: ['integrations'] });
+    qc.invalidateQueries({ queryKey: ['credentials-history'] });
   };
 
-  const save = async () => {
+  const save = async (skipVerify = false) => {
     setBusy('save');
+    setVerifyFail(null);
     try {
       const payload: Record<string, string | null> = {};
       for (const [k, v] of Object.entries(values)) if (v.trim() !== '') payload[k] = v.trim();
       for (const k of clear) payload[k] = null;
-      const r = await api.put<{ integration: Integration; changed: string[] }>(`/admin/credentials/${i.provider}`, { values: payload });
+      const r = await api.put<{ integration: Integration; changed: string[] }>(`/admin/credentials/${i.provider}`, { values: payload, skipVerify });
       update(r.integration);
       setValues({});
       setClear(new Set());
       // Confirm what changed by name only — never echo a value.
-      toast(r.changed.length ? `Saved: ${r.changed.map((k) => i.fields.find((f) => f.key === k)?.label ?? k).join(', ')}. Now test the connection.` : 'Nothing changed');
+      toast(r.changed.length ? `Saved: ${r.changed.map((k) => i.fields.find((f) => f.key === k)?.label ?? k).join(', ')}. ${i.status === 'connected' && !skipVerify ? 'Tested and working.' : 'Now test the connection.'}` : 'Nothing changed');
     } catch (e) {
+      if (reauth.handle(e, () => save(skipVerify))) return;
+      // The new values didn't work: the server kept the working ones. Offer to save anyway.
+      if (e instanceof ApiError && e.code === 'verification_failed') { setVerifyFail(e.message); return; }
       toast((e as Error).message, 'error');
     } finally {
       setBusy(null);
@@ -94,6 +133,20 @@ function IntegrationCard({ integration: i }: { integration: Integration }) {
       setConfirmRemove(false);
       toast(`${i.label} credentials removed`);
     } catch (e) {
+      if (reauth.handle(e, remove)) return;
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+  const toggle = async () => {
+    setBusy('toggle');
+    try {
+      const r = await api.post<{ integration: Integration }>(`/admin/credentials/${i.provider}/${i.disabled ? 'enable' : 'disable'}`);
+      update(r.integration);
+      toast(i.disabled ? `${i.label} turned on` : `${i.label} turned off — its keys are kept, but not used`);
+    } catch (e) {
+      if (reauth.handle(e, toggle)) return;
       toast((e as Error).message, 'error');
     } finally {
       setBusy(null);
@@ -113,11 +166,22 @@ function IntegrationCard({ integration: i }: { integration: Integration }) {
             {i.lastSuccessAt && !i.lastTestOk && <> · last worked {relative(i.lastSuccessAt)}</>}
           </span>
           {hasSaved && <Button variant="ghost" icon={<Trash2 className="h-4 w-4" />} onClick={() => setConfirmRemove(true)}>Remove</Button>}
-          <Button icon={<PlugZap className="h-4 w-4" />} onClick={test} loading={busy === 'test'} disabled={dirty || i.status === 'not_configured'}>Test connection</Button>
-          <Button variant="primary" onClick={save} loading={busy === 'save'} disabled={!dirty}>Save</Button>
+          {(i.disabled || i.status !== 'not_configured') && <Button variant="ghost" icon={i.disabled ? <Power className="h-4 w-4" /> : <PowerOff className="h-4 w-4" />} loading={busy === 'toggle'} onClick={toggle}>{i.disabled ? 'Turn on' : 'Turn off'}</Button>}
+          <Button icon={<PlugZap className="h-4 w-4" />} onClick={test} loading={busy === 'test'} disabled={dirty || i.status === 'not_configured' || i.disabled}>Test connection</Button>
+          <Button variant="primary" onClick={() => save()} loading={busy === 'save'} disabled={!dirty}>Save</Button>
         </>
       }
     >
+      {i.disabled && <p className="mb-3 rounded-lg bg-mist px-3 py-2 text-[13px] text-ink-soft">Turned off: the CRM doesn’t use {i.label} right now. Its keys are kept — turn it back on any time.</p>}
+      {verifyFail && (
+        <div className="mb-3 rounded-lg border border-rose/30 bg-rose/10 px-3 py-2 text-[13px] text-ink-soft" role="alert">
+          <p className="text-rose">{verifyFail}</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button size="sm" variant="ghost" onClick={() => { setVerifyFail(null); setValues({}); setClear(new Set()); }}>Keep the working settings</Button>
+            <Button size="sm" variant="danger" loading={busy === 'save'} onClick={() => save(true)}>Save anyway</Button>
+          </div>
+        </div>
+      )}
       {i.unreadable && (
         <p className="mb-3 flex items-start gap-2 rounded-lg bg-rose/10 px-3 py-2 text-[13px] text-rose"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />Saved credentials can’t be read — the server’s encryption key changed. Enter them again.</p>
       )}
@@ -179,6 +243,7 @@ function IntegrationCard({ integration: i }: { integration: Integration }) {
         })}
       </div>
 
+      {reauth.modal}
       {confirmRemove && (
         <Modal open onClose={() => setConfirmRemove(false)} title={`Remove ${i.label} credentials?`} footer={
           <><Button variant="ghost" onClick={() => setConfirmRemove(false)}>Cancel</Button><Button variant="danger" onClick={remove} loading={busy === 'remove'}>Remove</Button></>

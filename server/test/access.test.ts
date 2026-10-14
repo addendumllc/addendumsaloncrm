@@ -23,13 +23,14 @@ async function browser(email: string, ip: string, ua = DESKTOP) {
     patch: (url: string, body: object) => h(agent.patch(url)).send(body),
   };
 }
-const restrict = (patch: object = {}) => updateSettings({ access: { allowAnywhere: false, salonIps: [SALON], restrictMobile: false, ...patch } });
+const OFFICE = '198.51.100.200';
+const restrict = (patch: object = {}) => updateSettings({ access: { allowAnywhere: false, networks: [{ name: 'Salon', ip: SALON }], salonIps: [], restrictMobile: false, ...patch } });
 
 beforeAll(async () => {
   ({ app, api: admin } = await setup());
 });
 afterEach(async () => {
-  await updateSettings({ access: { allowAnywhere: false, salonIps: [], restrictMobile: false } });
+  await updateSettings({ access: { allowAnywhere: false, networks: [], salonIps: [], restrictMobile: false } });
 });
 
 describe('Location & Access (salon network)', () => {
@@ -56,6 +57,22 @@ describe('Location & Access (salon network)', () => {
     const jen = await browser('jennifer@addendumsalon.com', SALON);
     expect((await jen.get('/api/admin/users')).status).toBe(403);
     expect((await jen.get('/api/analytics')).status).toBe(403);
+  });
+
+  it('an office network works like the salon, and shows which network you’re on', async () => {
+    await restrict({ networks: [{ name: 'Salon', ip: SALON }, { name: 'Office', ip: OFFICE }] });
+    const office = await browser('frontdesk@addendumsalon.com', OFFICE);
+    expect((await office.get('/api/clients')).status).toBe(200);
+    expect((await office.get('/api/access/status')).body.status).toMatchObject({ onSalonNetwork: true, networkName: 'Office', restricted: false });
+    const home = await browser('frontdesk@addendumsalon.com', '192.0.2.44');
+    expect((await home.get('/api/clients')).status).toBe(403);
+  });
+
+  it('IPs saved by the earlier version still count (as “Salon”)', async () => {
+    await updateSettings({ access: { allowAnywhere: false, networks: [], salonIps: [SALON], restrictMobile: false } });
+    const atSalon = await browser('frontdesk@addendumsalon.com', SALON);
+    expect((await atSalon.get('/api/access/status')).body.status).toMatchObject({ networkName: 'Salon', restricted: false });
+    expect((await (await browser('frontdesk@addendumsalon.com', '192.0.2.44')).get('/api/clients')).status).toBe(403);
   });
 
   it('phones keep working off-site (unless phones are restricted too)', async () => {
@@ -86,12 +103,13 @@ describe('Location & Access (salon network)', () => {
 
   it('only an Owner/Admin changes it, with their password; the server switch recovers a lock-out', async () => {
     const owner = await browser('owner@addendumsalon.com', SALON);
-    const body = { allowAnywhere: false, salonIps: [SALON, '2001:db8::1'], password: 'addendum-demo' };
+    const body = { allowAnywhere: false, networks: [{ name: 'Salon', ip: SALON }, { name: 'Salon (IPv6)', ip: '2001:db8::1' }], password: 'addendum-demo' };
     expect((await owner.put('/api/access', { ...body, password: 'wrong' })).status).toBe(400);
-    expect((await owner.put('/api/access', { ...body, salonIps: ['not-an-ip'] })).status).toBe(400);
+    expect((await owner.put('/api/access', { ...body, networks: [{ name: 'Office', ip: 'not-an-ip' }] })).status).toBe(400);
+    expect((await owner.put('/api/access', { ...body, networks: [{ name: 'A', ip: SALON }, { name: 'B', ip: SALON }] })).status).toBe(400);
     const ok = await owner.put('/api/access', body);
     expect(ok.status).toBe(200);
-    expect(ok.body.access.salonIps).toEqual([SALON, '2001:db8::1']);
+    expect(ok.body.access.networks.map((n: any) => n.ip)).toEqual([SALON, '2001:db8::1']);
     expect(ok.body.status).toMatchObject({ onSalonNetwork: true, restricted: false });
 
     // Front desk with "edit business settings" granted still isn't an Owner/Admin.

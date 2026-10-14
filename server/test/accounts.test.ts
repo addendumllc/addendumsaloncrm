@@ -152,3 +152,19 @@ describe('Custom role templates', () => {
     expect((await admin.post('/api/admin/roles', { label: 'Office Admin', copyFrom: 'admin', confirm: true })).status).toBe(201);
   });
 });
+
+describe('Changing your own password', () => {
+  it('needs the current password, signs other devices out, and the new one works', async () => {
+    const r = await admin.post('/api/admin/users', { name: 'Cara Change', email: 'cara@addendumsalon.com', approveNow: true });
+    await anon().post('/api/auth/reset', { token: tokenFrom(r.body.setupLink), password: 'First-pass-2026' });
+    const phone = await login('cara@addendumsalon.com', 'First-pass-2026');
+    const laptop = await login('cara@addendumsalon.com', 'First-pass-2026');
+    expect((await laptop.post('/api/auth/change-password', { current: 'wrong-one-123', password: 'Second-pass-2026' })).status).toBe(400);
+    expect((await laptop.post('/api/auth/change-password', { current: 'First-pass-2026', password: 'short' })).status).toBe(400);
+    expect((await laptop.post('/api/auth/change-password', { current: 'First-pass-2026', password: 'Second-pass-2026' })).status).toBe(200);
+    expect((await laptop.get('/api/auth/me')).status).toBe(200); // this device stays signed in
+    expect((await phone.get('/api/auth/me')).status).toBe(401); // others are signed out
+    expect((await login('cara@addendumsalon.com', 'First-pass-2026')).status).toBe(401);
+    expect((await login('cara@addendumsalon.com', 'Second-pass-2026')).status).toBe(200);
+  });
+});

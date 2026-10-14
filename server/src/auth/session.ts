@@ -17,11 +17,12 @@ declare global {
   }
 }
 
-export async function createSession(res: Response, staffId: string, userAgent?: string) {
+export async function createSession(res: Response, staffId: string, userAgent?: string, method: 'password' | 'code' = 'password') {
   const token = randomToken(32);
+  await db().query('DELETE FROM sessions WHERE staff_id = $1 AND expires_at < now()', [staffId]);
   const days = config().SESSION_DAYS;
-  await db().query('INSERT INTO sessions(id, staff_id, expires_at, user_agent) VALUES ($1,$2,$3,$4)', [
-    sha256(token), staffId, new Date(Date.now() + days * 86400_000), userAgent?.slice(0, 200) ?? null,
+  await db().query('INSERT INTO sessions(id, staff_id, expires_at, user_agent, auth_method) VALUES ($1,$2,$3,$4,$5)', [
+    sha256(token), staffId, new Date(Date.now() + days * 86400_000), userAgent?.slice(0, 200) ?? null, method,
   ]);
   res.cookie(SESSION_COOKIE, token, cookieOptions(days * 86400_000));
 }
@@ -44,13 +45,13 @@ export async function destroySession(req: Request, res: Response) {
   res.clearCookie(SESSION_COOKIE, cookieOptions());
 }
 
-export async function loadUser(req: Request, _res: Response, next: NextFunction) {
+export async function loadUser(req: Request, res: Response, next: NextFunction) {
   try {
     const token = req.cookies?.[SESSION_COOKIE];
     if (token) {
       // Permissions are read fresh on every request, so role or permission changes apply immediately.
       const row = await db().one<any>(
-        `SELECT s.id, s.name, s.email, s.role, s.calendar_staff_ids,
+        `SELECT s.id, s.name, s.email, s.role, s.calendar_staff_ids, x.expires_at,
                 ARRAY(SELECT permission FROM role_permissions rp WHERE rp.role = s.role) AS role_perms,
                 COALESCE((SELECT json_agg(json_build_object('permission', o.permission, 'granted', o.granted))
                             FROM staff_permission_overrides o WHERE o.staff_id = s.id), '[]'::json) AS overrides
@@ -60,6 +61,12 @@ export async function loadUser(req: Request, _res: Response, next: NextFunction)
       );
       if (row) {
         const overrides = typeof row.overrides === 'string' ? JSON.parse(row.overrides) : row.overrides;
+        // Sliding sessions: someone who keeps using the app stays signed in (renewed at most once a day).
+        const days = config().SESSION_DAYS;
+        if (new Date(row.expires_at).getTime() - Date.now() < (days - 1) * 86400_000) {
+          await db().query('UPDATE sessions SET expires_at = $2 WHERE id = $1', [sha256(token), new Date(Date.now() + days * 86400_000)]);
+          res.cookie(SESSION_COOKIE, token, cookieOptions(days * 86400_000));
+        }
         req.user = {
           id: row.id, name: row.name, email: row.email, role: row.role as Role, permissions: computeEffective(row.role_perms ?? [], overrides),
           calendarStaffIds: row.calendar_staff_ids ?? null,

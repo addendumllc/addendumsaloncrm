@@ -1,6 +1,6 @@
 import net from 'node:net';
 import type { NextFunction, Request, Response } from 'express';
-import type { AccessStatusDTO, CurrentUser } from '@addendum/shared';
+import { approvedNetworks, type AccessStatusDTO, type CurrentUser } from '@addendum/shared';
 import { config } from '../config.js';
 import { getSettings } from '../repos/settings.js';
 import { can } from './permissions.js';
@@ -35,14 +35,16 @@ export async function accessStatus(req: Request): Promise<AccessStatusDTO> {
   const s = (await getSettings()).access;
   const ip = normalizeIp(req.ip);
   const mobile = isMobileRequest(req);
-  const configured = s.salonIps.length > 0;
+  const networks = approvedNetworks(s);
+  const configured = networks.length > 0;
   const overridden = config().ACCESS_ALLOW_ANYWHERE;
-  const onSalonNetwork = s.salonIps.some((x) => normalizeIp(x) === ip);
+  const here = networks.find((n) => normalizeIp(n.ip) === ip) ?? null;
+  const onSalonNetwork = !!here;
   const restricted = !overridden && !s.allowAnywhere && configured && !onSalonNetwork && (!mobile || s.restrictMobile);
   const canManage = canManageAccess(req.user);
   return {
-    ip, mobile, onSalonNetwork, allowAnywhere: s.allowAnywhere, configured, overridden, restricted, canManage,
-    ...(canManage ? { salonIps: s.salonIps, restrictMobile: s.restrictMobile } : {}),
+    ip, mobile, onSalonNetwork, networkName: here?.name ?? null, allowAnywhere: s.allowAnywhere, configured, overridden, restricted, canManage,
+    ...(canManage ? { networks, restrictMobile: s.restrictMobile } : {}),
   };
 }
 
@@ -58,7 +60,7 @@ export async function networkGate(req: Request, res: Response, next: NextFunctio
   try {
     if (!req.user || OPEN.some((o) => (o.method === '*' || o.method === req.method) && o.path.test(req.path))) return next();
     if (!(await accessStatus(req)).restricted) return next();
-    res.status(403).json({ error: { code: 'network_restricted', message: 'The CRM on a computer only works on the salon’s internet connection. Connect to the salon network, or ask an Admin to turn on “Allow Access Anywhere”.' } });
+    res.status(403).json({ error: { code: 'network_restricted', message: 'The CRM on a computer only works on an approved network (the salon or office). Connect to one, or ask an Admin to turn on “Allow Access Anywhere”.' } });
   } catch (e) {
     next(e);
   }

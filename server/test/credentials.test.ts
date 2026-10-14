@@ -9,6 +9,8 @@ let api: Awaited<ReturnType<typeof setup>>['api'];
 let app: Awaited<ReturnType<typeof setup>>['app'];
 beforeAll(async () => {
   ({ api, app } = await setup());
+  // Changing credentials needs the Owner to have confirmed their password recently.
+  expect((await api.post('/api/auth/confirm-password', { password: 'addendum-demo' })).status).toBe(200);
 });
 
 const SECRET = 'shpss_TEST-very-secret-value-123456';
@@ -87,6 +89,10 @@ describe('Settings → API & Integrations', () => {
 
   it('removes saved credentials', async () => {
     const agent = await as('owner@addendumsalon.com');
+    // A fresh session hasn't confirmed the password yet: refused until it does.
+    const first = await agent.delete('/api/admin/credentials/shopify').set('X-Requested-With', 'addendum-crm');
+    expect([first.status, first.body.error.code]).toEqual([403, 'reauth_required']);
+    expect((await agent.post('/api/auth/confirm-password').set('X-Requested-With', 'addendum-crm').send({ password: 'addendum-demo' })).status).toBe(200);
     const del = await agent.delete('/api/admin/credentials/shopify').set('X-Requested-With', 'addendum-crm');
     expect(del.status).toBe(200);
     expect(del.body.integration.status).toBe('not_configured');

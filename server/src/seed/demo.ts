@@ -5,7 +5,8 @@ import { db } from '../db/index.js';
 import { saveDemoHL, loadDemoHL } from '../integrations/highlevel/MockHighLevelService.js';
 import { demoSquareSimulator, saveDemoSquare, type DemoSquareState } from '../integrations/square/MockSquareService.js';
 import type { SquareBooking, SquareCustomer } from '../integrations/square/types.js';
-import { clearSettingsCache, setKV, updateSettings } from '../repos/settings.js';
+import { clearSettingsCache, getKV, setKV, updateSettings } from '../repos/settings.js';
+import { badRequest } from '../lib/errors.js';
 import { setClientTags } from '../repos/clients.js';
 import { DAY, zonedToUtc } from '../lib/time.js';
 import { handleInboundSms } from '../domain/messaging.js';
@@ -190,8 +191,21 @@ export async function wipeAll() {
   clearSettingsCache();
 }
 
+/**
+ * Demo data replaces everything, so it only ever runs on an empty database or one it created itself — never on a
+ * database with real accounts (e.g. when DEMO_MODE was left on by mistake).
+ */
+export async function assertDemoDatabase() {
+  const staff = (await db().one<{ n: number }>('SELECT count(*)::int AS n FROM staff'))!.n;
+  if (staff && !(await getKV('demo.seeded'))) {
+    throw badRequest('This database has real accounts, so demo data won’t replace it. Turn Demo Mode off (DEMO_MODE=false).');
+  }
+}
+
 export async function seedDemo(now = new Date()) {
+  await assertDemoDatabase();
   await wipeAll();
+  await setKV('demo.seeded', { at: now.toISOString() });
   const hash = await bcrypt.hash(config().OWNER_PASSWORD || DEMO_PASSWORD, 10);
   const staffIds: Record<string, string> = {};
   for (const s of STAFF) {

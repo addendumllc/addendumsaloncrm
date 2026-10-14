@@ -39,9 +39,9 @@ export function NetworkBlocked({ status }: { status: AccessStatusDTO }) {
         <BrandMark a={a} size="login" />
         <div className="panel mt-8 p-6 text-left shadow-lift">
           <span className="flex h-11 w-11 items-center justify-center rounded-full bg-amber-tint text-amber"><Wifi className="h-5 w-5" /></span>
-          <h1 className="h-display mt-3 text-[26px] leading-tight">Connect to the salon network</h1>
+          <h1 className="h-display mt-3 text-[26px] leading-tight">Connect to the salon or office network</h1>
           <p className="mt-2 text-[15px] text-ink-soft">
-            On a computer, the CRM works on the salon’s internet connection. Connect this computer to the salon Wi-Fi or network, then check again.
+            On a computer, the CRM works on the salon’s or office’s internet connection. Connect this computer to one of those networks, then check again.
           </p>
           <p className="mt-2 text-[14px] text-stone">Working away from the salon? Ask an Owner or Admin to turn on <b className="font-medium text-ink-soft">Allow Access Anywhere</b> in Settings → Location & Access. Your phone keeps working as usual.</p>
           <p className="mt-3 text-[12px] text-stone">This connection: <span className="font-mono">{status.ip || 'unknown'}</span></p>

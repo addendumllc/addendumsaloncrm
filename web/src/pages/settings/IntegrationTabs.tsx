@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { HIGHLEVEL_AUTOMATION_LABELS, type HighLevelAutomationKey } from '@addendum/shared';
 import { RefreshCw, Link2, Unplug, Send, ShieldCheck } from 'lucide-react';
 import { api } from '../../api/client';
+import { useReauth } from '../../components/domain/Reauth';
 import { useIntegrations, useRefreshAll, useStaff } from '../../api/hooks';
 import { dateTime, phone as fmtPhone, relative } from '../../lib/format';
 import { Badge, Button, Field, Modal, Toggle, useToast } from '../../components/ui';
@@ -53,6 +54,7 @@ export function SquareSettings({ compact }: { compact?: boolean }) {
       setBusy(null);
     }
   };
+  const reauth = useReauth();
   const connect = async () => {
     setBusy('connect');
     try {
@@ -63,8 +65,9 @@ export function SquareSettings({ compact }: { compact?: boolean }) {
         setBusy(null);
       } else window.location.href = url;
     } catch (e) {
-      toast((e as Error).message, 'error');
       setBusy(null);
+      if (reauth.handle(e, connect)) return;
+      toast((e as Error).message, 'error');
     }
   };
   const disconnect = async () => {
@@ -75,6 +78,7 @@ export function SquareSettings({ compact }: { compact?: boolean }) {
       qc.invalidateQueries({ queryKey: ['integrations'] });
       setConfirmOff(false);
     } catch (e) {
+      if (reauth.handle(e, disconnect)) return;
       toast((e as Error).message, 'error');
     } finally {
       setBusy(null);
@@ -130,6 +134,7 @@ export function SquareSettings({ compact }: { compact?: boolean }) {
       <Modal open={confirmOff} onClose={() => setConfirmOff(false)} title="Disconnect Square?" footer={<><Button variant="ghost" onClick={() => setConfirmOff(false)}>Keep connected</Button><Button variant="danger" loading={busy === 'off'} onClick={disconnect}>Disconnect</Button></>}>
         <p className="text-sm text-ink-soft">New bookings, cancellations and changes will stop coming in. Appointments already imported stay in the app, and you can reconnect any time.</p>
       </Modal>
+      {reauth.modal}
     </Card>
   );
 }

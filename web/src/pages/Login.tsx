@@ -6,11 +6,13 @@ import { api } from '../api/client';
 import { applyAppearance } from '../lib/theme';
 import { BrandMark } from '../components/layout/Brand';
 import { DEFAULT_APPEARANCE, type Appearance } from '@addendum/shared';
-import { Button, Field } from '../components/ui';
+import { Button, Field, Segmented } from '../components/ui';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mode, setMode] = useState<'password' | 'code'>('password');
+  const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [cookiesBlocked, setCookiesBlocked] = useState(false);
@@ -26,7 +28,8 @@ export function LoginPage() {
     setBusy(true);
     setError(null);
     try {
-      await api.post('/auth/login', { email, password });
+      if (mode === 'code') await api.post('/auth/login-code', { email, code });
+      else await api.post('/auth/login', { email, password });
       // Some browsers block sign-in cookies inside a website embed (third-party cookies).
       const ok = await api.get('/auth/me').then(() => true, () => false);
       if (!ok) {
@@ -47,8 +50,15 @@ export function LoginPage() {
         <BrandMark a={{ ...DEFAULT_APPEARANCE, ...(cfg?.appearance ?? {}) }} size="login" />
         <p className="mt-2 text-center text-[15px] text-stone">Sign in to the salon command center</p>
         <form onSubmit={submit} className="panel mt-8 space-y-4 p-6 shadow-lift">
+          <Segmented className="w-full" value={mode} onChange={(v) => { setMode(v); setError(null); }} options={[{ value: 'password', label: 'Password' }, { value: 'code', label: 'Sign-in code' }]} />
           <Field label="Email"><input className="field" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></Field>
-          <Field label="Password"><input className="field" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>
+          {mode === 'password' ? (
+            <Field label="Password"><input className="field" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>
+          ) : (
+            <Field label="Sign-in code" hint="The code your salon owner gave you. It’s your CRM code — not a Square passcode.">
+              <input className="field tracking-widest" type="password" name="crm-sign-in-code" autoComplete="off" value={code} onChange={(e) => setCode(e.target.value)} required maxLength={64} />
+            </Field>
+          )}
           {error && <p className="text-sm text-rose" role="alert">{error}</p>}
           {cookiesBlocked && (
             <div className="rounded-lg bg-amber-tint px-3 py-2 text-sm text-amber" role="alert">

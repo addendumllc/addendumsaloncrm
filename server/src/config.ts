@@ -21,6 +21,13 @@ const schema = z.object({
   PGLITE_DIR: z.string().default('./data/pglite'),
   /** 32+ char secret used to encrypt stored OAuth tokens. Required in production. */
   ENCRYPTION_KEY: z.string().optional(),
+  /** Only while rotating the key: the old ENCRYPTION_KEY, so saved secrets can be re-encrypted with the new one. */
+  ENCRYPTION_KEY_PREVIOUS: z.string().optional(),
+  /**
+   * Account recovery when nobody can sign in (hosts without a command line): a new password for OWNER_EMAIL, applied
+   * once at start-up. Remove it again afterwards.
+   */
+  OWNER_RECOVERY_PASSWORD: z.string().optional(),
   DEMO_MODE: bool(true),
   /** Comma-separated origins allowed to embed the app in an iframe, e.g. https://addendumsalon.com */
   ALLOWED_EMBED_ORIGINS: z.string().default(''),
@@ -96,13 +103,16 @@ let cached: Config | null = null;
 /** The raw environment the config was built from, and credentials saved in Settings → API & Integrations. */
 let envRaw: Record<string, string | undefined> = {};
 let overlay: Record<string, string> = {};
+/** Settings of switched-off integrations: ignored even when they're in the environment. */
+let blocked = new Set<string>();
 
 /** Keys that can never be overridden from the admin screen (they protect the store itself or the server). */
-const NOT_OVERLAYABLE = new Set(['ENCRYPTION_KEY', 'DATABASE_URL', 'NODE_ENV', 'DEMO_MODE', 'OWNER_PASSWORD', 'OWNER_EMAIL', 'APP_URL', 'PORT']);
+const NOT_OVERLAYABLE = new Set(['ENCRYPTION_KEY', 'ENCRYPTION_KEY_PREVIOUS', 'OWNER_RECOVERY_PASSWORD', 'PGLITE_DIR', 'DATABASE_URL', 'NODE_ENV', 'DEMO_MODE', 'OWNER_PASSWORD', 'OWNER_EMAIL', 'APP_URL', 'PORT']);
 
 function build(env: Record<string, string | undefined>) {
   const merged: Record<string, string | undefined> = { ...env };
   for (const [k, v] of Object.entries(overlay)) if (!NOT_OVERLAYABLE.has(k) && v !== '') merged[k] = v;
+  for (const k of blocked) if (!NOT_OVERLAYABLE.has(k)) delete merged[k];
   return schema.parse(merged);
 }
 
@@ -125,8 +135,9 @@ export function loadConfig(overrides: Partial<Record<keyof Config, string>> = {}
 }
 
 /** Applies credentials saved in the admin screen on top of the environment (saved values win). */
-export function setConfigOverlay(values: Record<string, string>) {
+export function setConfigOverlay(values: Record<string, string>, blockedKeys: string[] = []) {
   overlay = { ...values };
+  blocked = new Set(blockedKeys);
   cached = build(envRaw);
 }
 

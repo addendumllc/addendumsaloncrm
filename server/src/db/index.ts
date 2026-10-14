@@ -17,6 +17,8 @@ export interface Db extends Queryable {
   tx<T>(fn: (q: Queryable) => Promise<T>): Promise<T>;
   close(): Promise<void>;
   kind: 'postgres' | 'pglite';
+  /** Embedded database only: a compressed copy of the whole database (used for backups before updates). */
+  dump?: () => Promise<Blob>;
 }
 
 let instance: Db | null = null;
@@ -86,10 +88,11 @@ export async function createDb(opts: { databaseUrl?: string; pgliteDir?: string 
       return run as any;
     },
     close: () => pglite.close(),
+    dump: async () => (await pglite.dumpDataDir('gzip')) as Blob,
   };
 }
 
-function migrationsDir() {
+export function migrationsDir() {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [path.join(here, 'migrations'), path.join(here, 'db', 'migrations'), path.join(here, '..', 'src', 'db', 'migrations')];
   const found = candidates.find((c) => fs.existsSync(c));
@@ -97,21 +100,56 @@ function migrationsDir() {
   return found;
 }
 
-export async function migrate(d: Db) {
+/** A database update that couldn't be applied. It was rolled back: nothing from it was saved, and earlier data is untouched. */
+export class MigrationError extends Error {
+  constructor(public file: string, cause: unknown) {
+    super(`Database update ${file} failed and was rolled back. Nothing from it was applied and your existing data is unchanged. ` +
+      `Keep running the previous version of the app and report this message: ${(cause as Error)?.message ?? cause}`);
+  }
+}
+
+const listMigrations = (dir: string) => fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
+
+/** Updates this database still needs (in order). */
+export async function pendingMigrations(d: Db, dir = migrationsDir()) {
   await d.query(`CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
   const applied = new Set((await d.query<{ name: string }>('SELECT name FROM schema_migrations')).map((r) => r.name));
-  const dir = migrationsDir();
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.sql')).sort();
+  return listMigrations(dir).filter((f) => !applied.has(f));
+}
+
+/**
+ * Applies the numbered schema updates in order, each in its own transaction, and records them so none ever runs twice.
+ * Updates only add (tables, columns): existing rows — accounts, passwords, settings — are kept. Data is never reset.
+ *  - Several servers starting together wait for each other (a lock), and skip updates another one already applied.
+ *  - A failing update is rolled back completely and the start-up stops with MigrationError, so the host keeps the
+ *    previous version running.
+ *  - A database already updated by a newer version is left as it is (a warning only), so rolling back the app is safe.
+ */
+export async function migrate(d: Db, opts: { dir?: string } = {}) {
+  const dir = opts.dir ?? migrationsDir();
+  await d.query(`CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
+  const files = listMigrations(dir);
+  const appliedBefore = (await d.query<{ name: string }>('SELECT name FROM schema_migrations')).map((r) => r.name);
+  const unknown = appliedBefore.filter((n) => !files.includes(n));
+  if (unknown.length) console.warn(`[migrate] This database was updated by a newer version of the app (${unknown.join(', ')}). It's used as it is.`);
   for (const file of files) {
-    if (applied.has(file)) continue;
+    if (appliedBefore.includes(file)) continue;
     const sql = fs.readFileSync(path.join(dir, file), 'utf8');
-    await d.tx(async (q) => {
-      // Run statement by statement (pg's extended protocol accepts one statement per call).
-      for (const stmt of splitSql(sql)) await q.query(stmt);
-      await q.query('INSERT INTO schema_migrations(name) VALUES ($1)', [file]);
-    });
+    try {
+      await d.tx(async (q) => {
+        // One server at a time; re-check inside the lock in case another server applied it meanwhile.
+        if (d.kind === 'postgres') await q.query('SELECT pg_advisory_xact_lock(7428301)');
+        if ((await q.query('SELECT 1 FROM schema_migrations WHERE name = $1', [file])).length) return;
+        // Run statement by statement (pg's extended protocol accepts one statement per call).
+        for (const stmt of splitSql(sql)) await q.query(stmt);
+        await q.query('INSERT INTO schema_migrations(name) VALUES ($1)', [file]);
+      });
+    } catch (e) {
+      throw new MigrationError(file, e);
+    }
+    console.log(`[migrate] applied ${file}`);
   }
-  if (applied.has('009_permissions.sql') || files.includes('009_permissions.sql')) await syncRoleTemplates(d);
+  if (appliedBefore.includes('009_permissions.sql') || files.includes('009_permissions.sql')) await syncRoleTemplates(d);
 }
 
 /**

@@ -2,6 +2,7 @@ import { config, envHas, setConfigOverlay } from '../config.js';
 import { db } from '../db/index.js';
 import { decrypt, encrypt } from '../lib/crypto.js';
 import { badRequest } from '../lib/errors.js';
+import { setRedactedSecrets } from '../lib/redact.js';
 
 /**
  * Credentials entered by an administrator in Settings → API & Integrations.
@@ -100,9 +101,13 @@ interface Row {
   last_test_ok: boolean | null;
   last_test_message: string | null;
   last_success_at: Date | null;
+  disabled: boolean;
 }
 
 let unreadable = new Set<string>();
+let disabledProviders = new Set<CredentialProvider>();
+/** Switched off in Settings → API & Integrations: its credentials are kept but not used. */
+export const isProviderDisabled = (p: CredentialProvider) => disabledProviders.has(p);
 
 function decryptRow(r: Row): Record<string, string> {
   if (!r.encrypted_values) return {};
@@ -120,8 +125,18 @@ export async function loadSavedCredentials() {
   unreadable = new Set();
   const rows = await db().query<Row>('SELECT * FROM integration_credentials');
   const all: Record<string, string> = {};
-  for (const r of rows) Object.assign(all, decryptRow(r));
-  setConfigOverlay(all);
+  const blockedKeys: string[] = [];
+  disabledProviders = new Set();
+  for (const r of rows) {
+    if (r.disabled && isProvider(r.provider)) {
+      disabledProviders.add(r.provider);
+      blockedKeys.push(...CREDENTIAL_SPECS[r.provider].fields.map((f) => f.key));
+      continue;
+    }
+    Object.assign(all, decryptRow(r));
+  }
+  setConfigOverlay(all, blockedKeys);
+  setRedactedSecrets(secretValues(rows));
   onCredentialsChanged.forEach((fn) => fn());
 }
 
@@ -154,8 +169,9 @@ export async function credentialStatus(p: CredentialProvider) {
   const spec = CREDENTIAL_SPECS[p];
   const missing = missingRequirements(p);
   const changedSinceTest = !!(row?.last_test_at && row.updated_at > row.last_test_at);
-  const status: 'connected' | 'not_configured' | 'error' | 'untested' =
-    missing.length ? 'not_configured'
+  const status: 'connected' | 'not_configured' | 'error' | 'untested' | 'disabled' =
+    row?.disabled ? 'disabled'
+    : missing.length ? 'not_configured'
     : !row?.last_test_at || changedSinceTest ? 'untested'
     : row.last_test_ok ? 'connected' : 'error';
   return {
@@ -163,6 +179,7 @@ export async function credentialStatus(p: CredentialProvider) {
     label: spec.label,
     requirement: spec.requirement,
     status,
+    disabled: !!row?.disabled,
     missing,
     unreadable: unreadable.has(p),
     lastTestAt: row?.last_test_at?.toISOString() ?? null,
@@ -232,6 +249,51 @@ export async function removeCredentials(p: CredentialProvider) {
     [p],
   );
   await loadSavedCredentials();
+}
+
+/** Switch an integration off (credentials kept, not used) or back on. */
+export async function setProviderDisabled(p: CredentialProvider, disabled: boolean, staffId: string) {
+  await db().query(
+    `INSERT INTO integration_credentials(provider, disabled, updated_by_staff_id) VALUES ($1, $2, $3)
+     ON CONFLICT (provider) DO UPDATE SET disabled = $2, updated_by_staff_id = $3`,
+    [p, disabled, staffId],
+  );
+  await loadSavedCredentials();
+}
+
+/** The saved row exactly as it is (still encrypted), so a failed replacement can be put back untouched. */
+export async function snapshotCredentials(p: CredentialProvider) {
+  return getRow(p);
+}
+
+export async function restoreCredentials(p: CredentialProvider, before: Row | null) {
+  if (!before) {
+    await db().query('DELETE FROM integration_credentials WHERE provider = $1', [p]);
+  } else {
+    await db().query(
+      `UPDATE integration_credentials SET encrypted_values = $2, saved_keys = $3, updated_at = $4, last_test_at = $5, last_test_ok = $6,
+         last_test_message = $7, last_success_at = $8, disabled = $9 WHERE provider = $1`,
+      [p, before.encrypted_values, before.saved_keys, before.updated_at, before.last_test_at, before.last_test_ok, before.last_test_message, before.last_success_at, before.disabled],
+    );
+  }
+  unreadable.delete(p);
+  await loadSavedCredentials();
+}
+
+/** Every secret currently in use (saved or from the environment), so logs can be scrubbed of them. */
+function secretValues(rows: Row[]) {
+  const out: string[] = [];
+  for (const p of PROVIDERS) for (const f of CREDENTIAL_SPECS[p].fields) if (f.secret) { const v = effective(f.key); if (v) out.push(v); }
+  for (const r of rows) for (const v of Object.values(decryptQuiet(r))) if (v) out.push(v);
+  const c = config();
+  for (const v of [c.ENCRYPTION_KEY, c.ENCRYPTION_KEY_PREVIOUS, c.OWNER_PASSWORD, c.OWNER_RECOVERY_PASSWORD, c.DATABASE_URL]) if (v) out.push(v);
+  const dbPassword = c.DATABASE_URL?.match(/:\/\/[^:]+:([^@]+)@/)?.[1];
+  if (dbPassword) out.push(dbPassword);
+  return out;
+}
+function decryptQuiet(r: Row): Record<string, string> {
+  if (!r.encrypted_values) return {};
+  try { return JSON.parse(decrypt(r.encrypted_values)); } catch { return {}; }
 }
 
 export async function recordTest(p: CredentialProvider, ok: boolean, message: string) {

@@ -100,7 +100,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   inventory: { orderEmail: 'gaby@addendumhair.com', ccRequester: true, catalog: [] },
   appearance: { ...DEFAULT_APPEARANCE },
   accounts: { allowAccessRequests: true },
-  access: { allowAnywhere: false, salonIps: [], restrictMobile: false },
+  access: { allowAnywhere: false, networks: [], restrictMobile: false },
   onboardingComplete: false,
 };
 

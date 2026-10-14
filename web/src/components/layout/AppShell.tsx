@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
-  ArrowLeftRight, BarChart3, Bell, CalendarDays, CircleDollarSign, Package, CheckSquare, Home, ListTodo, LogOut, Menu as MenuIcon, MessageSquare, Plus, Settings, Sparkles, Users, Wallet, X,
+  ArrowLeftRight, BarChart3, Bell, CalendarDays, CircleDollarSign, Package, CheckSquare, Home, KeyRound, ListTodo, LogOut, Menu as MenuIcon, MessageSquare, Plus, Settings, Sparkles, Users, Wallet, X,
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
@@ -11,6 +11,8 @@ import { Menu, cx } from '../ui';
 import { useActions } from '../domain/ActionsProvider';
 import { BrandMark, useAppearance } from './Brand';
 import { GlobalSearch } from './GlobalSearch';
+import { ChangePasswordModal } from './ChangePassword';
+import { SystemBanner } from './SystemBanner';
 import { Notifications, useUpdates } from './Notifications';
 import { SETTINGS_PERMS } from '../../lib/access';
 
@@ -126,6 +128,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <span className="hidden text-white/80 sm:inline">Sample data from a simulated Square account — not live salon data.</span>
           </div>
         )}
+        <SystemBanner />
         {integ?.square.needsReconnect && (
           <button onClick={() => (can('settings:read') ? nav('/settings?tab=square') : undefined)} className="bg-rose px-4 py-1.5 text-center text-[13px] text-white">Square connection expired. Please reconnect. Your existing data is safe.</button>
         )}
@@ -171,10 +174,13 @@ export function Wordmark() {
 }
 
 export function SidebarFooter({ name, onSignOut }: { name?: string; onSignOut: () => void }) {
+  const [changing, setChanging] = useState(false);
   return (
-    <div className="mt-4 flex items-center justify-between border-t border-line px-3 pt-4 text-sm">
-      <span className="truncate text-ink-soft">{name}</span>
-      <button onClick={onSignOut} className="rounded p-1 text-stone hover:text-ink" title="Sign out" aria-label="Sign out"><LogOut className="h-4 w-4" /></button>
+    <div className="mt-4 flex items-center justify-between gap-1 border-t border-line px-3 pt-4 text-sm">
+      <span className="flex-1 truncate text-ink-soft">{name}</span>
+      <button onClick={() => setChanging(true)} className="rounded p-2 text-stone hover:text-ink lg:p-1" title="Change password" aria-label="Change password"><KeyRound className="h-4 w-4" /></button>
+      <button onClick={onSignOut} className="rounded p-2 text-stone hover:text-ink lg:p-1" title="Sign out" aria-label="Sign out"><LogOut className="h-4 w-4" /></button>
+      {changing && <ChangePasswordModal onClose={() => setChanging(false)} />}
     </div>
   );
 }

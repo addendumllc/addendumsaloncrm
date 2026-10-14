@@ -15,7 +15,7 @@ import { MockSquareService } from './square/MockSquareService.js';
 import { SquareApiService } from './square/SquareApiService.js';
 import type { SquareService } from './square/types.js';
 import { resetShopifyToken, ShopifyApiService } from './shopify/ShopifyApiService.js';
-import { onCredentialsChanged } from './credentials.js';
+import { isProviderDisabled, onCredentialsChanged } from './credentials.js';
 import { MockShopifyService, type ShopifyService } from './shopify/ShopifyService.js';
 
 /**
@@ -34,6 +34,7 @@ export function setIntegrationOverride(o: typeof overrides) {
 export async function squareService(): Promise<SquareService | null> {
   if ('square' in overrides) return overrides.square!;
   if (isDemo()) return new MockSquareService();
+  if (isProviderDisabled('square')) return null;
   const c = config();
   if (c.SQUARE_ACCESS_TOKEN) return new SquareApiService(getSquareAccessToken);
   const row = await getIntegration('square');

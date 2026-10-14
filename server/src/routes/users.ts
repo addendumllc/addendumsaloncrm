@@ -2,6 +2,9 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { badRequest, forbidden } from '../lib/errors.js';
 import { isApprover } from '../auth/permissions.js';
+import { requireOwnerReauth } from '../auth/reauth.js';
+import { db } from '../db/index.js';
+import { codeStatus, revokeCode, setCode, setCodeEnabled, setCodeLocation } from '../domain/loginCodes.js';
 import { requireAnyPermission, requirePermission } from '../auth/session.js';
 import {
   approveAccount,
@@ -126,6 +129,50 @@ usersRouter.put('/users/:id/calendars', requirePermission('users:permissions'), 
   const ids = await setCalendarAccess(req.user!, req.params.id, b.staffIds);
   await logAction(req, 'user.calendar_access', 'staff', req.params.id, { scope: ids === null ? 'everyone' : `${ids.length} team members` });
   res.json({ user: await getAccount(req.params.id) });
+}));
+
+// ---------- Custom sign-in codes (Owner/Admin + password confirmation; codes never logged) ----------
+const ownerReauth = requireOwnerReauth('users:manage');
+const codeOf = async (id: string) => ({ user: await getAccount(id), code: await codeStatus(id) });
+
+usersRouter.get('/users/:id/code', requirePermission('users:manage'), ah(async (req, res) => {
+  await getAccount(req.params.id);
+  res.json({ code: await codeStatus(req.params.id) });
+}));
+
+/** Square locations synced into the CRM, to assign people to. */
+usersRouter.get('/locations', requirePermission('users:manage'), ah(async (_req, res) => {
+  res.json({ locations: await db().query('SELECT square_location_id AS id, name FROM locations WHERE square_location_id IS NOT NULL ORDER BY name') });
+}));
+
+usersRouter.put('/users/:id/code', ownerReauth, ah(async (req, res) => {
+  const b = parse(z.object({ code: z.string().max(64).optional(), generate: z.boolean().default(false) }).refine((x) => x.generate || !!x.code, 'enter a code or choose Generate'), req.body);
+  await getAccount(req.params.id);
+  const generated = await setCode(req.user!.id, req.params.id, b);
+  await logAction(req, 'user.code_set', 'staff', req.params.id, { generated: b.generate }); // never the code
+  // A generated code is shown once, to the Owner who generated it; a typed one is never sent back.
+  res.json({ ...(await codeOf(req.params.id)), generatedCode: generated });
+}));
+
+usersRouter.post('/users/:id/code/:state(enable|disable)', ownerReauth, ah(async (req, res) => {
+  const on = req.params.state === 'enable';
+  await setCodeEnabled(req.user!.id, req.params.id, on);
+  await logAction(req, on ? 'user.code_enabled' : 'user.code_disabled', 'staff', req.params.id);
+  res.json(await codeOf(req.params.id));
+}));
+
+usersRouter.put('/users/:id/code/location', ownerReauth, ah(async (req, res) => {
+  const b = parse(z.object({ squareLocationId: z.string().trim().max(64).nullable() }), req.body);
+  await setCodeLocation(req.user!.id, req.params.id, b.squareLocationId || null);
+  await logAction(req, 'user.code_location', 'staff', req.params.id, { squareLocationId: b.squareLocationId });
+  res.json(await codeOf(req.params.id));
+}));
+
+usersRouter.delete('/users/:id/code', ownerReauth, ah(async (req, res) => {
+  await getAccount(req.params.id);
+  await revokeCode(req.params.id);
+  await logAction(req, 'user.code_revoked', 'staff', req.params.id);
+  res.json(await codeOf(req.params.id));
 }));
 
 const accessChange = z.object({

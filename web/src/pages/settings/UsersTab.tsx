@@ -8,6 +8,7 @@ import {
 import { AlertTriangle, ChevronRight, Clock, Copy, KeyRound, Layers, Link2, RotateCcw, ShieldAlert, ShieldCheck, UserCheck, UserPlus, UserX } from 'lucide-react';
 import { api, ApiError } from '../../api/client';
 import { useCanDo, useMe, useStaff } from '../../api/hooks';
+import { useReauth } from '../../components/domain/Reauth';
 import { relative } from '../../lib/format';
 import { Avatar, Badge, Button, Field, Modal, Segmented, Spinner, Toggle, cx, useToast } from '../../components/ui';
 import { Card, useSection } from './shared';
@@ -432,6 +433,8 @@ function UserDetail({ id, onClose }: { id: string; onClose: () => void }) {
           )}
         </section>
 
+        {canDo('users:manage') && <SignInCode u={u} canEdit={!!users?.canApprove} />}
+
         {u.permissions.find((p) => p.key === 'appointments:read')?.effective && <CalendarAccess u={u} canEdit={canPerms} onSaved={reload} />}
 
         <section>
@@ -553,6 +556,95 @@ function CalendarAccess({ u, canEdit, onSaved }: { u: StaffAccountDetailDTO; can
       )}
       {draft !== null && <p className="mt-1.5 text-[12px] text-stone">Their own calendar is always included.</p>}
       {canEdit && dirty && <Button size="sm" variant="primary" className="mt-2" loading={busy} onClick={save}>Save calendar access</Button>}
+    </section>
+  );
+}
+
+interface CodeStatus { set: boolean; enabled: boolean; locked: boolean; lockedUntil: string | null; failedAttempts: number; lastUsedAt: string | null; updatedAt: string | null; squareLocationId: string | null; squareLocationName: string | null }
+
+/**
+ * Owner/Admin: the person's custom sign-in code (an alternative to their password; email + code). The code itself is
+ * never shown — except a generated one, once, right after generating it, to hand over.
+ */
+function SignInCode({ u, canEdit }: { u: StaffAccountDetailDTO; canEdit: boolean }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const reauth = useReauth();
+  const { data: status } = useQuery({ queryKey: ['user-code', u.id], queryFn: () => api.get<{ code: CodeStatus }>(`/admin/users/${u.id}/code`).then((r) => r.code) });
+  const { data: locations } = useQuery({ queryKey: ['square-locations'], queryFn: () => api.get<{ locations: { id: string; name: string }[] }>('/admin/locations').then((r) => r.locations), enabled: canEdit });
+  const [typed, setTyped] = useState<string | null>(null);
+  const [shown, setShown] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [confirmRevoke, setConfirmRevoke] = useState(false);
+  const act = async (key: string, fn: () => Promise<{ code: CodeStatus; generatedCode?: string | null }>, msg: string) => {
+    setBusy(key);
+    try {
+      const r = await fn();
+      qc.setQueryData(['user-code', u.id], r.code);
+      if (r.generatedCode) setShown(r.generatedCode);
+      setTyped(null);
+      setConfirmRevoke(false);
+      toast(msg);
+    } catch (e) {
+      if (reauth.handle(e, () => act(key, fn, msg))) return;
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+  const base = `/admin/users/${u.id}/code`;
+  if (!status) return null;
+  return (
+    <section>
+      <h3 className="mb-1 text-[13px] font-semibold uppercase tracking-wide text-stone">Sign-in code</h3>
+      <p className="mb-2 text-[13px] text-stone">An alternative to a password: {u.name.split(' ')[0]} signs in with their email and this code. It’s the CRM’s own code — not a Square passcode — and it’s never shown again after it’s set.</p>
+      <div className="flex flex-wrap items-center gap-2 text-[14px]">
+        {!status.set ? <Badge>No code</Badge> : status.locked ? <Badge tone="rose">Locked until {new Date(status.lockedUntil!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</Badge>
+          : status.enabled ? <Badge tone="sage">On</Badge> : <Badge>Off</Badge>}
+        {status.set && <span className="text-[13px] text-stone">{status.lastUsedAt ? `last used ${relative(status.lastUsedAt)}` : 'not used yet'}{status.updatedAt ? ` · set ${relative(status.updatedAt)}` : ''}{status.squareLocationName ? ` · ${status.squareLocationName}` : ''}</span>}
+      </div>
+      {shown && (
+        <div className="mt-3 rounded-xl border border-sage/30 bg-sage-tint p-3">
+          <p className="text-[13px] text-ink-soft">New code for {u.name.split(' ')[0]} — give it to them privately. It won’t be shown again.</p>
+          <p className="num mt-1 font-mono text-[26px] tracking-[0.2em] text-ink">{shown}</p>
+          <div className="mt-2 flex gap-2">
+            <Button size="sm" icon={<Copy className="h-4 w-4" />} onClick={() => navigator.clipboard?.writeText(shown).then(() => toast('Code copied'), () => toast('Copy failed — note it down instead', 'error'))}>Copy</Button>
+            <Button size="sm" variant="ghost" onClick={() => setShown(null)}>Done</Button>
+          </div>
+        </div>
+      )}
+      {canEdit ? (
+        <div className="mt-3 space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="primary" icon={<KeyRound className="h-4 w-4" />} loading={busy === 'gen'} onClick={() => act('gen', () => api.put(base, { generate: true }), 'New code generated — the old one no longer works')}>{status.set ? 'Generate a new code' : 'Generate a code'}</Button>
+            <Button size="sm" onClick={() => setTyped(typed === null ? '' : null)}>{status.set ? 'Choose a new code' : 'Choose a code'}</Button>
+            {status.set && <Button size="sm" variant="ghost" loading={busy === 'toggle'} onClick={() => act('toggle', () => api.post(`${base}/${status.enabled ? 'disable' : 'enable'}`), status.enabled ? 'Code turned off — they’re signed out of code sessions' : 'Code turned on')}>{status.enabled ? 'Turn off' : 'Turn on'}</Button>}
+            {status.set && <Button size="sm" variant="ghost" className="text-rose" onClick={() => setConfirmRevoke(true)}>Revoke</Button>}
+          </div>
+          {typed !== null && (
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input className="field h-11 font-mono" type="password" autoComplete="new-password" value={typed} maxLength={32} onChange={(e) => setTyped(e.target.value)} placeholder="6+ characters, or 8+ digits" aria-label="New code" />
+              <Button className="h-11" variant="primary" disabled={!typed} loading={busy === 'set'} onClick={() => act('set', () => api.put(base, { code: typed }), 'Code saved — it works now, and the old one doesn’t')}>Save code</Button>
+            </div>
+          )}
+          {status.set && (
+            <Field label="Square location" hint="Where they work (from Square). Linking to their Square team member is under Edit details.">
+              <select className="field h-11 sm:max-w-xs" value={status.squareLocationId ?? ''} onChange={(e) => act('loc', () => api.put(`${base}/location`, { squareLocationId: e.target.value || null }), 'Location saved')}>
+                <option value="">Not set</option>
+                {locations?.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+              </select>
+            </Field>
+          )}
+          {confirmRevoke && (
+            <p className="flex flex-wrap items-center gap-2 rounded-lg bg-rose-tint px-3 py-2 text-[13px] text-ink-soft">
+              The code is deleted and every session it opened ends now. Their password still works.
+              <Button size="sm" variant="danger" loading={busy === 'revoke'} onClick={() => act('revoke', () => api.del(base), 'Code revoked')}>Revoke code</Button>
+              <Button size="sm" variant="ghost" onClick={() => setConfirmRevoke(false)}>Cancel</Button>
+            </p>
+          )}
+        </div>
+      ) : <p className="mt-2 text-[13px] text-stone">Only an Owner or Admin can set or change codes.</p>}
+      {reauth.modal}
     </section>
   );
 }

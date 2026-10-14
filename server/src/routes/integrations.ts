@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requireOwnerReauth } from '../auth/reauth.js';
 import { z } from 'zod';
 import { requirePermission } from '../auth/session.js';
 import { config } from '../config.js';
@@ -37,7 +38,7 @@ integrationsRouter.get('/setup-info', requirePermission('settings:read'), ah(asy
   });
 }));
 
-integrationsRouter.get('/square/connect', requirePermission('integrations:manage'), ah(async (_req, res) => {
+integrationsRouter.get('/square/connect', requireOwnerReauth('integrations:manage'), ah(async (_req, res) => {
   res.json({ url: await buildAuthorizeUrl() });
 }));
 
@@ -62,7 +63,7 @@ integrationsRouter.post('/square/sync', requirePermission('square:sync'), ah(asy
   res.json({ result, status: await integrationStatus() });
 }));
 
-integrationsRouter.post('/square/disconnect', requirePermission('integrations:manage'), ah(async (req, res) => {
+integrationsRouter.post('/square/disconnect', requireOwnerReauth('integrations:manage'), ah(async (req, res) => {
   await disconnectSquare();
   await logAction(req, 'integration.square_disconnected');
   res.json({ status: await integrationStatus() });

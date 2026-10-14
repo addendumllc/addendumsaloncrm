@@ -25,7 +25,16 @@ export interface TestResult {
  * Checks credentials against the real service API — always live, even in Demo Mode, and never reports
  * success without a real response. Error messages are written for staff and never include a secret.
  */
+/** Tests only: stand in for the real services (no network, no real credentials). */
+let override: ((p: CredentialProvider) => Promise<TestResult>) | null = null;
+export const setConnectionTestOverride = (fn: typeof override) => { override = fn; };
+
 export async function testConnection(p: CredentialProvider): Promise<TestResult> {
+  if (override) {
+    const r = await override(p);
+    await recordTest(p, r.ok, [r.message, ...r.warnings].join(' '));
+    return r;
+  }
   const missing = missingRequirements(p);
   let result: TestResult;
   if (missing.length) {
@@ -83,7 +92,11 @@ async function run(p: CredentialProvider): Promise<TestResult> {
       const has = (s: string) => scopes.includes(s) || (s.startsWith('read_') && scopes.includes(s.replace('read_', 'write_')));
       const lacking = SHOPIFY_SCOPES.filter((s) => !has(s));
       if (lacking.length) warnings.push(`The Shopify app is missing these permissions, needed for inventory sync: ${lacking.join(', ')}.`);
-      return { ok: true, message: `Connected to ${r.shopName}${r.locationName ? ` · inventory location: ${r.locationName}` : ''}.`, warnings };
+      // Least privilege: point out access the CRM never uses, so it can be removed from the Shopify app.
+      const needed = new Set([...SHOPIFY_SCOPES, ...SHOPIFY_SCOPES.map((s) => s.replace('read_', 'write_'))]);
+      const extra = scopes.filter((s) => !needed.has(s));
+      if (extra.length) warnings.push(`The app also has permissions the CRM doesn’t use (${extra.join(', ')}); you can remove them in Shopify.`);
+      return { ok: true, message: `Connected to ${r.shopName} (${domain})${r.locationName ? ` · inventory location: ${r.locationName}` : ''}. Permissions granted: ${scopes.join(', ') || 'none'}.`, warnings };
     }
     case 'highlevel': {
       const hl = new HighLevelApiService(c.HIGHLEVEL_PRIVATE_TOKEN!, c.HIGHLEVEL_LOCATION_ID!);

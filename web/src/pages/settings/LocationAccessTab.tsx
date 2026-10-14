@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { AccessSettings, AccessStatusDTO } from '@addendum/shared';
+import { approvedNetworks, type AccessSettings, type AccessStatusDTO } from '@addendum/shared';
 import { AlertTriangle, CheckCircle2, Plus, ShieldCheck, Trash2, Wifi, WifiOff } from 'lucide-react';
 import { api } from '../../api/client';
 import { useSettings } from '../../api/hooks';
@@ -17,25 +17,34 @@ export function LocationAccessSettings() {
   const { data: settings } = useSettings();
   const toast = useToast();
   const qc = useQueryClient();
-  const saved = settings?.settings.access;
-  const [draft, setDraft] = useState<AccessSettings | null>(null);
+  const raw = settings?.settings.access;
+  // Unnamed IPs from earlier versions show as a network named "Salon".
+  const saved = raw ? { allowAnywhere: raw.allowAnywhere, restrictMobile: raw.restrictMobile, networks: approvedNetworks(raw) } : undefined;
+  const [draft, setDraft] = useState<Omit<AccessSettings, 'salonIps'> | null>(null);
   const [newIp, setNewIp] = useState('');
+  const [newName, setNewName] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (saved && !draft) setDraft(saved); }, [saved, draft]);
+  useEffect(() => { if (saved && !draft) setDraft(saved); }, [saved, draft]); // eslint-disable-line react-hooks/exhaustive-deps
   if (isLoading || !status || !draft || !saved) return <div className="flex justify-center py-10"><Spinner /></div>;
 
   const can = status.canManage;
   const dirty = JSON.stringify(draft) !== JSON.stringify(saved);
-  const addIp = (ip: string) => {
+  const ips = draft.networks.map((n) => n.ip);
+  const suggestedName = draft.networks.length === 0 ? 'Salon' : draft.networks.some((n) => n.name.toLowerCase() === 'office') ? '' : 'Office';
+  const addNetwork = (ip: string) => {
     const v = ip.trim();
-    if (!v || draft.salonIps.includes(v)) return;
-    setDraft({ ...draft, salonIps: [...draft.salonIps, v] });
+    const name = (newName.trim() || suggestedName || 'Network').slice(0, 40);
+    if (!v || ips.includes(v)) return;
+    setDraft({ ...draft, networks: [...draft.networks, { name, ip: v }] });
     setNewIp('');
+    setNewName('');
   };
+  const rename = (ip: string, name: string) => setDraft({ ...draft, networks: draft.networks.map((n) => (n.ip === ip ? { ...n, name } : n)) });
   // Saving with restrictions that would shut this computer out deserves a warning.
-  const locksMeOut = !draft.allowAnywhere && draft.salonIps.length > 0 && !draft.salonIps.includes(status.ip) && (!status.mobile || draft.restrictMobile);
+  const locksMeOut = !draft.allowAnywhere && ips.length > 0 && !ips.includes(status.ip) && (!status.mobile || draft.restrictMobile);
+  const unnamed = draft.networks.some((n) => !n.name.trim());
 
   const save = async () => {
     setBusy(true);
@@ -43,7 +52,7 @@ export function LocationAccessSettings() {
       const r = await api.put<{ access: AccessSettings; status: AccessStatusDTO }>('/access', { ...draft, password });
       qc.setQueryData(['access-status'], r.status);
       await qc.invalidateQueries({ queryKey: ['settings'] });
-      setDraft(r.access);
+      setDraft({ allowAnywhere: r.access.allowAnywhere, restrictMobile: r.access.restrictMobile, networks: approvedNetworks(r.access) });
       setConfirming(false);
       setPassword('');
       toast('Location & Access saved — it applies straight away.');
@@ -63,30 +72,33 @@ export function LocationAccessSettings() {
         </p>
       )}
 
-      <Card title="Salon network" description="The salon’s public internet address. Computers on this connection can use the CRM when Allow Access Anywhere is off.">
-        {draft.salonIps.length === 0 ? (
-          <p className="rounded-lg bg-mist px-3 py-2 text-[14px] text-ink-soft">No salon IP registered yet, so nothing is restricted. Add it from a computer or phone on the salon Wi-Fi.</p>
+      <Card title="Approved networks" description="The public internet addresses of your salon, office and any other approved locations. Computers on these connections can use the CRM when Allow Access Anywhere is off.">
+        {draft.networks.length === 0 ? (
+          <p className="rounded-lg bg-mist px-3 py-2 text-[14px] text-ink-soft">No approved network yet, so nothing is restricted. Add the salon (and office) from a device on that network.</p>
         ) : (
           <ul className="divide-y divide-line rounded-xl border border-line">
-            {draft.salonIps.map((ip) => (
-              <li key={ip} className="flex min-h-[52px] items-center gap-3 px-3">
-                <span className="flex-1 font-mono text-[14px] text-ink">{ip}</span>
-                {ip === status.ip && <Badge tone="sage">This connection</Badge>}
-                {can && <button type="button" className="rounded-lg p-2 text-stone hover:bg-mist hover:text-rose" aria-label={`Remove ${ip}`} onClick={() => setDraft({ ...draft, salonIps: draft.salonIps.filter((x) => x !== ip) })}><Trash2 className="h-4 w-4" /></button>}
+            {draft.networks.map((n) => (
+              <li key={n.ip} className="flex min-h-[56px] flex-wrap items-center gap-2 px-3 py-2 sm:flex-nowrap sm:gap-3">
+                <input className="field h-10 min-w-0 flex-1 sm:max-w-[200px]" value={n.name} maxLength={40} disabled={!can} onChange={(e) => rename(n.ip, e.target.value)} aria-label={`Name for ${n.ip}`} placeholder="Name, e.g. Office" />
+                <span className="flex-1 font-mono text-[14px] text-ink">{n.ip}</span>
+                {n.ip === status.ip && <Badge tone="sage">This connection</Badge>}
+                {can && <button type="button" className="rounded-lg p-2 text-stone hover:bg-mist hover:text-rose" aria-label={`Remove ${n.name || n.ip}`} onClick={() => setDraft({ ...draft, networks: draft.networks.filter((x) => x.ip !== n.ip) })}><Trash2 className="h-4 w-4" /></button>}
               </li>
             ))}
           </ul>
         )}
         {can && (
-          <div className="mt-3 space-y-2">
-            {!draft.salonIps.includes(status.ip) && status.ip && (
-              <Button variant="primary" className="h-11 w-full sm:w-auto" icon={<Wifi className="h-4 w-4" />} onClick={() => addIp(status.ip)}>Use this connection’s IP ({status.ip})</Button>
+          <div className="mt-4 space-y-2 rounded-xl border border-dashed border-line-strong p-3">
+            <p className="text-[14px] font-medium text-ink">Add a network</p>
+            <Field label="Name"><input className="field h-11" value={newName} maxLength={40} onChange={(e) => setNewName(e.target.value)} placeholder={suggestedName ? `e.g. ${suggestedName}` : 'e.g. Back office'} /></Field>
+            {!ips.includes(status.ip) && status.ip && (
+              <Button variant="primary" className="h-11 w-full sm:w-auto" icon={<Wifi className="h-4 w-4" />} onClick={() => addNetwork(status.ip)}>Add this connection ({status.ip})</Button>
             )}
             <div className="flex gap-2">
-              <input className="field h-11 font-mono" value={newIp} onChange={(e) => setNewIp(e.target.value)} placeholder="Or type an IP, e.g. 203.0.113.10" aria-label="Salon IP address" onKeyDown={(e) => e.key === 'Enter' && addIp(newIp)} />
-              <Button className="h-11" icon={<Plus className="h-4 w-4" />} disabled={!newIp.trim()} onClick={() => addIp(newIp)}>Add</Button>
+              <input className="field h-11 font-mono" value={newIp} onChange={(e) => setNewIp(e.target.value)} placeholder="Or type its IP, e.g. 203.0.113.10" aria-label="Network IP address" onKeyDown={(e) => e.key === 'Enter' && addNetwork(newIp)} />
+              <Button className="h-11" icon={<Plus className="h-4 w-4" />} disabled={!newIp.trim()} onClick={() => addNetwork(newIp)}>Add</Button>
             </div>
-            <p className="text-[12px] text-stone">Only add it while you’re on the salon network. If your internet provider changes the address, update it here — from a phone connected to the salon Wi-Fi if no computer can get in.</p>
+            <p className="text-[12px] text-stone">To add the office, open this page on a device connected to the office internet and tap “Add this connection” — or ask your provider for the office’s public IP and type it. If a provider changes an address, update it here (from a phone on that Wi-Fi if no computer can get in).</p>
           </div>
         )}
       </Card>
@@ -95,13 +107,13 @@ export function LocationAccessSettings() {
         <>
           {dirty && <span className="mr-auto text-[13px] text-amber">Unsaved changes</span>}
           {dirty && <Button variant="ghost" onClick={() => setDraft(saved)}>Discard</Button>}
-          <Button variant="primary" disabled={!dirty} onClick={() => setConfirming(true)}>Save</Button>
+          <Button variant="primary" disabled={!dirty || unnamed} onClick={() => setConfirming(true)}>Save</Button>
         </>
       )}>
         <div className="space-y-4">
           <div className="rounded-xl border border-line p-3">
             <Toggle checked={draft.allowAnywhere} disabled={!can} onChange={(v) => setDraft({ ...draft, allowAnywhere: v })} label={`Allow Access Anywhere: ${draft.allowAnywhere ? 'ON' : 'OFF'}`}
-              description={draft.allowAnywhere ? 'ON: the CRM works from any network — salon, home or elsewhere — after signing in, within each person’s role.' : 'OFF: on a computer, the CRM only works on the salon network. Phones and tablets keep working as usual.'} />
+              description={draft.allowAnywhere ? 'ON: the CRM works from any network — salon, office, home or elsewhere — after signing in, within each person’s role.' : 'OFF: on a computer, the CRM only works on the approved networks above. Phones and tablets keep working as usual.'} />
           </div>
           <div className="rounded-xl border border-line p-3">
             <Toggle checked={draft.restrictMobile} disabled={!can || draft.allowAnywhere} onChange={(v) => setDraft({ ...draft, restrictMobile: v })} label="Restrict phones and tablets too"
@@ -132,7 +144,7 @@ function ConnectionStatus({ status }: { status: AccessStatusDTO }) {
     <div className={cx('flex items-start gap-3 rounded-xl2 border px-4 py-3', ok ? 'border-sage/30 bg-sage-tint' : 'border-line bg-white')}>
       {ok ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-sage" /> : <WifiOff className="mt-0.5 h-5 w-5 shrink-0 text-stone" />}
       <div className="min-w-0 text-[14px]">
-        <p className="font-medium text-ink">{ok ? 'Connected through the salon network' : status.configured ? 'Not on the salon network' : 'Salon network not set up yet'}</p>
+        <p className="font-medium text-ink">{ok ? `Connected through ${status.networkName ? `the ${status.networkName} network` : 'an approved network'}` : status.configured ? 'Not on an approved network' : 'No approved network set up yet'}</p>
         <p className="text-stone">This {status.mobile ? 'phone or tablet' : 'computer'} · <span className="font-mono">{status.ip || 'unknown IP'}</span>{!ok && status.allowAnywhere ? ' · allowed: Access Anywhere is on' : ''}</p>
       </div>
     </div>

@@ -871,25 +871,35 @@ export const DEFAULT_ACCENT = '#6B3F55';
  */
 export interface AccessSettings {
   allowAnywhere: boolean;
-  /** The salon's public IP address(es) (IPv4 and/or IPv6). */
-  salonIps: string[];
+  /** Approved networks — the salon, an office… — each with its public IP address (IPv4 or IPv6). */
+  networks: ApprovedNetwork[];
   restrictMobile: boolean;
+  /** Earlier versions stored unnamed IPs here; they're read as networks named "Salon". */
+  salonIps?: string[];
 }
+export interface ApprovedNetwork { name: string; ip: string }
+
+/** The approved networks, including ones saved by earlier versions (unnamed IPs → "Salon"). */
+export const approvedNetworks = (a: Pick<AccessSettings, 'networks' | 'salonIps'>): ApprovedNetwork[] =>
+  a.networks?.length ? a.networks : (a.salonIps ?? []).map((ip) => ({ name: 'Salon', ip }));
 
 export interface AccessStatusDTO {
   /** This connection's public IP, as the server sees it. */
   ip: string;
   mobile: boolean;
+  /** On one of the approved networks (salon, office…). */
   onSalonNetwork: boolean;
+  /** Which approved network this connection is on, if any. */
+  networkName: string | null;
   allowAnywhere: boolean;
-  /** A salon IP is registered (until then nothing is restricted). */
+  /** An approved network is registered (until then nothing is restricted). */
   configured: boolean;
   /** The server's recovery switch (ACCESS_ALLOW_ANYWHERE) is on. */
   overridden: boolean;
   /** This request would be refused. */
   restricted: boolean;
   canManage: boolean;
-  salonIps?: string[];
+  networks?: ApprovedNetwork[];
   restrictMobile?: boolean;
 }
 

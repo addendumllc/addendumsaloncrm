@@ -20,6 +20,9 @@ Contents:
 
 ## 1. Deploy
 
+> Accounts, passwords, integration keys, backups, key rotation and recovery: see
+> [SECURITY-AND-DATA.md](SECURITY-AND-DATA.md).
+
 The app is one Node service plus a PostgreSQL database. Any host that runs Docker or Node 20+
 works (Render, Railway, Fly.io, DigitalOcean App Platform, AWS, a VPS).
 
@@ -150,8 +153,9 @@ first start from `OWNER_EMAIL` / `OWNER_PASSWORD`.
 ## 2a. Location & Access (salon network)
 
 **Settings → Admin → Location & Access** (Owners/Admins only; saving asks for your password):
-- **Salon network**: register the salon's public IP address — tap **Use this connection's IP** while on the salon
-  Wi-Fi. "This connection" shows the address the server sees and whether you're on the salon network.
+- **Approved networks**: register the salon's public IP address — and the office's, or any other location — each with a
+  name. On a device connected to that network, type the name (e.g. "Office") and tap **Add this connection**.
+  "This connection" shows the address the server sees and which approved network you're on.
 - **Allow Access Anywhere** (default **OFF**): when OFF, *computers* can only use the CRM on the salon network; phones
   and tablets keep working as usual (or turn on **Restrict phones and tablets too**). When ON, the CRM works from any
   network. Changes apply immediately.
