@@ -3,6 +3,8 @@ import { config } from '../../config.js';
 import { IntegrationError } from '../../lib/errors.js';
 
 export interface EmailMessage {
+  /** Overrides the sender for this message (e.g. the Order Hair form sender). */
+  from?: string;
   to: string;
   cc?: string[];
   replyTo?: string | null;
@@ -41,7 +43,7 @@ export class SmtpEmailService implements EmailService {
   async send(msg: EmailMessage) {
     try {
       const info = await this.transport.sendMail({
-        from: this.from, to: msg.to, cc: msg.cc?.length ? msg.cc : undefined, replyTo: msg.replyTo ?? undefined,
+        from: msg.from ?? this.from, to: msg.to, cc: msg.cc?.length ? msg.cc : undefined, replyTo: msg.replyTo ?? undefined,
         subject: msg.subject, text: msg.text, html: msg.html,
       });
       return { messageId: String(info.messageId ?? '') };

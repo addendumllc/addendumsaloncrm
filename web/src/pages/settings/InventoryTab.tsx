@@ -38,6 +38,24 @@ export function InventorySettings() {
         <Field label="Send order requests to" hint="Whoever places orders with Addendum Hair. info@addendumhair.com is always copied.">
           <input className="field sm:w-80" type="email" value={d.orderEmail} disabled={locked} onChange={(e) => inv.set('orderEmail', e.target.value)} />
         </Field>
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          <Field label="Sent from — name" hint="Order emails arrive as a form submission under this name.">
+            <input className="field" value={d.orderFromName ?? ''} maxLength={80} disabled={locked} onChange={(e) => inv.set('orderFromName', e.target.value)} placeholder="Addendum Hair Order Form" />
+          </Field>
+          <Field label="Sent from — address" hint="A form/no-reply address, e.g. orders@addendumsalon.info — not a staff or info@ mailbox. Your email service must be allowed to send from it.">
+            <input className="field" type="email" value={d.orderFromAddress ?? ''} disabled={locked} onChange={(e) => inv.set('orderFromAddress', e.target.value)} placeholder="orders@addendumsalon.info" />
+          </Field>
+        </div>
+        <div className="mt-3 space-y-2 rounded-xl border border-line p-3">
+          <Toggle label="Send as the person who placed the order" checked={d.sendAsSubmitter ?? true} disabled={locked} onChange={(v) => inv.set('sendAsSubmitter', v)}
+            description="Their name is on the email and replies go to them. It comes from their own address when its domain is listed below (your email service must be allowed to send for it); otherwise it shows as “Name via the form name” from the address above." />
+          {(d.sendAsSubmitter ?? true) && (
+            <Field label="Email domains your email service can send from" hint="Comma-separated, e.g. addendumsalon.com. Leave empty if staff use personal addresses (Gmail, Outlook…).">
+              <input className="field font-mono text-[13px]" disabled={locked} defaultValue={(d.senderDomains ?? []).join(', ')}
+                onChange={(e) => inv.set('senderDomains', [...new Set(e.target.value.split(/[,\s]+/).map((x) => x.trim().toLowerCase().replace(/^@/, '')).filter(Boolean))])} placeholder="addendumsalon.com" />
+            </Field>
+          )}
+        </div>
         <Toggle label="Copy the stylist" description="CC the person who submitted the request (when they have an email on file), and replies go to them." checked={d.ccRequester} disabled={locked} onChange={(v) => inv.set('ccRequester', v)} />
         <Field label="Quick-pick collections" className="mt-2" hint="One per line. Shown as one-tap buttons when building an order. Collections ordered before are suggested automatically too.">
           <textarea

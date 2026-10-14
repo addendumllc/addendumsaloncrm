@@ -44,7 +44,12 @@ describe('Inventory order requests → emailed to Addendum Hair', () => {
     expect(req.items[0]).toMatchObject({ size: '20"', color: '#60 Platinum', collection: 'Signature Hand-Tied Weft', quantity: 3, neededBy: D(6) });
     const mail = MockEmailService.outbox.at(-1)!;
     expect(mail.to).toBe('gaby@addendumhair.com');
-    expect(mail.subject).toMatch(/^Addendum Hair order request #\d+ — /);
+    expect(mail.subject).toMatch(/^Hair Order Form #\d+ — /);
+    expect(mail.text.startsWith('HAIR ORDER FORM')).toBe(true);
+    expect(mail.text).toMatch(/Order reference: #\d+/);
+    // Sent as the person who placed it; their own domain isn't verified for sending here, so "<Name> via the form".
+    expect(mail.from).toMatch(/^".+ via Addendum Hair Order Form" </);
+    expect(mail.replyTo).toBe('owner@addendumsalon.com');
     expect(mail.text).toContain(`Size: 20" | Color: #60 Platinum | Collection: Signature Hand-Tied Weft | QTY: 3 | Needed by: ${fmt(D(6))}`);
     expect(mail.text).toContain(`Size: — | Color: — | Collection: Bond Remover | QTY: 1 | Needed by: ${fmt(D(2))}`);
     expect(mail.text).not.toMatch(/rush|urgency/i);
@@ -74,6 +79,25 @@ describe('Inventory order requests → emailed to Addendum Hair', () => {
     await api.post('/api/inventory/requests', one('Tape-In'));
     expect(MockEmailService.outbox.at(-1)!.cc).toEqual(['owner@addendumsalon.com']);
     await api.patch('/api/settings', { inventory: { orderEmail: 'gaby@addendumhair.com', ccRequester: true } });
+  });
+
+  it('order emails are sent as the person who placed them, from their own address only where allowed', async () => {
+    MockEmailService.outbox = [];
+    const name = (await db().one<any>("SELECT name FROM staff WHERE email = 'owner@addendumsalon.com'")).name;
+    await api.patch('/api/settings', { inventory: { orderFromName: 'Addendum Hair Orders', orderFromAddress: 'orders@addendumsalon.info', senderDomains: [] } });
+    await api.post('/api/inventory/requests', one('Tape-In'));
+    expect(MockEmailService.outbox.at(-1)!.from).toBe(`"${name} via Addendum Hair Orders" <orders@addendumsalon.info>`);
+    // Their domain is one the email service can send from: straight from their address.
+    await api.patch('/api/settings', { inventory: { senderDomains: ['addendumsalon.com'] } });
+    await api.post('/api/inventory/requests', one('Tape-In'));
+    expect(MockEmailService.outbox.at(-1)!.from).toBe(`"${name}" <owner@addendumsalon.com>`);
+    // Turned off: the form sender.
+    await api.patch('/api/settings', { inventory: { sendAsSubmitter: false } });
+    await api.post('/api/inventory/requests', one('Tape-In'));
+    expect(MockEmailService.outbox.at(-1)!.from).toBe('"Addendum Hair Orders" <orders@addendumsalon.info>');
+    expect((await api.patch('/api/settings', { inventory: { orderFromAddress: 'not-an-email' } })).status).toBe(400);
+    expect((await api.patch('/api/settings', { inventory: { senderDomains: ['not a domain'] } })).status).toBe(400);
+    await api.patch('/api/settings', { inventory: { orderFromName: 'Addendum Hair Order Form', orderFromAddress: '', sendAsSubmitter: true, senderDomains: [] } });
   });
 
   it('keeps the request when email fails, then retries it', async () => {
