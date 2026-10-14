@@ -97,7 +97,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
       follow_up_overdue: false,
     },
   },
-  inventory: { orderEmail: 'gaby@addendumhair.com', ccRequester: true, catalog: [] },
+  inventory: { orderEmail: 'gaby@addendumhair.com', ccRequester: true, catalog: [], orderFromName: 'Addendum Hair Order Form', orderFromAddress: '', sendAsSubmitter: true, senderDomains: [] },
   appearance: { ...DEFAULT_APPEARANCE },
   accounts: { allowAccessRequests: true },
   access: { allowAnywhere: false, networks: [], restrictMobile: false },

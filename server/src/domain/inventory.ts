@@ -296,20 +296,32 @@ async function reserveInventory(id: string, attempt = 1): Promise<void> {
 const fmtDate = (d: string | null) => (d ? new Date(`${d}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }) : '—');
 
 /** Builds the email Gaby receives. Plain text first (reads well on a phone), plus a simple HTML table. */
-export function renderInventoryEmail(req: InventoryRequestDTO, salonName: string) {
+/**
+ * The email Addendum Hair receives — laid out as a submitted order form (labelled fields, an items table, notes).
+ * Plain text first (reads well on a phone), plus HTML.
+ */
+export function renderInventoryEmail(req: InventoryRequestDTO, salonName: string, timezone = 'America/Los_Angeles') {
   const who = req.forStaffName ?? req.requestedByName ?? 'A stylist';
-  const subject = `Addendum Hair order request #${req.number} — ${who}`;
+  const subject = `Hair Order Form #${req.number} — ${who}`;
   const link = `${config().APP_URL.replace(/\/$/, '')}/inventory?open=${req.id}`;
+  const submitted = new Date(req.createdAt).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: timezone });
+  const fields: [string, string | null][] = [
+    ['Order reference', `#${req.number}`],
+    ['Salon', salonName],
+    ['Stylist', who],
+    ['Stylist email', req.forStaffEmail],
+    ['Needed by', fmtDate(req.neededBy)],
+    ['Submitted', submitted],
+    ['Submitted by', req.requestedByName && req.requestedByName !== who ? req.requestedByName : null],
+    ['Inventory', req.inventoryStatus === 'reserved' ? 'Items marked “from inventory” have been taken out of Shopify stock.' : null],
+  ];
+  const shown = fields.filter(([, v]) => v) as [string, string][];
   const lines = [
-    `New hair order from ${salonName}.`,
+    'HAIR ORDER FORM',
     '',
-    `Order reference: #${req.number}`,
-    `Needed by: ${fmtDate(req.neededBy)}`,
-    `Stylist: ${who}${req.forStaffEmail ? ` · ${req.forStaffEmail}` : ''}`,
-    req.requestedByName && req.requestedByName !== who ? `Submitted by: ${req.requestedByName}` : null,
-    req.inventoryStatus === 'reserved' ? 'Items marked “from inventory” have been taken out of Shopify stock.' : null,
+    ...shown.map(([k, v]) => `${k}: ${v}`),
     '',
-    'Items:',
+    'ORDER ITEMS',
     ...req.items.map((i) => [
       `  • Size: ${i.size ?? '—'} | Color: ${i.color ?? '—'} | Collection: ${i.collection}${i.sku ? ` | SKU: ${i.sku}` : ''} | QTY: ${i.quantity} | Needed by: ${fmtDate(i.neededBy)}`,
       i.shopifyLabel ? `     From inventory: ${i.shopifyLabel}` : null,
@@ -317,35 +329,58 @@ export function renderInventoryEmail(req: InventoryRequestDTO, salonName: string
       i.clientName ? `     For client: ${i.clientName}` : null,
       i.note ? `     Note: ${i.note}` : null,
     ].filter(Boolean).join('\n')),
-    '',
     `Total: ${req.items.length} item${req.items.length === 1 ? '' : 's'}, ${req.totalUnits} unit${req.totalUnits === 1 ? '' : 's'}`,
-    req.note ? `\nNote from stylist:\n${req.note}` : null,
     '',
-    `View in the salon app: ${link}`,
-  ].filter((l) => l !== null) as string[];
+    'ORDER NOTES',
+    req.note ?? '(none)',
+    '',
+    `View this order: ${link}`,
+  ];
   const esc = (v: string) => v.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
-  const td = 'padding:6px 10px;border-bottom:1px solid #eee;vertical-align:top';
+  const td = 'padding:8px 10px;border-bottom:1px solid #eee;vertical-align:top';
+  const th = 'padding:8px 10px;text-align:left;color:#75716b;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #ddd';
+  const fieldRows = shown.map(([k, v]) => `<tr><td style="padding:6px 12px 6px 0;color:#75716b;white-space:nowrap;vertical-align:top">${esc(k)}</td><td style="padding:6px 0;font-weight:500">${k === 'Stylist email' ? `<a href="mailto:${esc(v)}">${esc(v)}</a>` : esc(v)}</td></tr>`).join('');
   const rows = req.items.map((i) => {
     const extra = [i.sku ? `SKU ${i.sku} · from inventory` : null, i.shopifyLabel, i.legacyDetails, i.clientName ? `For ${i.clientName}` : null, i.note].filter(Boolean).map((x) => `<br><span style="color:#666;font-size:13px">${esc(x!)}</span>`).join('');
     return `<tr><td style="${td}">${esc(i.size ?? '—')}</td><td style="${td}">${esc(i.color ?? '—')}</td><td style="${td}"><b>${esc(i.collection)}</b>${extra}</td><td style="${td};text-align:right">${i.quantity}</td><td style="${td};white-space:nowrap">${esc(fmtDate(i.neededBy))}</td></tr>`;
   }).join('');
-  const th = 'padding:6px 10px';
-  const html = `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;font-size:15px;color:#1d1c1a;max-width:680px">
-<p>New hair order from ${esc(salonName)}.</p>
-<p><b>Order reference #${req.number}</b><br><b>Needed by: ${esc(fmtDate(req.neededBy))}</b><br>Stylist: ${esc(who)}${req.forStaffEmail ? ` · <a href="mailto:${esc(req.forStaffEmail)}">${esc(req.forStaffEmail)}</a>` : ''}</p>
-${req.inventoryStatus === 'reserved' ? '<p style="color:#557563">Items marked “from inventory” have been taken out of Shopify stock.</p>' : ''}
-<table style="border-collapse:collapse;width:100%"><thead><tr style="text-align:left;color:#75716b;font-size:13px"><th style="${th}">Size</th><th style="${th}">Color</th><th style="${th}">Collection</th><th style="${th};text-align:right">QTY</th><th style="${th}">Needed By</th></tr></thead><tbody>${rows}</tbody></table>
-<p style="color:#666">${req.items.length} item${req.items.length === 1 ? '' : 's'} · ${req.totalUnits} units</p>
-${req.note ? `<p><b>Note from stylist</b><br>${esc(req.note).replace(/\n/g, '<br>')}</p>` : ''}
-<p><a href="${esc(link)}">View in the salon app</a></p></div>`;
+  const html = `<div style="font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;font-size:15px;color:#1d1c1a;max-width:680px;border:1px solid #e7e4df;border-radius:12px;overflow:hidden">
+<div style="background:#f2f1ee;padding:14px 18px;border-bottom:1px solid #e7e4df"><div style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#75716b">Form submission</div><div style="font-size:20px;font-weight:600">Hair Order Form #${req.number}</div></div>
+<div style="padding:16px 18px">
+<table style="border-collapse:collapse;margin-bottom:16px">${fieldRows}</table>
+<div style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#75716b;margin:8px 0">Order items</div>
+<table style="border-collapse:collapse;width:100%"><thead><tr><th style="${th}">Size</th><th style="${th}">Color</th><th style="${th}">Collection</th><th style="${th};text-align:right">QTY</th><th style="${th}">Needed By</th></tr></thead><tbody>${rows}</tbody></table>
+<p style="color:#666;margin:8px 0 16px">${req.items.length} item${req.items.length === 1 ? '' : 's'} · ${req.totalUnits} units</p>
+<div style="font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:#75716b;margin:8px 0">Order notes</div>
+<p style="margin:0 0 16px">${req.note ? esc(req.note).replace(/\n/g, '<br>') : '<span style="color:#999">(none)</span>'}</p>
+<p style="margin:0"><a href="${esc(link)}">View this order</a></p>
+</div></div>`;
   return { subject, text: lines.join('\n'), html };
+}
+
+/**
+ * Who an order email is from. With "send as the person who placed it" (the default), it's their name and — when their
+ * email's domain is one the email service may send from — their own address. Otherwise it's "<Name> via <form name>"
+ * on the form address (never a forged personal address, which would be rejected as spam). Replies always go to them.
+ */
+export function orderFormSender(general: string, inv: { orderFromName?: string; orderFromAddress?: string; sendAsSubmitter?: boolean; senderDomains?: string[] }, person?: { name: string | null; email: string | null } | null) {
+  const clean = (v: string) => v.replace(/["<>\r\n]/g, '').trim();
+  const address = inv.orderFromAddress?.trim() || general.match(/<([^>]+)>/)?.[1] || general.trim();
+  const formName = clean(inv.orderFromName?.trim() || 'Addendum Hair Order Form');
+  if (inv.sendAsSubmitter !== false && person?.name) {
+    const domainOf = (e: string) => e.split('@')[1]?.toLowerCase() ?? '';
+    const allowed = new Set([...(inv.senderDomains ?? []).map((d) => d.toLowerCase()), domainOf(address)].filter(Boolean));
+    if (person.email && allowed.has(domainOf(person.email))) return `"${clean(person.name)}" <${person.email.trim()}>`;
+    return `"${clean(person.name)} via ${formName}" <${address}>`;
+  }
+  return `"${formName}" <${address}>`;
 }
 
 /** Sends (or re-sends) the email for a request. Never throws — the request is always kept. */
 export async function sendInventoryEmail(id: string) {
   const s = await getSettings();
   const req = await getInventoryRequest(id);
-  const { subject, text, html } = renderInventoryEmail(req, s.business.name);
+  const { subject, text, html } = renderInventoryEmail(req, s.business.name, s.business.timezone);
   const email = emailService();
   if (!email) {
     await db().query(
@@ -355,10 +390,10 @@ export async function sendInventoryEmail(id: string) {
     );
     return { ok: false as const };
   }
-  const requester = await db().one<any>('SELECT s.email FROM inventory_requests r LEFT JOIN staff s ON s.id = r.requested_by_staff_id WHERE r.id = $1', [id]);
+  const requester = await db().one<any>('SELECT s.email, s.name FROM inventory_requests r LEFT JOIN staff s ON s.id = r.requested_by_staff_id WHERE r.id = $1', [id]);
   const cc = orderEmailCc(req.email.to, requester?.email, s.inventory.ccRequester);
   try {
-    const r = await email.send({ to: req.email.to, subject, text, html, cc, replyTo: requester?.email ?? null });
+    const r = await email.send({ from: orderFormSender(email.from, s.inventory, requester), to: req.email.to, subject, text, html, cc, replyTo: requester?.email ?? null });
     await db().query(
       `UPDATE inventory_requests SET email_status = 'sent', email_sent_at = now(), email_message_id = $2, email_error = NULL,
          email_attempts = email_attempts + 1, email_last_attempt_at = now(), email_subject = $3, email_text = $4, email_cc = $5, updated_at = now() WHERE id = $1`,

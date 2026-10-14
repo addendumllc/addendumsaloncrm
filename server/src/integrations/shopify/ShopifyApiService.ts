@@ -68,8 +68,14 @@ export class ShopifyApiService implements ShopifyService {
       return this.gql(query, variables, attempt + 1);
     }
     if (res.status === 401 || res.status === 403) {
-      if (!c.SHOPIFY_ADMIN_TOKEN) cachedToken = null;
-      throw new IntegrationError('shopify', `Shopify connection needs attention. Check the app's access and that it has these scopes: ${SHOPIFY_SCOPES.join(', ')}.`, false, true, `${res.status} ${JSON.stringify(json)}`);
+      if (c.SHOPIFY_ADMIN_TOKEN) {
+        // A saved Admin API token is always used before the Client ID + secret — say so, it's the usual mix-up.
+        throw new IntegrationError('shopify', 'Shopify rejected the saved Admin API access token. If your app is from the Shopify Dev Dashboard, remove that token (Settings → API & Integrations → Shopify) so the Client ID + secret are used.', false, true, `${res.status} ${JSON.stringify(json)}`);
+      }
+      // The cached 24-hour token may have been revoked (secret rotated, scopes changed, app reinstalled): get a new one once.
+      cachedToken = null;
+      if (attempt === 0) return this.gql(query, variables, 9);
+      throw new IntegrationError('shopify', `Shopify didn't accept the app's access. Check the Client ID and secret, that the app is installed on the store, and that it has these scopes: ${SHOPIFY_SCOPES.join(', ')}.`, false, true, `${res.status} ${JSON.stringify(json)}`);
     }
     if (res.status >= 500) throw new ShopifyOutcomeUnknownError('shopify', 'Shopify had a problem. Try again in a moment.', true, false, `${res.status} ${JSON.stringify(json)}`);
     if (!res.ok || json?.errors) {

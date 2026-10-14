@@ -877,6 +877,14 @@ export interface AppSettings {
     ccRequester: boolean;
     /** Products offered as quick picks when building a request (one per line in Settings). */
     catalog: string[];
+    /** Order emails come from this form sender — not a staff or info@ mailbox. */
+    orderFromName: string;
+    /** The sending address for order emails (must be allowed by the email service); empty = the general sender. */
+    orderFromAddress: string;
+    /** Send each order as the person who placed it (their name and, where allowed, their email address). */
+    sendAsSubmitter: boolean;
+    /** Email domains the email service may send from (e.g. addendumsalon.com). The sending address's domain counts too. */
+    senderDomains: string[];
   };
   appearance: Appearance;
   /** Where the CRM can be used from (Settings → Location & Access). Changed only through PUT /api/access. */

@@ -31,6 +31,8 @@ const myshopify = (v: string) => (/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i.test(v
 const noSpaces = (v: string) => (/\s/.test(v) ? 'must not contain spaces' : null);
 // Only used to verify Square's signatures (the CRM never sends anything to it), but it must be this app's webhook path.
 const squareWebhookUrl = (v: string) => (/^https:\/\/[^\s/]+\/api\/webhooks\/square$/i.test(v) ? null : 'must be https://<your CRM address>/api/webhooks/square, exactly as registered in Square');
+// Only a store's Admin API token works here; other Shopify tokens (atkn_ CLI/app-management, shpss_ secrets) don't.
+const shopifyAdminToken = (v: string) => (/^shp(at|ca|pa)_[A-Za-z0-9]+$/.test(v) ? null : 'must be an Admin API token starting with shpat_ — for a Dev Dashboard app, leave this empty and use the Client ID + secret');
 const portNum = (v: string) => (/^\d{2,5}$/.test(v) ? null : 'must be a number such as 587');
 
 export const CREDENTIAL_SPECS: Record<CredentialProvider, { label: string; fields: CredentialField[]; requirement: string }> = {
@@ -54,7 +56,7 @@ export const CREDENTIAL_SPECS: Record<CredentialProvider, { label: string; field
       { key: 'SHOPIFY_STORE_DOMAIN', label: 'Store address', secret: false, required: true, placeholder: 'addendumhair.myshopify.com', validate: myshopify, help: 'Shopify admin → Settings → Domains → the myshopify.com domain.' },
       { key: 'SHOPIFY_CLIENT_ID', label: 'Client ID', secret: false, group: 'app', validate: noSpaces, help: 'Shopify Dev Dashboard → your app → Settings. Public identifier.' },
       { key: 'SHOPIFY_CLIENT_SECRET', label: 'Client secret', secret: true, group: 'app', validate: noSpaces, help: 'Shopify Dev Dashboard → your app → Settings → Client secret.' },
-      { key: 'SHOPIFY_ADMIN_TOKEN', label: 'Admin API access token', secret: true, group: 'token', validate: noSpaces, placeholder: 'shpat_…', help: 'Only for an older custom app made in the store admin (Settings → Apps → Develop apps).' },
+      { key: 'SHOPIFY_ADMIN_TOKEN', label: 'Admin API access token (older apps only)', secret: true, group: 'token', validate: shopifyAdminToken, placeholder: 'shpat_…', help: 'Leave empty for apps from the Shopify Dev Dashboard (they use the Client ID + secret above). Only for an older custom app made in the store admin, whose token starts with shpat_. If filled in, it is used instead of the Client ID + secret.' },
       { key: 'SHOPIFY_LOCATION_ID', label: 'Inventory location ID', secret: false, validate: noSpaces, help: 'Only if the store has more than one active location.' },
     ],
   },
