@@ -86,6 +86,11 @@ export class ShopifyApiService implements ShopifyService {
     if (!res.ok || json?.errors) {
       const msg = Array.isArray(json?.errors) ? json.errors.map((e: any) => e.message).join('; ') : '';
       const scope = /access denied|scope/i.test(msg);
+      // A permission just added in Shopify only comes with a new access token: get one and try once more.
+      if (scope && attempt === 0 && !setting(this.prefix, 'ADMIN_TOKEN')) {
+        cachedTokens.delete(this.prefix);
+        return this.gql(query, variables, 9);
+      }
       throw new IntegrationError('shopify', scope ? `The Shopify app is missing a permission. It needs: ${SHOPIFY_SCOPES.join(', ')}.` : 'Shopify rejected the request.', false, scope, `${res.status} ${JSON.stringify(json)}`);
     }
     return json.data as T;
