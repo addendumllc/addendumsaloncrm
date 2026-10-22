@@ -2051,6 +2051,8 @@ export interface StockProductDTO {
   shopifyQty: number | null;
   /** The second Shopify store's listings with this SKU (it may list one SKU more than once, at different prices). */
   store2: { inventoryItemId: string; label: string; qty: number | null }[];
+  /** Other listings in the main Shopify store with the same SKU (e.g. a PRO listing): one stock, kept the same. */
+  siblings?: { inventoryItemId: string; label: string; qty: number | null }[];
   priceCents: number | null;
   supplier: string | null;
   costCents: number | null;

@@ -53,7 +53,7 @@ export function CustomersWaiting({ items }: { items: PreorderItem[] }) {
             </div>
             <div className="mt-2 grid grid-cols-2 gap-3 text-[13px] sm:grid-cols-4">
               <div><span className="block text-[11px] uppercase tracking-wide text-stone">Customers waiting</span><b className="num text-[16px] text-ink">{i.waiting}</b>
-                {i.stores.length > 1 && <span className="block text-[12px] text-stone">{i.stores.map((s) => `${s.store} ${s.waiting}`).join(' · ')}</span>}</div>
+</div>
               <div><span className="block text-[11px] uppercase tracking-wide text-stone">On order</span><b className="num text-[16px] text-ink">{i.onOrder || '—'}</b>
                 {i.purchaseOrders && <span className="block text-[12px] text-stone">{i.purchaseOrders}</span>}</div>
               <div><span className="block text-[11px] uppercase tracking-wide text-stone">Due</span><b className="text-[14px] text-ink">{i.due ? dateShort(i.due) : '—'}</b></div>

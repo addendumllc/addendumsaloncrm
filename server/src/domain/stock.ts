@@ -72,6 +72,20 @@ async function live(fresh = false): Promise<Live> {
       moq: s?.moq ?? null, caseSize: s?.case_size ?? null, status: (s?.status ?? 'active') as StockProductStatus,
     };
   };
+  // Several listings in the main Shopify store can share a SKU (e.g. a PRO listing): they're one product with one stock.
+  // The paired (or first) listing is the product; the others follow it and aren't listed on their own.
+  const siblingsOf = new Map<string, StockProductDTO['store2']>();
+  const siblingIds = new Set<string>();
+  const groups = new Map<string, ShopifyInventoryEntry[]>();
+  for (const i of items) if (i.tracked && norm(i.sku)) groups.set(norm(i.sku), [...(groups.get(norm(i.sku)) ?? []), i]);
+  for (const list of groups.values()) {
+    if (list.length < 2) continue;
+    const primary = list.find((i) => linkedItems.has(i.inventoryItemId)) ?? [...list].sort((a, b) => a.inventoryItemId.localeCompare(b.inventoryItemId))[0];
+    const others = list.filter((i) => i !== primary && !linkedItems.has(i.inventoryItemId));
+    if (!others.length) continue;
+    siblingsOf.set(primary.inventoryItemId, others.map((i) => ({ inventoryItemId: i.inventoryItemId, label: i.label, qty: i.available })));
+    for (const i of others) siblingIds.add(i.inventoryItemId);
+  }
   const rows: StockProductDTO[] = [];
   for (const p of products) {
     const l = linkBySq.get(p.variationId);
@@ -82,15 +96,17 @@ async function live(fresh = false): Promise<Live> {
       sku: p.sku ?? i?.sku ?? null, squareSku: p.sku ?? null, shopifySku: i?.sku ?? null,
       squareVariationId: p.variationId, shopifyInventoryItemId: i?.inventoryItemId ?? null, linkId: l?.id ?? null,
       squareQty: p.trackInventory ? Math.floor(squareQty.get(p.variationId) ?? 0) : null, shopifyQty: i?.available ?? null, priceCents: p.priceCents,
+      siblings: i ? siblingsOf.get(i.inventoryItemId) ?? [] : [],
       collections: [...new Set([...(p.categories ?? []), ...(i?.collections ?? [])])],
       imageUrl: p.imageUrl ?? i?.imageUrl ?? null,
     }));
   }
   for (const i of items) {
-    if (linkedItems.has(i.inventoryItemId) || !i.tracked) continue;
+    if (linkedItems.has(i.inventoryItemId) || !i.tracked || siblingIds.has(i.inventoryItemId)) continue;
     rows.push(withSettings({
       key: shopKey(i.inventoryItemId), label: i.label, sku: i.sku, squareSku: null, shopifySku: i.sku,
       squareVariationId: null, shopifyInventoryItemId: i.inventoryItemId, linkId: null, squareQty: null, shopifyQty: i.available, priceCents: null,
+      siblings: siblingsOf.get(i.inventoryItemId) ?? [],
       collections: i.collections ?? [],
       imageUrl: i.imageUrl ?? null,
     }));
@@ -149,15 +165,16 @@ export async function applyStockChanges(changes: StockChangeInput[], opts: { kin
     let sku = c.sku != null ? c.sku.trim() : null;
     let pairWith: StockProductDTO | null = null;
     if (sku != null) {
-      // A SKU must be unique within each store. Giving a Square-only product the SKU of a Shopify-only product (or the
-      // other way round) isn't a clash: it pairs them, so they sync from then on.
+      // A SKU must be unique in Square (it's how products pair). In Shopify several listings may share one (e.g. a PRO
+      // listing of the same hair): they become one product with one stock. Giving a Square-only product the SKU of a
+      // Shopify-only product (or the other way round) isn't a clash: it pairs them, so they sync from then on.
       const s = sku;
-      const sameStore = L.rows.find((r) => r.key !== row.key
-        && ((row.squareVariationId && r.squareVariationId && norm(r.squareSku) === norm(s)) || (row.shopifyInventoryItemId && r.shopifyInventoryItemId && norm(r.shopifySku) === norm(s))));
+      const sameStore = L.rows.find((r) => r.key !== row.key && row.squareVariationId && r.squareVariationId && norm(r.squareSku) === norm(s));
       const twin = !sameStore ? L.rows.find((r) => r.key !== row.key && !r.linkId && !row.linkId
         && ((!row.shopifyInventoryItemId && !r.squareVariationId && norm(r.shopifySku) === norm(s)) || (!row.squareVariationId && !r.shopifyInventoryItemId && norm(r.squareSku) === norm(s)))) : undefined;
       const dup = newSkus.get(norm(s));
-      const problem = !s ? 'enter a SKU' : sameStore ? `SKU ${s} is already used by ${sameStore.label}` : dup && dup !== row.key ? `SKU ${s} is given to two products in this change` : null;
+      const dupRow = dup && dup !== row.key ? byKey.get(dup) : undefined;
+      const problem = !s ? 'enter a SKU' : sameStore ? `SKU ${s} is already used by ${sameStore.label} in Square` : dupRow?.squareVariationId && row.squareVariationId ? `SKU ${s} is given to two Square products in this change` : null;
       if (problem) {
         results.push({ key: row.key, label: row.label, ok: false, note: `SKU not changed: ${problem}.` });
         sku = null;
@@ -237,11 +254,17 @@ export async function applyStockChanges(changes: StockChangeInput[], opts: { kin
   const key = `stock-${opts.kind}-${Date.now()}`;
   let shopifyOk = true;
   let shopifyErr = '';
-  const shWrites = qty.filter((p) => p.sh != null && p.sh !== p.row.shopifyQty);
+  const sibNeed = (p: (typeof planned)[number]) => (p.sh == null ? [] : (p.row.siblings ?? []).filter((x) => x.qty != null && x.qty !== p.sh));
+  const shWrites = qty.filter((p) => p.sh != null && (p.sh !== p.row.shopifyQty || sibNeed(p).length));
   if (shWrites.length) {
     try {
       if (!shop || !L.shLoc) throw badRequest('Shopify isn’t connected.');
-      await shop.setAvailable(L.shLoc, shWrites.map((p) => ({ inventoryItemId: p.row.shopifyInventoryItemId!, quantity: p.sh!, changeFromQuantity: p.row.shopifyQty })), key, `addendum-crm://stock/${opts.kind}`);
+      // Listings sharing the SKU (e.g. PRO) get the same count, in the same compare-and-set request.
+      await shop.setAvailable(L.shLoc, shWrites.flatMap((p) => [
+        ...(p.sh !== p.row.shopifyQty ? [{ inventoryItemId: p.row.shopifyInventoryItemId!, quantity: p.sh!, changeFromQuantity: p.row.shopifyQty }] : []),
+        ...sibNeed(p).map((x) => ({ inventoryItemId: x.inventoryItemId, quantity: p.sh!, changeFromQuantity: x.qty })),
+      ]), key, `addendum-crm://stock/${opts.kind}`);
+      for (const p of shWrites) for (const x of p.row.siblings ?? []) await markSibling(x.inventoryItemId, p.row.sku, x.label, p.sh!);
     } catch (e) {
       shopifyOk = false;
       shopifyErr = e instanceof ShopifyStaleQuantityError ? 'Shopify’s count changed just now (a sale?). Nothing was changed — look again and retry.' : msg(e);
@@ -1064,10 +1087,13 @@ export async function preorderReport() {
   for (const r of L.rows) {
     const stores = [
       ...(r.shopifyQty != null && r.shopifyQty < 0 ? [{ store: shopifyNameOf('shopify'), itemId: r.shopifyInventoryItemId!, waiting: -r.shopifyQty }] : []),
+      ...(r.siblings ?? []).filter((e) => (e.qty ?? 0) < 0).map((e) => ({ store: shopifyNameOf('shopify'), itemId: e.inventoryItemId, waiting: -(e.qty ?? 0) })),
       ...r.store2.filter((e) => (e.qty ?? 0) < 0).map((e) => ({ store: shopifyNameOf('shopify2'), itemId: e.inventoryItemId, waiting: -(e.qty ?? 0) })),
     ];
     if (!stores.length) continue;
-    const waiting = stores.reduce((n, s) => n + s.waiting, 0);
+    // The stores share one stock, so each shows the same shortfall: count it once (the deepest), not once per store.
+    // The orders below say which store each customer ordered from.
+    const waiting = Math.max(...stores.map((s) => s.waiting));
     const p = po.get(r.key);
     // The newest online orders for it, enough to cover what's waiting (the ones that took it below zero).
     const lines = await db().query<any>(
@@ -1240,4 +1266,11 @@ export async function applyPrices(changes: PriceChange[], staffId: string | null
   }
   forgetStockCache();
   return { saved, failed };
+}
+
+/** A main-store listing sharing a SKU (e.g. PRO): its count when last set, so the sync can add its own sales. */
+export async function markSibling(inventoryItemId: string, sku: string | null, label: string, qty: number) {
+  await db().query(
+    `INSERT INTO inventory_sync_extra(inventory_item_id, store, sku, label, synced_baseline) VALUES ($1,'shopify_sibling',$2,$3,$4)
+     ON CONFLICT (inventory_item_id) DO UPDATE SET store = 'shopify_sibling', sku = $2, label = $3, synced_baseline = $4, updated_at = now()`, [inventoryItemId, sku, label, qty]);
 }

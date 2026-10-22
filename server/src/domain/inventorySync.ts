@@ -380,10 +380,30 @@ async function execute(runId: string, onlyFailed: boolean): Promise<InventorySyn
   const existing = await db().query<any>('SELECT * FROM inventory_sync_links');
   const linkedSq = new Set(existing.map((l) => l.square_variation_id));
   const linkedSh = new Set(existing.map((l) => l.shopify_inventory_item_id));
+  // A SKU used twice in Square can't be paired reliably (listed for attention). In Shopify several listings may share a
+  // SKU (e.g. a PRO listing): the paired (or first) one is the product and the others follow it with the same stock.
   const duplicates: { sku: string; where: string; count: number }[] = [];
   for (const [sku, list] of sqBySku) if (list.length > 1) duplicates.push({ sku: list[0].sku!, where: SQ, count: list.length });
-  for (const [sku, list] of shBySku) if (list.length > 1) duplicates.push({ sku: list[0].sku, where: SH, count: list.length });
   const dupSkus = new Set(duplicates.map((d) => normSku(d.sku)));
+  const shSiblings = new Map<string, ShopifyInventoryEntry[]>();
+  const siblingIds = new Set<string>();
+  for (const [sku, list] of shBySku) {
+    const tracked = list.filter((i) => i.tracked);
+    if (tracked.length < 2) continue;
+    const primary = tracked.find((i) => linkedSh.has(i.inventoryItemId)) ?? [...tracked].sort((a, b) => a.inventoryItemId.localeCompare(b.inventoryItemId))[0];
+    const others = tracked.filter((i) => i !== primary && !linkedSh.has(i.inventoryItemId));
+    shBySku.set(sku, [primary, ...list.filter((i) => !i.tracked && i !== primary)].slice(0, 1));
+    if (!others.length) continue;
+    shSiblings.set(sku, others);
+    for (const i of others) siblingIds.add(i.inventoryItemId);
+  }
+  const markSiblings = async (items: ShopifyInventoryEntry[], qty: number) => {
+    for (const e of items) {
+      await db().query(
+        `INSERT INTO inventory_sync_extra(inventory_item_id, store, sku, label, synced_baseline) VALUES ($1,'shopify_sibling',$2,$3,$4)
+         ON CONFLICT (inventory_item_id) DO UPDATE SET store = 'shopify_sibling', sku = $2, label = $3, synced_baseline = $4, updated_at = now()`, [e.inventoryItemId, e.sku, e.label, qty]);
+    }
+  };
 
   // New SKU matches: exactly one product per SKU on each side, neither already linked. Never creates products.
   for (const [sku, list] of sqBySku) {
@@ -408,7 +428,7 @@ async function execute(runId: string, onlyFailed: boolean): Promise<InventorySyn
   const unmatched = {
     squareOnly: products.filter((p) => normSku(p.sku) && !linkedSq.has(p.variationId) && !sep.square.has(p.variationId) && !dupSkus.has(normSku(p.sku)) && p.trackInventory)
       .slice(0, 200).map((p) => ({ id: p.variationId, label: [p.itemName, p.variationName].filter(Boolean).join(' · '), sku: p.sku })),
-    shopifyOnly: shopItems.filter((i) => !linkedSh.has(i.inventoryItemId) && !sep.shopify.has(i.inventoryItemId) && !dupSkus.has(normSku(i.sku)) && i.tracked)
+    shopifyOnly: shopItems.filter((i) => !linkedSh.has(i.inventoryItemId) && !siblingIds.has(i.inventoryItemId) && !sep.shopify.has(i.inventoryItemId) && !dupSkus.has(normSku(i.sku)) && i.tracked)
       .slice(0, 200).map((i) => ({ id: i.inventoryItemId, label: i.label, sku: i.sku })),
     duplicates,
     noSku: products.filter((p) => !normSku(p.sku) && p.trackInventory && !sep.square.has(p.variationId)).length,
@@ -458,7 +478,7 @@ async function execute(runId: string, onlyFailed: boolean): Promise<InventorySyn
     await setLink(l.id, { status: 'needs_attention', issue, ...extra });
   };
 
-  type Plan = { link: any; S: number; H: number; target: number; why: string; extras: ShopifyInventoryEntry[] };
+  type Plan = { link: any; S: number; H: number; target: number; why: string; extras: ShopifyInventoryEntry[]; siblings: ShopifyInventoryEntry[] };
   const plans: Plan[] = [];
   for (const l of links) {
     let p = sqById.get(l.square_variation_id);
@@ -504,16 +524,19 @@ async function execute(runId: string, onlyFailed: boolean): Promise<InventorySyn
     // The second store's products with this SKU, and how much they changed since they were last set.
     const skuKey = normSku(p.sku) || normSku(i.sku);
     const extras = (sh2Loc && skuKey && sh2BySku.get(skuKey)) || [];
+    // Main-store listings sharing the SKU (e.g. PRO): their sales since last set count too, and they get the same count.
+    const siblings = ((skuKey && shSiblings.get(skuKey)) || []).filter((e) => e.inventoryItemId !== i!.inventoryItemId && e.available != null);
     let dE = 0;
-    for (const e of extras) { const r = extraRows.get(e.inventoryItemId); if (r?.synced_baseline != null) dE += e.available! - r.synced_baseline; }
+    for (const e of [...extras, ...siblings]) { const r = extraRows.get(e.inventoryItemId); if (r?.synced_baseline != null) dE += e.available! - r.synced_baseline; }
     const sign = (n: number) => `${n > 0 ? '+' : ''}${n}`;
     let target: number;
     let why: string;
     if (B == null) {
       if (S === H) {
-        if (extras.every((e) => e.available === S)) {
+        if (extras.every((e) => e.available === S) && siblings.every((e) => e.available === S)) {
           await setLink(l.id, { baseline_quantity: S, last_square_quantity: S, last_shopify_quantity: H, status: 'in_sync', issue: null, last_synced_at: new Date() });
           await markExtras(extras, S);
+          await markSiblings(siblings, S);
           tally.unchanged++;
           continue;
         }
@@ -531,9 +554,10 @@ async function execute(runId: string, onlyFailed: boolean): Promise<InventorySyn
       const dS = S - B;
       const dH = H - B;
       if (dS === 0 && dH === 0 && dE === 0) {
-        if (extras.every((e) => e.available === B)) {
+        if (extras.every((e) => e.available === B) && siblings.every((e) => e.available === B)) {
           await setLink(l.id, { last_square_quantity: S, last_shopify_quantity: H, status: 'in_sync', issue: null, last_synced_at: new Date() });
           await markExtras(extras, B);
+          await markSiblings(siblings, B);
           tally.unchanged++;
           continue;
         }
@@ -541,7 +565,7 @@ async function execute(runId: string, onlyFailed: boolean): Promise<InventorySyn
         why = `${store2} set to match`;
       } else {
         target = B + dS + dH + dE;
-        const parts = [dS && `${SQ} ${sign(dS)}`, dH && `${SH} ${sign(dH)}`, dE && `${store2} ${sign(dE)}`].filter(Boolean) as string[];
+        const parts = [dS && `${SQ} ${sign(dS)}`, dH && `${SH} ${sign(dH)}`, dE && `${siblings.length ? 'other listings' : store2} ${sign(dE)}`].filter(Boolean) as string[];
         why = parts.length > 1 ? `changed in more than one store (${parts.join(', ')})` : `changed in ${parts[0]?.replace(/ ([+-]\d+)$/, ' ($1)')}`;
       }
     }
@@ -555,7 +579,7 @@ async function execute(runId: string, onlyFailed: boolean): Promise<InventorySyn
       await attention(l, `Held for review: this would change stock by more than ${limit} (${SQ} ${S}, ${SH} ${H} → ${target}). Choose which count is right.`, { last_square_quantity: S, last_shopify_quantity: H });
       continue;
     }
-    plans.push({ link: l, S, H, target, why, extras });
+    plans.push({ link: l, S, H, target, why, extras, siblings });
   }
   await db().query('UPDATE inventory_sync_runs SET processed = $2 WHERE id = $1', [runId, links.length - plans.length]);
 
@@ -625,6 +649,19 @@ async function execute(runId: string, onlyFailed: boolean): Promise<InventorySyn
         extraNote = e instanceof ShopifyStaleQuantityError ? `${store2} changed during the sync — next time` : `${store2} not updated (${e instanceof IntegrationError ? e.userMessage : 'no answer'})`;
       }
     }
+    // Main-store listings sharing the SKU (e.g. PRO) follow too (compare-and-set).
+    if (p.siblings.length) {
+      const need = p.siblings.filter((e) => e.available !== p.target);
+      try {
+        if (need.length) {
+          await shop.setAvailable(shLoc, need.map((e) => ({ inventoryItemId: e.inventoryItemId, quantity: p.target, changeFromQuantity: e.available })), `inv-sync-sib-${runId}-${l.id}`, `addendum-crm://inventory-sync/${runId}`);
+          extraNote = [extraNote, `${SH} other listing${need.length > 1 ? 's' : ''} ${need.map((e) => e.available).join('/')} → ${p.target}`].filter(Boolean).join(', ');
+        }
+        await markSiblings(p.siblings, p.target);
+      } catch (e) {
+        extraNote = [extraNote, e instanceof ShopifyStaleQuantityError ? `${SH} other listings changed during the sync — next time` : `${SH} other listings not updated (${e instanceof IntegrationError ? e.userMessage : 'no answer'})`].filter(Boolean).join(', ');
+      }
+    }
     const change = [needSq && `${SQ} ${p.S} → ${p.target}`, needSh && `${SH} ${p.H} → ${p.target}`, extraNote].filter(Boolean).join(', ');
     note({ label: l.label, sku: l.sku, result: needSq && needSh ? 'updated_both' : needSq ? 'updated_square' : 'updated_shopify', note: `${change} (${p.why})` });
     await setLink(l.id, { baseline_quantity: p.target, last_square_quantity: p.target, last_shopify_quantity: p.target, status: 'in_sync', issue: null, last_synced_at: new Date(), last_change: `${change} (${p.why})` });
@@ -639,38 +676,41 @@ async function execute(runId: string, onlyFailed: boolean): Promise<InventorySyn
   // ---- Shopify-only products: not in Square, same SKU in both Shopify stores. The two stores keep one shared count,
   // combined the same way (count when last set + changes in each store since). The first time, the main store's count is kept.
   let shopifyOnlySynced = 0;
-  if (shop2 && sh2Loc && !onlyFailed) {
-    await stage(runId, `Syncing ${SH}-only products with ${store2}`);
+  if (!onlyFailed && ((shop2 && sh2Loc) || shSiblings.size)) {
+    await stage(runId, `Syncing ${SH}-only products`);
     for (const a of shopItems) {
       const sku = normSku(a.sku);
-      if (!sku || (linkedSh.has(a.inventoryItemId) && !onlineOnly.has(a.inventoryItemId)) || dupSkus.has(sku) || !a.tracked || a.available == null || gone.has(`shopify:${a.inventoryItemId}`)) continue;
-      const extras = sh2BySku.get(sku);
-      if (!extras?.length) continue;
+      if (!sku || siblingIds.has(a.inventoryItemId) || (linkedSh.has(a.inventoryItemId) && !onlineOnly.has(a.inventoryItemId)) || dupSkus.has(sku) || !a.tracked || a.available == null || gone.has(`shopify:${a.inventoryItemId}`)) continue;
+      const extras = (shop2 && sh2Loc && sh2BySku.get(sku)) || [];
+      const sibs = (shSiblings.get(sku) ?? []).filter((e) => e.available != null);
+      if (!extras.length && !sibs.length) continue;
       const A = a.available;
       const B: number | null = extraRows.get(a.inventoryItemId)?.synced_baseline ?? null;
       let dE = 0;
-      for (const e of extras) { const r = extraRows.get(e.inventoryItemId); if (r?.synced_baseline != null) dE += e.available! - r.synced_baseline; }
+      for (const e of [...extras, ...sibs]) { const r = extraRows.get(e.inventoryItemId); if (r?.synced_baseline != null) dE += e.available! - r.synced_baseline; }
       const target = B == null ? A : A + dE;
       const label = a.label;
-      if (B != null && target === A && extras.every((e) => e.available === target)) { tally.unchanged++; continue; }
+      if (B != null && target === A && extras.every((e) => e.available === target) && sibs.every((e) => e.available === target)) { tally.unchanged++; continue; }
       if (target < 0) { tally.attention++; note({ label, sku: a.sku, result: 'attention', note: `${SH} + ${store2} only: combining the two stores’ sales would leave ${target}. Set the right count in the Products tab.` }); continue; }
       const limit = settings.holdChangesOver;
       if (limit > 0 && B != null && (Math.abs(target - A) > limit || extras.some((e) => Math.abs(target - e.available!) > limit))) {
         tally.attention++; note({ label, sku: a.sku, result: 'attention', note: `${SH} + ${store2} only: held for review — this would change stock by more than ${limit}. Set the right count in the Products tab.` }); continue;
       }
       try {
-        if (A !== target) await shop.setAvailable(shLoc, [{ inventoryItemId: a.inventoryItemId, quantity: target, changeFromQuantity: A }], `inv-sync-so-${runId}-${a.inventoryItemId}`, `addendum-crm://inventory-sync/${runId}`);
+        const sibNeed = sibs.filter((e) => e.available !== target);
+        if (A !== target || sibNeed.length) await shop.setAvailable(shLoc, [...(A !== target ? [{ inventoryItemId: a.inventoryItemId, quantity: target, changeFromQuantity: A }] : []), ...sibNeed.map((e) => ({ inventoryItemId: e.inventoryItemId, quantity: target, changeFromQuantity: e.available }))], `inv-sync-so-${runId}-${a.inventoryItemId}`, `addendum-crm://inventory-sync/${runId}`);
         const need = extras.filter((e) => e.available !== target);
-        if (need.length) await shop2.setAvailable(sh2Loc, need.map((e) => ({ inventoryItemId: e.inventoryItemId, quantity: target, changeFromQuantity: e.available })), `inv-sync2-so-${runId}-${a.inventoryItemId}`, `addendum-crm://inventory-sync/${runId}`);
+        if (need.length && shop2 && sh2Loc) await shop2.setAvailable(sh2Loc, need.map((e) => ({ inventoryItemId: e.inventoryItemId, quantity: target, changeFromQuantity: e.available })), `inv-sync2-so-${runId}-${a.inventoryItemId}`, `addendum-crm://inventory-sync/${runId}`);
         await markExtras(extras, target);
+        await markSiblings(sibs, target);
         await db().query(
           `INSERT INTO inventory_sync_extra(inventory_item_id, store, sku, label, synced_baseline) VALUES ($1,'shopify1',$2,$3,$4)
            ON CONFLICT (inventory_item_id) DO UPDATE SET sku = $2, label = $3, synced_baseline = $4, updated_at = now()`, [a.inventoryItemId, a.sku, label, target]);
         if (A !== target) tally.updated_shopify++;
         if (need.length) tally.updated_store2++;
-        if (A !== target || need.length) {
+        if (A !== target || need.length || sibNeed.length) {
           shopifyOnlySynced++;
-          const change = [A !== target && `${SH} ${A} → ${target}`, need.length && `${store2} ${need.map((e) => e.available).join('/')} → ${target}`].filter(Boolean).join(', ');
+          const change = [A !== target && `${SH} ${A} → ${target}`, sibNeed.length && `${SH} other listing${sibNeed.length > 1 ? 's' : ''} ${sibNeed.map((e) => e.available).join('/')} → ${target}`, need.length && `${store2} ${need.map((e) => e.available).join('/')} → ${target}`].filter(Boolean).join(', ');
           note({ label, sku: a.sku, result: 'updated_shopify', note: `${change} (${onlineOnly.has(a.inventoryItemId) ? `online stock, separate from ${SQ}` : `not in ${SQ}`} — ${B == null ? `first sync, ${SH}’s count kept` : 'both stores’ sales combined'})` });
         } else tally.unchanged++;
       } catch (e) {

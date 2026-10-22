@@ -134,7 +134,8 @@ export function Toggle({ checked, onChange, label, description, disabled }: { ch
 
 export function Segmented<T extends string>({ value, onChange, options, className }: { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode }[]; className?: string }) {
   return (
-    <div className={cx('inline-flex rounded-lg bg-mist p-0.5 font-button', className)} role="tablist">
+    // Never wider than the screen: on a phone, a long row of choices scrolls sideways instead of running off the edge.
+    <div className={cx('inline-flex max-w-full overflow-x-auto scrollbar-none rounded-lg bg-mist p-0.5 font-button', className)} role="tablist">
       {options.map((o) => (
         <button
           key={o.value}
@@ -278,7 +279,7 @@ export function PageHeader({ title, subtitle, actions }: { title: ReactNode; sub
         <h1 className="h-display text-[34px] leading-[1.05] sm:text-[40px]"><Tc>{title}</Tc></h1>
         {subtitle && <p className="mt-1.5 text-[15px] text-stone">{subtitle}</p>}
       </div>
-      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
+      {actions && <div className="flex min-w-0 max-w-full flex-wrap gap-2">{actions}</div>}
     </div>
   );
 }

@@ -159,3 +159,53 @@ describe('A second Shopify store with the same stock and SKUs', () => {
     expect(all.totals.units).toBe(all.totals.square.units + all.totals.shopify.units + all.totals.shopify2.units);
   });
 });
+
+describe('Listings sharing a SKU in the main Shopify store (e.g. a PRO listing)', () => {
+  const PROLIST = { sku: 'PRO-WEFT', inventoryItemId: 'gid://shopify/InventoryItem/77', label: 'Signature Hand-Tied Weft PRO – 20" / #60 Platinum', tracked: true };
+  const withProListing = async (fn: () => Promise<void>) => {
+    MockShopifyService.catalog.push(PROLIST);
+    MockShopifyService.stock.set(PROLIST.inventoryItemId, 50);
+    try { await fn(); } finally { MockShopifyService.catalog.splice(MockShopifyService.catalog.indexOf(PROLIST), 1); MockShopifyService.skus.delete(PROLIST.inventoryItemId); }
+  };
+
+  it('can be given the same SKU, then follow the product’s stock — and a sale on either one comes off the shared count', async () => {
+    await withProListing(async () => {
+      await sync();
+      forgetStockCache();
+      // Giving the PRO listing the regular listing's SKU is allowed (Shopify only; Square SKUs stay unique).
+      const pro = (await api.get('/api/inventory-sync/stock/products')).body.products.find((p: any) => p.shopifyInventoryItemId === PROLIST.inventoryItemId);
+      const r = await api.post('/api/inventory-sync/stock/apply', { kind: 'adjust', changes: [{ key: pro.key, sku: 'HTW-20-60' }] });
+      expect(r.body.results[0]).toMatchObject({ ok: true });
+      await sync();
+      expect(MockShopifyService.stock.get(PROLIST.inventoryItemId)).toBe(12); // follows the product
+      forgetStockCache();
+      const list = (await api.get('/api/inventory-sync/stock/products')).body.products;
+      expect(list.some((p: any) => p.shopifyInventoryItemId === PROLIST.inventoryItemId)).toBe(false); // not listed on its own
+      expect(list.find((p: any) => p.key === SQ.weft60).siblings).toEqual([expect.objectContaining({ inventoryItemId: PROLIST.inventoryItemId, qty: 12 })]);
+      // Two sold on the PRO listing: everything goes to 10.
+      MockShopifyService.stock.set(PROLIST.inventoryItemId, 10);
+      await sync();
+      expect(demoSquareStock.get(SQ.weft60)).toBe(10);
+      expect(MockShopifyService.stock.get(SH.weft60)).toBe(10);
+      expect(MockShopifyStore2.stock.get(PRO.weftA)).toBe(10);
+    });
+  });
+
+  it('a Square SKU is still unique', async () => {
+    await sync();
+    forgetStockCache();
+    const r = await api.post('/api/inventory-sync/stock/apply', { kind: 'adjust', changes: [{ key: SQ.ktip, sku: 'HTW-20-60' }] });
+    expect(r.body.results[0]).toMatchObject({ ok: false, note: expect.stringMatching(/already used .* in Square/) });
+  });
+
+  it('pre-orders count the shared shortfall once, not once per store', async () => {
+    const { preorderReport } = await import('../src/domain/stock.js');
+    await sync();
+    MockShopifyService.stock.set(SH.weft60, -5);
+    MockShopifyStore2.stock.set(PRO.weftA, -5);
+    MockShopifyStore2.stock.set(PRO.weftB, -5);
+    forgetStockCache();
+    const item = (await preorderReport()).items.find((i) => i.key === SQ.weft60)!;
+    expect(item).toMatchObject({ waiting: 5, toOrder: 5 });
+  });
+});
