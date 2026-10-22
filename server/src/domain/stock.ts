@@ -1274,3 +1274,66 @@ export async function markSibling(inventoryItemId: string, sku: string | null, l
     `INSERT INTO inventory_sync_extra(inventory_item_id, store, sku, label, synced_baseline) VALUES ($1,'shopify_sibling',$2,$3,$4)
      ON CONFLICT (inventory_item_id) DO UPDATE SET store = 'shopify_sibling', sku = $2, label = $3, synced_baseline = $4, updated_at = now()`, [inventoryItemId, sku, label, qty]);
 }
+
+// ---------------- Pro prices (Inventory → Pricing → Match Pro prices) ----------------
+/** A Pro listing: "Pro" in its name, or the product tagged "professional" or "pro-pricing". */
+export const isProListing = (p: { label: string; productTitle?: string; tags?: string[] }) =>
+  /\bpro\b/i.test(`${p.productTitle ?? ''} ${p.label}`) || (p.tags ?? []).some((t) => ['professional', 'pro-pricing'].includes(t.trim().toLowerCase()));
+
+/**
+ * The retail store lists each product twice: retail and Pro. Its Pro listings should cost what the professional store
+ * charges for the same SKU. Plans those changes only — nothing else is touched. The professional store is the one whose
+ * address says "professional" (else the main store).
+ */
+export async function proPricePlan() {
+  const { config } = await import('../config.js');
+  const c = config();
+  const s1 = shopifyService();
+  const s2 = shopifyService2();
+  if (!s1 || !s2) throw badRequest('Both Shopify stores need to be connected.');
+  const proFirst = /professional/i.test(c.SHOPIFY_STORE_DOMAIN ?? '') || !/professional/i.test(c.SHOPIFY2_STORE_DOMAIN ?? '');
+  const [pro, retail] = proFirst ? [s1, s2] : [s2, s1];
+  const names = { pro: shopifyNameOf(proFirst ? 'shopify' : 'shopify2'), retail: shopifyNameOf(proFirst ? 'shopify2' : 'shopify') };
+  const [proPrices, retailPrices] = await Promise.all([pro.listPrices(), retail.listPrices()]);
+  const proBySku = new Map<string, Set<number>>();
+  for (const p of proPrices) if (norm(p.sku) && p.priceCents != null) proBySku.set(norm(p.sku), new Set([...(proBySku.get(norm(p.sku)) ?? []), p.priceCents]));
+  const changes: { variantId: string; productId: string; label: string; sku: string | null; fromCents: number | null; toCents: number }[] = [];
+  const skipped: { label: string; sku: string | null; reason: string }[] = [];
+  let same = 0;
+  // "Pro" in the name is the surest sign. A tag only counts when the SKU has no listing named Pro in that store —
+  // otherwise the tagged one is the retail listing (tagged by mistake) and its price is left alone.
+  const namedPro = (p: { label: string; productTitle?: string }) => /\bpro\b/i.test(`${p.productTitle ?? ''} ${p.label}`);
+  const skusWithNamedPro = new Set(retailPrices.filter(namedPro).map((p) => norm(p.sku)).filter(Boolean));
+  for (const l of retailPrices.filter(isProListing)) {
+    if (!namedPro(l) && skusWithNamedPro.has(norm(l.sku))) {
+      skipped.push({ label: l.label, sku: l.sku, reason: 'Tagged professional / pro-pricing, but this SKU already has a listing named Pro — treated as the retail listing, not changed' });
+      continue;
+    }
+    const prices = norm(l.sku) ? proBySku.get(norm(l.sku)) : undefined;
+    if (!norm(l.sku)) { skipped.push({ label: l.label, sku: null, reason: 'No SKU' }); continue; }
+    if (!prices?.size) { skipped.push({ label: l.label, sku: l.sku, reason: `SKU not found in ${names.pro}` }); continue; }
+    if (prices.size > 1) { skipped.push({ label: l.label, sku: l.sku, reason: `${names.pro} has more than one price for this SKU (${[...prices].map((x) => `$${(x / 100).toFixed(2)}`).join(', ')})` }); continue; }
+    const to = [...prices][0];
+    if (l.priceCents === to) { same++; continue; }
+    changes.push({ variantId: l.variantId, productId: l.productId, label: l.label, sku: l.sku, fromCents: l.priceCents, toCents: to });
+  }
+  return { proStore: names.pro, retailStore: names.retail, changes, skipped, alreadyMatching: same, retailService: retail };
+}
+
+/** Applies the plan (recomputed now, so it's never stale): only the Pro listings' prices in the retail store. */
+export async function applyProPrices() {
+  const plan = await proPricePlan();
+  const byProduct = new Map<string, typeof plan.changes>();
+  for (const ch of plan.changes) byProduct.set(ch.productId, [...(byProduct.get(ch.productId) ?? []), ch]);
+  const failed: { label: string; message: string }[] = [];
+  let saved = 0;
+  for (const [productId, list] of byProduct) {
+    try {
+      await plan.retailService.setPrices(productId, list.map((x) => ({ variantId: x.variantId, priceCents: x.toCents })));
+      saved += list.length;
+    } catch (e) {
+      for (const x of list) failed.push({ label: x.label, message: (e as Error).message });
+    }
+  }
+  return { saved, failed, skipped: plan.skipped, alreadyMatching: plan.alreadyMatching };
+}

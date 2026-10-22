@@ -227,12 +227,12 @@ export class ShopifyApiService implements ShopifyService {
         `query($after: String) {
           productVariants(first: 250, after: $after) {
             pageInfo { hasNextPage endCursor }
-            nodes { id sku price displayName product { id } inventoryItem { id unitCost { amount } } }
+            nodes { id sku price displayName product { id title tags } inventoryItem { id unitCost { amount } } }
           }
         }`, { after });
       for (const v of d.productVariants.nodes) {
         if (!v.inventoryItem?.id) continue;
-        out.push({ variantId: v.id, productId: v.product.id, inventoryItemId: v.inventoryItem.id, sku: v.sku || null, label: v.displayName,
+        out.push({ variantId: v.id, productId: v.product.id, inventoryItemId: v.inventoryItem.id, sku: v.sku || null, label: v.displayName, productTitle: v.product.title, tags: v.product.tags ?? [],
           priceCents: v.price != null ? Math.round(Number(v.price) * 100) : null,
           costCents: v.inventoryItem.unitCost?.amount != null ? Math.round(Number(v.inventoryItem.unitCost.amount) * 100) : null });
       }

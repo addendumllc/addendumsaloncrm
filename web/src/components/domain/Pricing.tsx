@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Search } from 'lucide-react';
 import { api } from '../../api/client';
-import { Button, EmptyState, ErrorNote, Field, PageLoading, cx, useToast } from '../ui';
+import { Button, EmptyState, ErrorNote, Field, Modal, PageLoading, cx, useToast } from '../ui';
 
 interface Listing { variantId: string; productId: string; inventoryItemId: string; label: string; priceCents: number | null }
 interface Row { key: string; label: string; sku: string | null; costCents: number | null; square: { variationId: string; priceCents: number | null } | null; shopify: Listing[]; shopify2: Listing[] }
@@ -30,6 +30,7 @@ export function PricingView() {
   const [bulk, setBulk] = useState<{ col: Col; how: 'markup' | 'percent' | 'set'; value: string }>({ col: 'shopify', how: 'markup', value: '2' });
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState<{ key: string; store: string; message: string }[]>([]);
+  const [matching, setMatching] = useState(false);
   const cols = useMemo(() => {
     if (!data) return [] as { col: Col; name: string }[];
     return [
@@ -139,6 +140,7 @@ export function PricingView() {
           <input className="field h-10 pl-9" placeholder="Search name or SKU" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search products" />
         </label>
         <span className="ml-auto text-[13px] text-stone">{changes.length ? `${changes.length} product${changes.length === 1 ? '' : 's'} changed` : 'No changes yet'}</span>
+        {data.stores.shopify2 && <Button onClick={() => setMatching(true)}>Match Pro prices</Button>}
         {changes.length > 0 && <Button variant="ghost" onClick={() => { setDrafts({}); setFailed([]); }}>Discard</Button>}
         <Button variant="primary" loading={saving} disabled={!changes.length || invalid} onClick={save}>Save to stores</Button>
       </div>
@@ -165,6 +167,7 @@ export function PricingView() {
         </div>
       )}
 
+      {matching && <MatchProPrices onClose={() => setMatching(false)} onDone={() => qc.invalidateQueries({ queryKey: ['stock-prices'] })} />}
       {!rows.length ? <div className="panel"><EmptyState title="No products">{q ? 'Nothing matches that search.' : 'No products in the stores yet.'}</EmptyState></div> : (
         <div className="panel overflow-x-auto">
           <table className="w-full min-w-[760px] text-sm">
@@ -204,5 +207,65 @@ function PriceInput({ value, onChange, changed, margin: m, label, tag }: { value
       </label>
       {m != null && <span className={cx('mt-0.5 block text-[11px]', m < 30 ? 'text-rose' : 'text-stone')}>{m}% margin</span>}
     </div>
+  );
+}
+
+interface ProPlan {
+  proStore: string; retailStore: string; alreadyMatching: number;
+  changes: { variantId: string; label: string; sku: string | null; fromCents: number | null; toCents: number }[];
+  skipped: { label: string; sku: string | null; reason: string }[];
+}
+
+/**
+ * The retail store's Pro listings ("Pro" in the name, or tagged professional / pro-pricing) take the professional
+ * store's price for the same SKU. Shows every change first; nothing else is touched.
+ */
+function MatchProPrices({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const { data, isLoading, error, refetch } = useQuery({ queryKey: ['stock-prices-pro'], queryFn: () => api.get<ProPlan>('/inventory-sync/stock/prices/pro'), gcTime: 0 });
+  const [busy, setBusy] = useState(false);
+  const apply = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post<{ saved: number; failed: { label: string; message: string }[] }>('/inventory-sync/stock/prices/pro');
+      toast(r.failed.length ? `${r.saved} updated · ${r.failed.length} didn’t save: ${r.failed[0].message}` : `${r.saved} Pro price${r.saved === 1 ? '' : 's'} updated`, r.failed.length ? 'error' : 'success');
+      onDone();
+      onClose();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const money = (c: number | null) => (c == null ? '—' : `$${(c / 100).toFixed(2)}`);
+  return (
+    <Modal open wide onClose={onClose} title="Match Pro prices" footer={<>
+      <Button variant="ghost" onClick={onClose}>Cancel</Button>
+      <Button variant="primary" loading={busy} disabled={!data?.changes.length} onClick={apply}>{data?.changes.length ? `Update ${data.changes.length} Pro price${data.changes.length === 1 ? '' : 's'}` : 'Nothing to update'}</Button>
+    </>}>
+      {isLoading ? <PageLoading /> : error || !data ? <ErrorNote error={error} onRetry={refetch} /> : (
+        <div className="space-y-4 text-[14px]">
+          <p className="text-ink-soft">Pro listings in <b className="font-medium text-ink">{data.retailStore}</b> — “Pro” in the name, or tagged <i>professional</i> or <i>pro-pricing</i> — get <b className="font-medium text-ink">{data.proStore}</b>’s price for the same SKU. No other price changes.</p>
+          {data.alreadyMatching > 0 && <p className="text-[13px] text-stone">{data.alreadyMatching} Pro listing{data.alreadyMatching === 1 ? '' : 's'} already match.</p>}
+          {data.changes.length > 0 && (
+            <div className="max-h-[45vh] overflow-y-auto border border-line">
+              <table className="w-full text-[13px]">
+                <thead><tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-stone"><th className="px-3 py-2 font-medium">Pro listing</th><th className="px-3 py-2 font-medium">SKU</th><th className="px-3 py-2 text-right font-medium">Now</th><th className="px-3 py-2 text-right font-medium">New</th></tr></thead>
+                <tbody>{data.changes.map((c) => (
+                  <tr key={c.variantId} className="border-b border-line/60 last:border-0"><td className="px-3 py-1.5 text-ink">{c.label}</td><td className="px-3 py-1.5 font-mono text-stone">{c.sku}</td><td className="num px-3 py-1.5 text-right text-stone">{money(c.fromCents)}</td><td className="num px-3 py-1.5 text-right font-medium text-ink">{money(c.toCents)}</td></tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+          {data.skipped.length > 0 && (
+            <details className="text-[13px]">
+              <summary className="cursor-pointer text-stone">{data.skipped.length} Pro listing{data.skipped.length === 1 ? '' : 's'} left as they are</summary>
+              <ul className="mt-2 space-y-1 text-ink-soft">{data.skipped.map((x, i) => <li key={i}>{x.label}{x.sku ? ` (${x.sku})` : ''} — {x.reason}</li>)}</ul>
+            </details>
+          )}
+          {!data.changes.length && !data.skipped.length && !data.alreadyMatching && <p className="text-stone">No Pro listings found in {data.retailStore}.</p>}
+        </div>
+      )}
+    </Modal>
   );
 }

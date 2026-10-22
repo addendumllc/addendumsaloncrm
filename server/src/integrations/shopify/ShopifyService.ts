@@ -37,7 +37,7 @@ export interface ShopifyInventoryEntry {
 }
 
 /** A variant's price and its inventory item's cost (Inventory → Pricing). */
-export interface ShopifyPriceEntry { variantId: string; productId: string; inventoryItemId: string; sku: string | null; label: string; priceCents: number | null; costCents: number | null }
+export interface ShopifyPriceEntry { variantId: string; productId: string; inventoryItemId: string; sku: string | null; label: string; priceCents: number | null; costCents: number | null; productTitle?: string; tags?: string[] }
 /** An order's number (e.g. "#1042") and the customer's name, when the app may read customers. */
 export interface ShopifyOrderWho { name: string | null; customer: string | null }
 
@@ -95,6 +95,8 @@ export interface ShopifyService {
 
 /** Demo prices and costs per listing (by inventory item), shared by both demo stores. */
 export const demoPrices = new Map<string, { priceCents: number; costCents: number | null }>();
+/** Demo product tags per listing (e.g. "pro-pricing"). */
+export const demoTags = new Map<string, string[]>();
 const demoPriceOf = (id: string, i: number) => demoPrices.get(id) ?? { priceCents: 9500 + i * 2000, costCents: 4000 + i * 800 };
 const DEMO_CUSTOMERS = ['Maya Lopez', 'Bella Moreno', 'Jade Kim', 'Rosa Diaz', 'Sam Patel', 'Ava Chen'];
 function demoWho(orderIds: string[]) {
@@ -106,7 +108,7 @@ function demoWho(orderIds: string[]) {
 function demoPriceList(catalog: ShopifyVariantBySku[], prefix: string) {
   return catalog.map((c, i) => ({
     variantId: `gid://shopify/ProductVariant/${prefix}${i}`, productId: `gid://shopify/Product/${prefix}${c.label.split(/\s+[–-]\s+/)[0].length}`,
-    inventoryItemId: c.inventoryItemId, sku: c.sku, label: c.label, ...demoPriceOf(c.inventoryItemId, i),
+    inventoryItemId: c.inventoryItemId, sku: c.sku, label: c.label, productTitle: c.label.split(/\s+[–-]\s+/)[0], tags: demoTags.get(c.inventoryItemId) ?? [], ...demoPriceOf(c.inventoryItemId, i),
   }));
 }
 

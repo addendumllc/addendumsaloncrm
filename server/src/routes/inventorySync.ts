@@ -6,7 +6,7 @@ import {
   copyShopifySkuToSquare, editLinkedProduct, getRun, linkByIds, linkBySku, listLinks, listRuns, markSeparate, resolveLink, setProductKind, setShopifySync, skuCandidates, startInventorySync, syncOverview, unlink,
   unmarkSeparate,
 } from '../domain/inventorySync.js';
-import { applyPrices, priceList,
+import { applyPrices, applyProPrices, priceList, proPricePlan,
   applyStockChanges, createPurchaseOrders, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
   assignSupplier, deleteSupplier, refreshShopifySales, renameSupplier, saveProductSettings, saveSupplier, setForecastSettings, setSupplierLeadTime, stockForecast, stockHistory, stockProducts, updatePurchaseOrder,
 } from '../domain/stock.js';
@@ -167,6 +167,16 @@ inventorySyncRouter.get('/stock/preorders', ah(async (_req, res) => res.json(awa
 
 // Pricing: unit cost and each store's price (salon Square, each Shopify store), changed in one place.
 inventorySyncRouter.get('/stock/prices', ah(async (_req, res) => res.json(await priceList())));
+// Pro listings in the retail store take the professional store's price for the same SKU (preview, then apply).
+inventorySyncRouter.get('/stock/prices/pro', ah(async (_req, res) => {
+  const { retailService: _s, ...plan } = await proPricePlan();
+  res.json(plan);
+}));
+inventorySyncRouter.post('/stock/prices/pro', ah(async (req, res) => {
+  const r = await applyProPrices();
+  await logAction(req, 'stock.pro_prices', 'stock', null, { saved: r.saved, failed: r.failed.length });
+  res.json(r);
+}));
 const cents = z.number().int().min(0).max(10_000_000);
 const variantPrices = z.array(z.object({ variantId: z.string().min(1).max(200), productId: z.string().min(1).max(200), priceCents: cents })).max(20);
 inventorySyncRouter.put('/stock/prices', ah(async (req, res) => {

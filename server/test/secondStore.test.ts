@@ -209,3 +209,36 @@ describe('Listings sharing a SKU in the main Shopify store (e.g. a PRO listing)'
     expect(item).toMatchObject({ waiting: 5, toOrder: 5 });
   });
 });
+
+describe('Pro prices in the retail store', () => {
+  it('only Pro listings (by name or tag) take the professional store’s price for the same SKU; nothing else changes', async () => {
+    const { demoPrices, demoTags } = await import('../src/integrations/shopify/ShopifyService.js');
+    const PROW = { sku: 'HTW-20-60', inventoryItemId: 'gid://shopify/InventoryItem/290', label: 'Signature Hand-Tied Weft PRO – 20" / #60', tracked: true };
+    const TAGGED = { sku: 'KTIP-22-1B', inventoryItemId: 'gid://shopify/InventoryItem/291', label: 'K-Tip Extensions (stylists) – 22" / #1B', tracked: true };
+    MockShopifyStore2.catalog.push(PROW, TAGGED);
+    demoTags.set(TAGGED.inventoryItemId, ['Pro-Pricing']);
+    // A retail listing tagged by mistake (its SKU has a listing named Pro): left alone.
+    demoTags.set(PRO.weftA, ['professional']);
+    demoPrices.set(SH.weft60, { priceCents: 15000, costCents: null }); // professional store's price
+    demoPrices.set(SH.ktip, { priceCents: 9900, costCents: null });
+    try {
+      const before = (await api.get('/api/inventory-sync/stock/prices')).body.rows;
+      const retailBefore = before.flatMap((r: any) => r.shopify2).filter((l: any) => ![PROW.inventoryItemId, TAGGED.inventoryItemId].includes(l.inventoryItemId));
+      const plan = (await api.get('/api/inventory-sync/stock/prices/pro')).body;
+      expect(plan.changes.map((c: any) => [c.sku, c.toCents])).toEqual(expect.arrayContaining([['HTW-20-60', 15000], ['KTIP-22-1B', 9900]]));
+      expect(plan.changes).toHaveLength(2);
+      expect(plan.skipped).toEqual(expect.arrayContaining([expect.objectContaining({ sku: 'HTW-20-60', reason: expect.stringMatching(/retail listing/) })]));
+      const r = (await api.post('/api/inventory-sync/stock/prices/pro')).body;
+      expect(r).toMatchObject({ saved: 2, failed: [] });
+      const after = (await api.get('/api/inventory-sync/stock/prices')).body.rows.flatMap((x: any) => x.shopify2);
+      expect(after.find((l: any) => l.inventoryItemId === PROW.inventoryItemId).priceCents).toBe(15000);
+      expect(after.find((l: any) => l.inventoryItemId === TAGGED.inventoryItemId).priceCents).toBe(9900);
+      // Every other listing keeps its price.
+      for (const l of retailBefore) expect(after.find((x: any) => x.inventoryItemId === l.inventoryItemId).priceCents).toBe(l.priceCents);
+      expect((await api.get('/api/inventory-sync/stock/prices/pro')).body).toMatchObject({ changes: [], alreadyMatching: 2 });
+    } finally {
+      MockShopifyStore2.catalog.splice(MockShopifyStore2.catalog.indexOf(PROW), 2);
+      for (const id of [PROW.inventoryItemId, TAGGED.inventoryItemId, SH.weft60, SH.ktip, PRO.weftA]) { demoPrices.delete(id); demoTags.delete(id); }
+    }
+  });
+});
