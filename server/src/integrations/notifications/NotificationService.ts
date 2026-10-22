@@ -7,11 +7,12 @@ import { emailService } from '../registry.js';
  * Email/SMS staff alerts are architected here: plug a mail provider into `deliverExternal`.
  */
 export class NotificationService {
-  async notify(n: { staffId?: string | null; kind: string; title: string; body?: string; link?: string }) {
+  /** `external: false` keeps it in the CRM only (e.g. a task sent to one person — not the salon's alert email). */
+  async notify(n: { staffId?: string | null; kind: string; title: string; body?: string; link?: string; external?: boolean }) {
     await db().query('INSERT INTO notifications(staff_id, kind, title, body, link) VALUES ($1,$2,$3,$4,$5)', [
       n.staffId ?? null, n.kind, n.title, n.body ?? null, n.link ?? null,
     ]);
-    await this.deliverExternal(n);
+    if (n.external !== false) await this.deliverExternal(n);
   }
 
   private async deliverExternal(n: { title: string; body?: string; link?: string }) {

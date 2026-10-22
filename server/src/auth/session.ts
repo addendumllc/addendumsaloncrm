@@ -13,6 +13,8 @@ declare global {
   namespace Express {
     interface Request {
       user?: CurrentUser;
+      /** Set when this request comes from away from the salon with only some sections allowed (Location & Access). */
+      away?: boolean;
     }
   }
 }

@@ -40,6 +40,13 @@ export function ComposerModal({ target, onClose }: { target: ComposerTarget; onC
   const [handoff, setHandoff] = useState<{ message: MessageDTO; phone: string; href: string; opened: boolean | null } | null>(null);
   const [marking, setMarking] = useState<'sent' | 'not_sent' | null>(null);
   const aiEnabled = settings?.settings.ai.enabled !== false;
+  // The booking link only goes in when someone ticks "Add booking link" (drafts leave it out).
+  const bookingUrl = settings?.settings.business.bookingUrl?.trim() ?? '';
+  const bookingLine = bookingUrl ? `Book here: ${bookingUrl}` : '';
+  const hasBooking = !!bookingLine && body.includes(bookingLine);
+  const toggleBooking = (on: boolean) => setBody((b) => (on
+    ? (b.includes(bookingLine) ? b : `${b.trimEnd()}${b.trim() ? '\n' : ''}${bookingLine}`)
+    : b.replace(`\n${bookingLine}`, '').replace(bookingLine, '').trimEnd()));
 
   const draft = async () => {
     setDrafting(true);
@@ -183,6 +190,11 @@ export function ComposerModal({ target, onClose }: { target: ComposerTarget; onC
         </div>
         <span className="pt-2 text-xs text-stone">{body.length} characters</span>
       </div>
+      {bookingLine && (
+        <label className="mt-1 flex items-center gap-2 text-[13px] text-ink-soft">
+          <input type="checkbox" className="h-4 w-4 accent-plum" checked={hasBooking} onChange={(e) => toggleBooking(e.target.checked)} />Add booking link
+        </label>
+      )}
       <SavedRepliesPicker
         placement="inline" className="mt-1"
         context={{ clientId: target.clientId, leadId: target.leadId, conversationId: target.conversationId, taskId: target.taskId }}

@@ -6,7 +6,8 @@ import { useIntegrations, useRefreshAll } from '../../api/hooks';
 import { Button, Modal, useToast } from '../ui';
 
 /**
- * "Push to HighLevel" with the full flow: match contact → (ask to create if missing) → create task.
+ * "Push to HighLevel": one click makes a follow-up to-do on the client's HighLevel contact — matched by phone/email
+ * first, created only if there's none (no duplicates). Pushing again updates the same to-do.
  * Failed pushes stay saved here and show Retry.
  */
 export function HighLevelButton({ task, size = 'sm' }: { task: TaskDTO; size?: 'sm' | 'md' }) {
@@ -17,11 +18,11 @@ export function HighLevelButton({ task, size = 'sm' }: { task: TaskDTO; size?: '
   const [askCreate, setAskCreate] = useState<string | null>(null);
   if (!integ?.highlevel.connected || (!task.clientId && !task.leadId)) return null;
 
-  const push = async (createContact = false) => {
+  const push = async (createContact = true) => {
     setBusy(true);
     try {
       const r = await api.post<{ result: { status: string; message: string } }>(`/tasks/${task.id}/highlevel`, { createContact });
-      if (r.result.status === 'synced') toast('✓ Added to HighLevel');
+      if (r.result.status === 'synced') toast('✓ Follow-up to-do added in HighLevel');
       else if (r.result.status === 'needs_contact') setAskCreate(r.result.message);
       else toast(r.result.message, 'error');
       refresh();

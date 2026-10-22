@@ -168,3 +168,108 @@ describe('Changing your own password', () => {
     expect((await login('cara@addendumsalon.com', 'Second-pass-2026')).status).toBe(200);
   });
 });
+
+describe('Linking an account to Square', () => {
+  it('lists Square’s team with who each is linked to', async () => {
+    const r = await admin.get('/api/admin/users/square-team-members');
+    expect(r.status).toBe(200);
+    expect(r.body.connected).toBe(true);
+    expect(r.body.members.length).toBeGreaterThan(0);
+    expect(r.body.members.some((m: any) => m.linkedTo?.signsIn)).toBe(true);
+  });
+
+  it('moves the link off a placeholder the sync added, but never off a real account', async () => {
+    const tm = (await admin.get('/api/admin/users/square-team-members')).body.members[0];
+    const holder = await db().one<any>('SELECT id FROM staff WHERE square_team_member_id = $1', [tm.id]);
+    const placeholder = await db().one<any>("INSERT INTO staff(name, role, square_team_member_id) VALUES ('Square Copy', 'assistant', 'TM-PLACEHOLDER') RETURNING id");
+    const me = (await admin.post('/api/admin/users', { name: 'Linda Link', email: 'linda@addendumsalon.com' })).body.user;
+
+    const moved = await admin.patch(`/api/admin/users/${me.id}`, { squareTeamMemberId: 'TM-PLACEHOLDER' });
+    expect(moved.status).toBe(200);
+    expect(moved.body.user.squareTeamMemberId).toBe('TM-PLACEHOLDER');
+    expect((await db().one<any>('SELECT square_team_member_id FROM staff WHERE id = $1', [placeholder!.id])).square_team_member_id).toBeNull();
+
+    if (holder) {
+      await db().query("UPDATE staff SET password_hash = COALESCE(password_hash, 'x') WHERE id = $1", [holder.id]);
+      expect((await admin.patch(`/api/admin/users/${me.id}`, { squareTeamMemberId: tm.id })).status).toBe(400);
+    }
+  });
+});
+
+describe('Internal tasks reach the person, and each person arranges their Dashboard', () => {
+  it('a task sent to someone shows in their notifications, and their mobile can be saved for texting', async () => {
+    const jen = await db().one<any>("SELECT id FROM staff WHERE email = 'jennifer@addendumsalon.com'");
+    expect((await admin.patch(`/api/admin/users/${jen.id}`, { mobilePhone: 'not a phone' })).status).toBe(400);
+    const p = await admin.patch(`/api/admin/users/${jen.id}`, { mobilePhone: '(619) 555-0142' });
+    expect(p.body.user.mobilePhone).toBe('+16195550142');
+    expect((await admin.get('/api/staff')).body.staff.find((s: any) => s.id === jen.id).mobilePhone).toBe('+16195550142');
+
+    const t = await admin.post('/api/tasks', { kind: 'task', type: 'internal', title: 'Restock the color bar', priority: 'medium', dueAt: new Date(Date.now() + 3600_000).toISOString(), assignedStaffId: jen.id });
+    expect(t.status).toBe(201);
+    const stylist = await login('jennifer@addendumsalon.com', 'addendum-demo');
+    const mine = (await stylist.get('/api/notifications')).body.notifications;
+    expect(mine.some((n: any) => n.kind === 'task' && n.body === 'Restock the color bar')).toBe(true);
+    // Only for that person, not everyone.
+    const others = (await admin.get('/api/notifications')).body.notifications;
+    expect(others.some((n: any) => n.body === 'Restock the color bar')).toBe(false);
+  });
+
+  it('saves a Dashboard layout per person, and reset clears it', async () => {
+    expect((await admin.get('/api/dashboard/layout')).body.layout).toBeNull();
+    const layout = { order: ['schedule', 'counts', 'actions'], sizes: { schedule: 'full', actions: 'm' }, hidden: ['counts'] }; // a hidden widget is kept
+    expect((await admin.put('/api/dashboard/layout', { layout })).status).toBe(200);
+    expect((await admin.get('/api/dashboard/layout')).body.layout).toEqual(layout);
+    expect((await admin.put('/api/dashboard/layout', { layout: { order: [], sizes: { x: 'huge' } } })).status).toBe(400);
+    const desk = await login('frontdesk@addendumsalon.com', 'addendum-demo');
+    expect((await desk.get('/api/dashboard/layout')).body.layout).toBeNull(); // each person has their own
+    await admin.put('/api/dashboard/layout', { layout: null });
+    expect((await admin.get('/api/dashboard/layout')).body.layout).toBeNull();
+  });
+});
+
+describe('Customize menu', () => {
+  it('saves each person’s own sidebar order and hidden items', async () => {
+    const admin = await login('owner@addendumsalon.com', 'addendum-demo');
+    const layout = { order: ['/messages', '/', '/clients'], hidden: ['/tasks'] };
+    expect((await admin.put('/api/sidebar/layout', { layout })).status).toBe(200);
+    expect((await admin.get('/api/sidebar/layout')).body.layout).toEqual(layout);
+    expect((await admin.put('/api/sidebar/layout', { layout: { order: ['not a path'], hidden: [] } })).status).toBe(400);
+    const desk = await login('frontdesk@addendumsalon.com', 'addendum-demo');
+    expect((await desk.get('/api/sidebar/layout')).body.layout).toBeNull(); // each person has their own
+    await admin.put('/api/sidebar/layout', { layout: null });
+  });
+});
+
+describe('Personal look', () => {
+  it('each person saves their own accent and light/dark; the salon look is unchanged', async () => {
+    const jen = await login('jennifer@addendumsalon.com', 'addendum-demo');
+    expect((await jen.get('/api/look')).body.look).toEqual({ accent: null, mode: null, theme: null, workspace: null });
+    expect((await jen.put('/api/look', { accent: '#2F6670', mode: 'dark' })).status).toBe(200);
+    expect((await jen.get('/api/look')).body.look).toEqual({ accent: '#2F6670', mode: 'dark', theme: null, workspace: null });
+    expect((await admin.get('/api/look')).body.look).toEqual({ accent: null, mode: null, theme: null, workspace: null });
+    expect((await jen.put('/api/look', { accent: null, mode: null, theme: 'midnight' })).status).toBe(200);
+    expect((await jen.get('/api/look')).body.look.theme).toBe('midnight');
+    expect((await jen.put('/api/look', { accent: 'red', mode: 'dark' })).status).toBe(400);
+    expect((await admin.patch('/api/settings', { appearance: { mode: 'auto', background: 'custom', backgroundColor: '#FFF8F0', textColor: '#222222' } })).status).toBe(200);
+    expect((await admin.get('/api/settings')).body.settings.appearance).toMatchObject({ mode: 'auto', background: 'custom', backgroundColor: '#FFF8F0' });
+  });
+});
+
+describe('My settings', () => {
+  it('anyone can see their profile and set their own mobile, and nobody else’s', async () => {
+    const jen = await login('jennifer@addendumsalon.com', 'addendum-demo');
+    const p = (await jen.get('/api/my-profile')).body.profile;
+    expect(p.email).toBe('jennifer@addendumsalon.com');
+    expect(p.roleLabel).toBeTruthy();
+    expect((await jen.patch('/api/my-profile', { mobilePhone: 'nope' })).status).toBe(400);
+    expect((await jen.patch('/api/my-profile', { mobilePhone: '619-555-0177' })).body.profile.mobilePhone).toBe('+16195550177');
+    expect((await jen.get('/api/my-profile')).body.profile.mobilePhone).toBe('+16195550177');
+    // Their own colour, too.
+    expect((await jen.patch('/api/my-profile', { color: '#2e8b6f' })).body.profile.color).toBe('#2E8B6F');
+    expect((await jen.patch('/api/my-profile', { color: 'green' })).status).toBe(400);
+    expect((await jen.get('/api/my-profile')).body.profile.mobilePhone).toBe('+16195550177'); // untouched
+    // Only their own: they still can't edit other accounts.
+    const other = await db().one<any>("SELECT id FROM staff WHERE email = 'frontdesk@addendumsalon.com'");
+    expect((await jen.patch(`/api/admin/users/${other.id}`, { mobilePhone: '6195550100' })).status).toBe(403);
+  });
+});

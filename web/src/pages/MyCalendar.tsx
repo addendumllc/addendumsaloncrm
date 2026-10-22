@@ -4,6 +4,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, StickyNote } from 'lucide-reac
 import { useAppointments, useMe } from '../api/hooks';
 import { addDaysKey, dayKey, labelOfKey, startOfDayKey, time, weekdayOfKey } from '../lib/format';
 import { Badge, Button, EmptyState, ErrorNote, PageHeader, PageLoading, cx } from '../components/ui';
+import { Tc } from '../lib/titleCase';
 
 /**
  * A stylist's own appointments, a week at a time. The server only ever returns the signed-in stylist's
@@ -50,9 +51,9 @@ export function MyCalendarPage() {
         <ul className="space-y-4">
           {days.filter((d) => byDay.has(d)).map((d) => (
             <li key={d} className="panel px-4 py-4 sm:px-5">
-              <h2 className={cx('font-display text-xl', d === today ? 'text-plum' : 'text-ink')}>
+              <h2 className={cx('font-display text-xl', d === today ? 'text-plum' : 'text-ink')}><Tc>
                 {labelOfKey(d, { weekday: 'long', month: 'short', day: 'numeric' })}{d === today ? ' · Today' : ''}
-              </h2>
+              </Tc></h2>
               <ul className="mt-2 divide-y divide-line/70">
                 {byDay.get(d)!.map((a) => (
                   <li key={a.id} className={cx('flex gap-4 py-3', a.displayStatus === 'cancelled' && 'opacity-60')}>

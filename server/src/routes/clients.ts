@@ -1,3 +1,4 @@
+import { updatePreferredStylists } from '../domain/preferredStylist.js';
 import { Router } from 'express';
 import { z } from 'zod';
 import { can } from '../auth/permissions.js';
@@ -49,8 +50,8 @@ clientsRouter.post('/', requirePermission('clients:write'), ah(async (req, res) 
     if (dupe) throw badRequest('A client with that phone number already exists.', { existingId: dupe.id });
   }
   const row = await db().one<{ id: string }>(
-    `INSERT INTO clients(first_name, last_name, phone, email, birthday, preferred_staff_id, lead_source) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-    [b.firstName, b.lastName, phone, b.email?.toLowerCase() ?? null, b.birthday, b.preferredStaffId ?? null, b.leadSource],
+    `INSERT INTO clients(first_name, last_name, phone, email, birthday, preferred_staff_id, preferred_staff_source, lead_source) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+    [b.firstName, b.lastName, phone, b.email?.toLowerCase() ?? null, b.birthday, b.preferredStaffId ?? null, b.preferredStaffId ? 'manual' : null, b.leadSource],
   );
   if (b.tags?.length) await setClientTags(row!.id, b.tags);
   await db().query('UPDATE conversations SET client_id = $1 WHERE phone = $2 AND client_id IS NULL', [row!.id, phone]);
@@ -93,7 +94,10 @@ clientsRouter.get('/:id', requireAnyPermission('clients:read', 'clients:read_ass
       lastName: row.last_name,
       birthday: row.birthday,
       preferredStaffId: row.preferred_staff_id,
+      preferredStaffAuto: row.preferred_staff_source === 'auto',
       leadSource: row.lead_source,
+      preferences: row.preferences ?? null,
+      allergies: row.allergies ?? null,
       highlevelContactId: row.highlevel_contact_id,
       smsOptedOut: row.sms_opted_out,
       createdAt: iso(row.created_at),
@@ -113,7 +117,8 @@ clientsRouter.get('/:id', requireAnyPermission('clients:read', 'clients:read_ass
 
 clientsRouter.patch('/:id', requirePermission('clients:write'), ah(async (req, res) => {
   await assertClientVisible(req.user, req.params.id);
-  const b = parse(clientInput.partial().extend({ staffIds: z.array(z.string().uuid()).optional() }), req.body);
+  // preferredStaffAuto: true hands the preferred stylist back to the automatic choice (from their visits).
+  const b = parse(clientInput.partial().extend({ staffIds: z.array(z.string().uuid()).optional(), preferredStaffAuto: z.boolean().optional() }), req.body);
   const sets: string[] = [];
   const p: unknown[] = [req.params.id];
   const set = (col: string, v: unknown) => {
@@ -129,15 +134,30 @@ clientsRouter.patch('/:id', requirePermission('clients:write'), ah(async (req, r
   }
   if (b.email !== undefined) set('email', b.email?.toLowerCase() ?? null);
   if (b.birthday !== undefined) set('birthday', b.birthday);
-  if (b.preferredStaffId !== undefined) set('preferred_staff_id', b.preferredStaffId);
+  // Chosen by hand (even "None"): never changed automatically after this.
+  if (b.preferredStaffAuto) set('preferred_staff_source', 'auto');
+  else if (b.preferredStaffId !== undefined) { set('preferred_staff_id', b.preferredStaffId); set('preferred_staff_source', 'manual'); }
   if (b.leadSource !== undefined) set('lead_source', b.leadSource);
   if (sets.length) await db().query(`UPDATE clients SET ${sets.join(', ')}, updated_at = now() WHERE id = $1`, p);
+  if (b.preferredStaffAuto) await updatePreferredStylists({ clientId: req.params.id });
   if (b.tags) await setClientTags(req.params.id, b.tags);
   if (b.staffIds) {
     await db().query('DELETE FROM client_staff WHERE client_id = $1', [req.params.id]);
     for (const s of b.staffIds) await db().query('INSERT INTO client_staff(client_id, staff_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [req.params.id, s]);
   }
   await logAction(req, 'client.update', 'client', req.params.id, { fields: Object.keys(b) });
+  res.json({ ok: true });
+}));
+
+/** Preferences and allergies: anyone who can add notes can keep these up to date (internal only). */
+clientsRouter.patch('/:id/preferences', requireAnyPermission('clients:notes', 'clients:write'), ah(async (req, res) => {
+  await assertClientVisible(req.user, req.params.id);
+  const b = parse(z.object({ preferences: z.string().trim().max(2000).nullable().optional(), allergies: z.string().trim().max(1000).nullable().optional() }), req.body);
+  await db().query(
+    `UPDATE clients SET preferences = CASE WHEN $2::boolean THEN NULLIF($3, '') ELSE preferences END,
+       allergies = CASE WHEN $4::boolean THEN NULLIF($5, '') ELSE allergies END, updated_at = now() WHERE id = $1`,
+    [req.params.id, b.preferences !== undefined, b.preferences ?? null, b.allergies !== undefined, b.allergies ?? null]);
+  await logAction(req, 'client.preferences', 'client', req.params.id, { fields: Object.keys(b) });
   res.json({ ok: true });
 }));
 

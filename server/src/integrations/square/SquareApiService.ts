@@ -2,7 +2,7 @@ import { config, squareBaseUrl } from '../../config.js';
 import { IntegrationError } from '../../lib/errors.js';
 import { DAY } from '../../lib/time.js';
 import type {
-  SquareBooking, SquareCustomer, SquareInventoryCount, SquareOrder, SquarePaymentInfo, SquareLocation, SquareProductVariation, SquareService, SquareServiceVariation, SquareTeamMember, SquareSetCount,
+  SquareBooking, SquareCustomer, SquareInventoryCount, SquareOrder, SquarePaymentInfo, SquareTimecard, SquareJob, TimecardBreakInput, SquareLocation, SquareProductVariation, SquareService, SquareServiceVariation, SquareTeamMember, SquareSetCount,
 } from './types.js';
 
 /**
@@ -19,12 +19,13 @@ import type {
  *  GET  /v2/merchants                (MERCHANT_PROFILE_READ)
  *  POST /v2/orders/search            (ORDERS_READ; updated_at filter + UPDATED_AT sort, ≤10 locations, ≤1000/page)
  *  GET  /v2/payments                 (PAYMENTS_READ; begin_time/end_time, ≤100/page)
+ *  POST /v2/labor/timecards/search   (TIMECARDS_READ; falls back to /v2/labor/shifts/search on older API versions)
  */
 export class SquareApiService implements SquareService {
   readonly mode = 'live' as const;
   constructor(private getToken: () => Promise<string>) {}
 
-  private async call<T>(method: 'GET' | 'POST', path: string, body?: unknown, attempt = 0): Promise<T> {
+  private async call<T>(method: 'GET' | 'POST' | 'PUT' | 'DELETE', path: string, body?: unknown, attempt = 0): Promise<T> {
     const cfg = config();
     const token = await this.getToken();
     let res: Response;
@@ -56,6 +57,11 @@ export class SquareApiService implements SquareService {
         throw new IntegrationError('square', 'Square needs more permissions. Please reconnect Square and approve all requested access.', false, true, code);
       }
       if (res.status === 404) return null as T;
+      // Square refused the request itself (e.g. an overlapping timecard): say what Square said.
+      const detail: string | undefined = json?.errors?.[0]?.detail;
+      if (res.status >= 400 && res.status < 500 && detail) {
+        throw new IntegrationError('square', `Square said: ${detail}`, false, false, `${res.status} ${code}`);
+      }
       throw new IntegrationError('square', 'Unable to load data from Square right now. Your existing data is safe.', res.status >= 500, false, `${res.status} ${code}`);
     }
     return json as T;
@@ -141,12 +147,20 @@ export class SquareApiService implements SquareService {
 
   async listProducts(): Promise<SquareProductVariation[]> {
     const out: SquareProductVariation[] = [];
+    // Categories come in the same listing; items refer to them by ID, so names are filled in at the end.
+    const categoryNames = new Map<string, string>();
+    const itemCategories = new Map<SquareProductVariation, string[]>();
+    // Photos also come in the listing (IMAGE objects); items and variations refer to them by ID.
+    const imageUrls = new Map<string, string>();
+    const itemImages = new Map<SquareProductVariation, string[]>();
     let cursor: string | undefined;
     do {
-      const qs = new URLSearchParams({ types: 'ITEM' });
+      const qs = new URLSearchParams({ types: 'ITEM,CATEGORY,IMAGE' });
       if (cursor) qs.set('cursor', cursor);
       const res = await this.call<{ objects?: any[]; cursor?: string }>('GET', `/v2/catalog/list?${qs}`);
       for (const obj of res?.objects ?? []) {
+        if (obj.type === 'CATEGORY') { if (obj.category_data?.name) categoryNames.set(obj.id, obj.category_data.name); continue; }
+        if (obj.type === 'IMAGE') { if (obj.image_data?.url) imageUrls.set(obj.id, obj.image_data.url); continue; }
         const item = obj.item_data;
         if (!item || obj.is_deleted || item.is_archived) continue;
         if (item.product_type === 'APPOINTMENTS_SERVICE') continue;
@@ -154,7 +168,8 @@ export class SquareApiService implements SquareService {
           if (v.is_deleted) continue;
           const vd = v.item_variation_data ?? {};
           const varName: string = vd.name ?? '';
-          out.push({
+          const cats = [...(item.categories ?? []).map((c: any) => c.id), item.category_id, item.reporting_category?.id].filter(Boolean) as string[];
+          const row: SquareProductVariation = {
             variationId: v.id,
             itemId: obj.id,
             itemName: item.name ?? 'Unnamed item',
@@ -163,11 +178,16 @@ export class SquareApiService implements SquareService {
             upc: vd.upc || null,
             priceCents: vd.price_money?.amount != null ? Number(vd.price_money.amount) : null,
             trackInventory: vd.track_inventory !== false,
-          });
+          };
+          out.push(row);
+          itemCategories.set(row, cats);
+          itemImages.set(row, [...(vd.image_ids ?? []), ...(item.image_ids ?? [])]);
         }
       }
       cursor = res?.cursor || undefined;
     } while (cursor);
+    for (const [row, ids] of itemCategories) row.categories = [...new Set(ids.map((id) => categoryNames.get(id)).filter(Boolean) as string[])];
+    for (const [row, ids] of itemImages) row.imageUrl = ids.map((id) => imageUrls.get(id)).find(Boolean) ?? null;
     return out;
   }
 
@@ -195,6 +215,27 @@ export class SquareApiService implements SquareService {
       timezone: l.timezone,
       address: [l.address?.address_line_1, l.address?.locality, l.address?.administrative_district_level_1].filter(Boolean).join(', '),
     }));
+  }
+
+  /**
+   * Reads the variation, changes only its SKU and writes it back with the version Square gave us (Square refuses the
+   * write if someone changed the product in between, so nothing else on it is overwritten). Needs ITEMS_WRITE.
+   */
+  async setVariationSku(variationId: string, sku: string, idempotencyKey: string) {
+    const got = await this.call<{ object?: any }>('GET', `/v2/catalog/object/${encodeURIComponent(variationId)}`);
+    const obj = got?.object;
+    if (!obj || obj.type !== 'ITEM_VARIATION' || obj.is_deleted) throw new IntegrationError('square', 'That product wasn’t found in Square (it may have been deleted).', false);
+    obj.item_variation_data = { ...obj.item_variation_data, sku };
+    await this.call('POST', '/v2/catalog/object', { idempotency_key: idempotencyKey.slice(0, 128), object: obj });
+  }
+
+  async setVariationPrice(variationId: string, priceCents: number, idempotencyKey: string) {
+    const got = await this.call<{ object?: any }>('GET', `/v2/catalog/object/${encodeURIComponent(variationId)}`);
+    const obj = got?.object;
+    if (!obj || obj.type !== 'ITEM_VARIATION' || obj.is_deleted) throw new IntegrationError('square', 'That product wasn’t found in Square (it may have been deleted).', false);
+    const currency = obj.item_variation_data?.price_money?.currency ?? 'USD';
+    obj.item_variation_data = { ...obj.item_variation_data, pricing_type: 'FIXED_PRICING', price_money: { amount: priceCents, currency } };
+    await this.call('POST', '/v2/catalog/object', { idempotency_key: idempotencyKey.slice(0, 128), object: obj });
   }
 
   async setInventoryCounts(counts: SquareSetCount[], idempotencyKey: string) {
@@ -259,6 +300,122 @@ export class SquareApiService implements SquareService {
     return out;
   }
 
+  async listTimecards(from: Date, to: Date): Promise<SquareTimecard[]> {
+    const out: SquareTimecard[] = [];
+    // Square renamed shifts to timecards; older API versions only have /shifts/search.
+    let path = '/v2/labor/timecards/search';
+    let key: 'timecards' | 'shifts' = 'timecards';
+    let cursor: string | undefined;
+    do {
+      const body = { query: { filter: { start: { start_at: from.toISOString(), end_at: to.toISOString() }, status: 'CLOSED' } }, limit: 200, ...(cursor ? { cursor } : {}) };
+      const res = await this.call<any>('POST', path, body);
+      if (res === null && key === 'timecards') {
+        path = '/v2/labor/shifts/search';
+        key = 'shifts';
+        continue;
+      }
+      for (const t of res?.[key] ?? []) {
+        if (t.team_member_id || t.employee_id) out.push({ id: t.id, team_member_id: t.team_member_id ?? t.employee_id, start_at: t.start_at, end_at: t.end_at ?? null, status: t.status, breaks: t.breaks ?? [], created_at: t.created_at, updated_at: t.updated_at });
+      }
+      cursor = res?.cursor || undefined;
+    } while (cursor);
+    return out;
+  }
+
+  async assignedJob(teamMemberId: string): Promise<SquareJob | null> {
+    const r = await this.call<any>('GET', `/v2/team-members/${encodeURIComponent(teamMemberId)}/wage-setting`);
+    const j = r?.wage_setting?.job_assignments?.[0];
+    if (!j) return null;
+    return { jobId: j.job_id ?? null, title: j.job_title ?? 'Job', hourlyRateCents: j.hourly_rate?.amount ?? null };
+  }
+
+  /**
+   * The location's break type for this kind of break: an unpaid one for lunch (named like "Lunch" if there are several),
+   * a paid one otherwise. Made in Square when the location has none.
+   */
+  private breakTypes = new Map<string, string>();
+  private async breakTypeId(locationId: string, paid: boolean, minutes: number) {
+    const key = `${locationId}:${paid}`;
+    const cached = this.breakTypes.get(key);
+    if (cached) return cached;
+    const res = await this.call<any>('GET', `/v2/labor/break-types?location_id=${encodeURIComponent(locationId)}&limit=200`);
+    const types: any[] = (res?.break_types ?? []).filter((b: any) => !!b.is_paid === paid);
+    const want = paid ? /break|rest/i : /lunch|meal|unpaid/i;
+    let id: string | undefined = (types.find((b) => want.test(b.break_name ?? '')) ?? types[0])?.id;
+    if (!id) {
+      const made = await this.call<any>('POST', '/v2/labor/break-types', {
+        idempotency_key: `crm-break-${locationId}-${paid ? 'paid' : 'unpaid'}`.slice(0, 128),
+        break_type: { location_id: locationId, break_name: paid ? 'Break' : 'Lunch', expected_duration: `PT${minutes}M`, is_paid: paid },
+      });
+      id = made?.break_type?.id;
+      if (!id) throw new IntegrationError('square', 'Square didn’t make a lunch break type. Add an unpaid break in Square (Team → Settings → Breaks).', false);
+    }
+    this.breakTypes.set(key, id);
+    return id;
+  }
+
+  private async squareBreaks(locationId: string, breaks: TimecardBreakInput[] | undefined) {
+    const out = [];
+    for (const b of breaks ?? []) {
+      out.push({
+        start_at: b.startAt.toISOString(), ...(b.endAt ? { end_at: b.endAt.toISOString() } : {}),
+        break_type_id: await this.breakTypeId(locationId, b.paid, b.plannedMinutes),
+        name: b.paid ? 'Break' : 'Lunch', expected_duration: `PT${b.plannedMinutes}M`, is_paid: b.paid,
+      });
+    }
+    return out;
+  }
+
+  async createTimecard(t: { teamMemberId: string; locationId: string; startAt: Date; endAt: Date; job?: SquareJob | null; breaks?: TimecardBreakInput[] }, idempotencyKey: string) {
+    // The person's assigned job, so Square files the hours (and pay) under it.
+    const wage = t.job ? { title: t.job.title, ...(t.job.jobId ? { job_id: t.job.jobId } : {}), ...(t.job.hourlyRateCents != null ? { hourly_rate: { amount: t.job.hourlyRateCents, currency: 'USD' } } : {}) } : undefined;
+    const breaks = await this.squareBreaks(t.locationId, t.breaks);
+    const body = { location_id: t.locationId, team_member_id: t.teamMemberId, start_at: t.startAt.toISOString(), end_at: t.endAt.toISOString(), ...(wage ? { wage } : {}), ...(breaks.length ? { breaks } : {}) };
+    // Square renamed shifts to timecards; older API versions only have /shifts.
+    let r = await this.call<any>('POST', '/v2/labor/timecards', { idempotency_key: idempotencyKey.slice(0, 128), timecard: body });
+    if (r === null) r = await this.call<any>('POST', '/v2/labor/shifts', { idempotency_key: idempotencyKey.slice(0, 128), shift: body });
+    const id = r?.timecard?.id ?? r?.shift?.id;
+    if (!id) throw new IntegrationError('square', 'Square didn’t create the timecard. Try again.', true);
+    return id as string;
+  }
+
+  async openTimecard(t: { teamMemberId: string; locationId: string; startAt: Date; job?: SquareJob | null }, idempotencyKey: string) {
+    const wage = t.job ? { title: t.job.title, ...(t.job.jobId ? { job_id: t.job.jobId } : {}), ...(t.job.hourlyRateCents != null ? { hourly_rate: { amount: t.job.hourlyRateCents, currency: 'USD' } } : {}) } : undefined;
+    const body = { location_id: t.locationId, team_member_id: t.teamMemberId, start_at: t.startAt.toISOString(), ...(wage ? { wage } : {}) };
+    let r = await this.call<any>('POST', '/v2/labor/timecards', { idempotency_key: idempotencyKey.slice(0, 128), timecard: body });
+    if (r === null) r = await this.call<any>('POST', '/v2/labor/shifts', { idempotency_key: idempotencyKey.slice(0, 128), shift: body });
+    const id = r?.timecard?.id ?? r?.shift?.id;
+    if (!id) throw new IntegrationError('square', 'Square didn’t clock them in. Try again.', true);
+    return id as string;
+  }
+
+  /** Reads the timecard (Square needs its current version), then updates its end and/or breaks. */
+  private async updateTimecard(id: string, change: { endAt?: Date; breaks?: TimecardBreakInput[] }) {
+    let kind: 'timecards' | 'shifts' = 'timecards';
+    let got = await this.call<any>('GET', `/v2/labor/timecards/${encodeURIComponent(id)}`);
+    if (got === null) { kind = 'shifts'; got = await this.call<any>('GET', `/v2/labor/shifts/${encodeURIComponent(id)}`); }
+    const card = got?.timecard ?? got?.shift;
+    if (!card) throw new IntegrationError('square', 'That Square timecard wasn’t found.', false);
+    const body = { ...card, ...(change.endAt ? { end_at: change.endAt.toISOString() } : {}) };
+    if (change.breaks) body.breaks = await this.squareBreaks(card.location_id, change.breaks);
+    for (const k of ['id', 'status', 'created_at', 'updated_at']) delete body[k];
+    await this.call('PUT', `/v2/labor/${kind}/${encodeURIComponent(id)}`, kind === 'timecards' ? { timecard: body } : { shift: body });
+  }
+
+  async setTimecardBreaks(id: string, breaks: TimecardBreakInput[]) {
+    await this.updateTimecard(id, { breaks });
+  }
+
+  async closeTimecard(id: string, endAt: Date, breaks?: TimecardBreakInput[]) {
+    await this.updateTimecard(id, { endAt, breaks });
+  }
+
+  /** Removes a timecard (already gone counts as done). */
+  async deleteTimecard(id: string) {
+    const r = await this.call<any>('DELETE', `/v2/labor/timecards/${encodeURIComponent(id)}`);
+    if (r === null) await this.call<any>('DELETE', `/v2/labor/shifts/${encodeURIComponent(id)}`);
+  }
+
   async listPayments(from: Date, to: Date): Promise<SquarePaymentInfo[]> {
     const out: SquarePaymentInfo[] = [];
     let cursor: string | undefined;
@@ -267,7 +424,8 @@ export class SquareApiService implements SquareService {
       if (cursor) qs.set('cursor', cursor);
       const res = await this.call<{ payments?: any[]; cursor?: string }>('GET', `/v2/payments?${qs}`);
       for (const p of res?.payments ?? []) {
-        out.push({ id: p.id, order_id: p.order_id, team_member_id: p.team_member_id ?? null, status: p.status, created_at: p.created_at, tip_money: p.tip_money, amount_money: p.amount_money });
+        // Who took the payment (checked the client out): team_member_id, or employee_id on some POS setups and older payments.
+        out.push({ id: p.id, order_id: p.order_id, team_member_id: p.team_member_id ?? p.employee_id ?? null, status: p.status, created_at: p.created_at, tip_money: p.tip_money, amount_money: p.amount_money });
       }
       cursor = res?.cursor || undefined;
     } while (cursor);

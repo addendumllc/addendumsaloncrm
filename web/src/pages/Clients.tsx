@@ -1,10 +1,14 @@
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { HairClientsView } from './HairCrm';
+import { pageBusiness, useWorkspace } from '../lib/workspace';
 import { Plus, Sparkles, Users } from 'lucide-react';
 import { useCanDo, useClients, useStaff, useTags } from '../api/hooks';
 import { LeadsPage } from './Leads';
 import { dateShort, phone, relative } from '../lib/format';
 import { Avatar, Badge, Button, EmptyState, ErrorNote, PageHeader, PageLoading, Segmented } from '../components/ui';
 import { useActions } from '../components/domain/ActionsProvider';
+import { SectionPicker } from '../components/layout/subNav';
+import { useStoreNames } from '../lib/storeNames';
 
 const LAST_VISIT: Record<string, { label: string; days?: number; dir?: 'before' | 'after' }> = {
   '': { label: 'Any last visit' },
@@ -24,20 +28,29 @@ export function ClientsPage() {
   const { addClient, newLead } = useActions();
   const seesClients = canDo('clients:read') || canDo('clients:read_assigned');
   const seesNew = canDo('leads:read');
+  const seesHair = canDo('hair:manage');
   const section = !seesClients || (seesNew && params.get('section') === 'new') ? 'new' : 'all';
-  const switchTo = (s: 'all' | 'new') => setParams(s === 'new' ? { section: 'new' } : {}, { replace: true });
+  const names = useStoreNames();
+  // One Clients tab for both businesses: Addendum Salon or Addendum Hair at the top (like Tasks), defaulting to theirs.
+  const ws = useWorkspace();
+  const business = seesHair && (!(seesClients || seesNew) || pageBusiness(params, 'business', ws.current?.id ?? 'salon') === 'hair') ? 'hair' : 'salon';
+  const picker = seesHair && (seesClients || seesNew) && (
+    <Segmented className="mb-4" value={business} onChange={(b) => setParams({ business: b })}
+      options={[{ value: 'salon', label: ws.names.salon.name }, { value: 'hair', label: ws.names.hair.name }]} />
+  );
+  if (business === 'hair') return <div>{picker}<HairClientsView /></div>;
   return (
     <div>
+      {picker}
       <PageHeader
-        title="Clients"
+        title={section === 'new' ? 'New client inquiries' : 'Clients'}
         actions={<>
           {section === 'new' && canDo('leads:write') && <Button icon={<Sparkles className="h-4 w-4" />} onClick={newLead}>Add inquiry</Button>}
           {canDo('clients:write') && <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={addClient}>Add New Client</Button>}
         </>}
       />
-      {seesClients && seesNew && (
-        <Segmented className="mb-5" value={section} onChange={switchTo} options={[{ value: 'all', label: 'All clients' }, { value: 'new', label: 'New client inquiries' }]} />
-      )}
+      {/* All clients / New client inquiries are in the side menu; on phones, a dropdown. */}
+      {seesClients && seesNew && section === 'new' && <SectionPicker path="/clients" names={names} can={canDo} className="mb-5" />}
       {section === 'new' ? <LeadsPage embedded /> : <ClientList />}
     </div>
   );

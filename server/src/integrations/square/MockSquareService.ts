@@ -2,7 +2,7 @@ import { getKV, setKV } from '../../repos/settings.js';
 import type {
   SquareInventoryCount, SquareProductVariation, SquareSetCount,
   SquareBooking, SquareCustomer, SquareLocation, SquareService, SquareServiceVariation, SquareTeamMember,
-  SquareOrder, SquarePaymentInfo,
+  SquareOrder, SquarePaymentInfo, SquareTimecard, SquareJob, TimecardBreakInput,
 } from './types.js';
 
 /**
@@ -61,7 +61,20 @@ export class MockSquareService implements SquareService {
     return (await loadDemoSquare()).merchantName;
   }
   async listProducts() {
-    return DEMO_PRODUCTS;
+    return DEMO_PRODUCTS.map((p) => ({ ...p, ...(demoSquareSkus.has(p.variationId) ? { sku: demoSquareSkus.get(p.variationId)! } : {}), ...(demoSquarePrices.has(p.variationId) ? { priceCents: demoSquarePrices.get(p.variationId)! } : {}) }));
+  }
+  async setVariationPrice(variationId: string, priceCents: number) {
+    if (!DEMO_PRODUCTS.some((p) => p.variationId === variationId)) throw new Error('not found');
+    demoSquarePrices.set(variationId, priceCents);
+  }
+  async setVariationSku(variationId: string, sku: string) {
+    if (demoSquareHooks.failNext) {
+      const e = demoSquareHooks.failNext;
+      demoSquareHooks.failNext = null;
+      throw e;
+    }
+    if (!DEMO_PRODUCTS.some((p) => p.variationId === variationId)) throw new Error('not found');
+    demoSquareSkus.set(variationId, sku);
   }
   async listInventoryCounts() {
     const locationId = (await loadDemoSquare()).locations[0]?.id ?? 'demo-location';
@@ -99,13 +112,77 @@ export class MockSquareService implements SquareService {
     }
     return out;
   }
+  async assignedJob(teamMemberId: string): Promise<SquareJob | null> {
+    return { jobId: `demo-job-${teamMemberId}`, title: 'Stylist', hourlyRateCents: 2000 };
+  }
+  async createTimecard(t: { teamMemberId: string; locationId: string; startAt: Date; endAt: Date; job?: SquareJob | null; breaks?: TimecardBreakInput[] }, idempotencyKey: string) {
+    const id = `demo-tc-created-${idempotencyKey}`;
+    if (!demoCreatedTimecards.some((x) => x.id === id)) {
+      demoCreatedTimecards.push({ id, team_member_id: t.teamMemberId, status: 'CLOSED', start_at: t.startAt.toISOString(), end_at: t.endAt.toISOString(), breaks: demoBreaks(t.breaks), job_id: t.job?.jobId ?? null } as SquareTimecard);
+    }
+    return id;
+  }
+  async openTimecard(t: { teamMemberId: string; locationId: string; startAt: Date; job?: SquareJob | null }, idempotencyKey: string) {
+    const id = `demo-tc-open-${idempotencyKey}`;
+    if (!demoCreatedTimecards.some((x) => x.id === id)) {
+      demoCreatedTimecards.push({ id, team_member_id: t.teamMemberId, status: 'OPEN', start_at: t.startAt.toISOString(), end_at: null, breaks: [], job_id: t.job?.jobId ?? null });
+    }
+    return id;
+  }
+  async setTimecardBreaks(id: string, breaks: TimecardBreakInput[]) {
+    const c = demoCreatedTimecards.find((x) => x.id === id);
+    if (!c) throw new Error('not found');
+    c.breaks = demoBreaks(breaks);
+  }
+  async closeTimecard(id: string, endAt: Date, breaks?: TimecardBreakInput[]) {
+    const c = demoCreatedTimecards.find((x) => x.id === id);
+    if (!c) throw new Error('not found');
+    if (breaks) c.breaks = demoBreaks(breaks);
+    c.end_at = endAt.toISOString();
+    c.status = 'CLOSED';
+  }
+  async deleteTimecard(id: string) {
+    const i = demoCreatedTimecards.findIndex((t) => t.id === id);
+    if (i >= 0) demoCreatedTimecards.splice(i, 1);
+    else if (id.startsWith('demo-tc-')) demoDeletedTimecards.add(id);
+  }
+  /** Demo shifts: each team member works most weekdays and Saturdays, 9:00–17:00 local-ish, with a 30-minute unpaid lunch. */
+  async listTimecards(from: Date, to: Date): Promise<SquareTimecard[]> {
+    const { team } = await loadDemoSquare();
+    // Like Square's search for CLOSED timecards: open ones (still clocked in) aren't listed.
+    const out: SquareTimecard[] = demoCreatedTimecards.filter((t) => t.end_at && new Date(t.start_at) >= from && new Date(t.start_at) <= to);
+    const last = Math.min(to.getTime(), Date.now() - 86400_000);
+    for (let d = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate())); d.getTime() <= last; d = new Date(d.getTime() + 86400_000)) {
+      if (d.getUTCDay() === 0) continue;
+      const day = d.toISOString().slice(0, 10);
+      for (const m of team) {
+        if (hash(`${m.id}:${day}`) % 5 === 0) continue; // a day off now and then
+        if (demoCreatedTimecards.some((t) => t.team_member_id === m.id && t.start_at.slice(0, 10) === day)) continue; // a timecard sent from the CRM
+        const start = new Date(`${day}T17:00:00Z`);
+        if (start < from || demoDeletedTimecards.has(`demo-tc-${m.id}-${day}`)) continue;
+        out.push({
+          id: `demo-tc-${m.id}-${day}`, team_member_id: m.id, status: 'CLOSED', start_at: start.toISOString(), end_at: new Date(start.getTime() + 8 * 3600_000).toISOString(),
+          breaks: [{ start_at: new Date(start.getTime() + 4 * 3600_000).toISOString(), end_at: new Date(start.getTime() + 4.5 * 3600_000).toISOString(), is_paid: false }],
+        });
+      }
+    }
+    return out;
+  }
 }
+
+const demoBreaks = (b: TimecardBreakInput[] | undefined) => (b ?? []).map((x) => ({ start_at: x.startAt.toISOString(), end_at: x.endAt?.toISOString() ?? null, is_paid: x.paid }));
+
+/** Timecards created from the CRM (demo). */
+export const demoCreatedTimecards: SquareTimecard[] = [];
+/** Demo Square timecards deleted from the CRM. */
+const demoDeletedTimecards = new Set<string>();
 
 // ---------- Demo sales (orders) ----------
 // Built from the demo bookings, like Square Appointments checkouts: one order per completed visit with the booked
 // services, some retail, discounts and tips — plus a few cases that need care: a refund, an amount-only refund,
 // a $0 package redemption and a custom amount nobody can be matched to. DEMO MODE ONLY.
-const demoPaymentTeam = new Map<string, string>();
+/** Who took each demo payment (tests can add their own). */
+export const demoPaymentTeam = new Map<string, string>();
 /** Test hook: extra demo orders (e.g. a refund made "today"). */
 export const demoExtraOrders: SquareOrder[] = [];
 const money = (amount: number) => ({ amount, currency: 'USD' });
@@ -199,8 +276,13 @@ export const demoSquareStock = new Map<string, number>();
 /** Test hook: make the next stock write fail. */
 export const demoSquareHooks: { failNext: Error | null } = { failNext: null };
 const demoSquareApplied = new Set<string>();
+/** SKUs changed in the demo catalog (cleared by resetDemoSquareStock). */
+export const demoSquareSkus = new Map<string, string>();
+/** Demo price changes (Inventory → Pricing). */
+export const demoSquarePrices = new Map<string, number>();
 export function resetDemoSquareStock() {
   demoSquareStock.clear();
+  demoSquareSkus.clear();
   demoSquareApplied.clear();
   for (const c of DEMO_COUNTS) demoSquareStock.set(c.variationId, c.quantity);
 }

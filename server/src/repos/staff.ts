@@ -17,6 +17,7 @@ export function toStaffDTO(r: any): StaffDTO {
     canLogin: !!r.password_hash,
     color: r.color,
     squareTeamMemberId: r.square_team_member_id,
+    mobilePhone: r.mobile_phone ?? null,
     highlevelUserId: r.highlevel_user_id,
     openFollowUps: r.open_follow_ups,
     assignedLeads: r.assigned_leads,

@@ -75,7 +75,7 @@ export function GlobalSearch() {
           if (e.key === 'Enter') pick(active);
           if (e.key === 'Escape') setOpen(false);
         }}
-        placeholder="Search clients, phone numbers, services, texts…"
+        placeholder="Search"
         aria-label="Search"
         className="h-10 w-full max-w-xl rounded-lg border border-line bg-white pl-9 pr-3 text-[14.5px] placeholder:text-stone-light focus:border-plum focus:outline-none focus:ring-2 focus:ring-plum/15"
       />

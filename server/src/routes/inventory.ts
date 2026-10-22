@@ -8,6 +8,7 @@ import {
   createInventoryRequest, getInventoryRequest, inventorySuggestions, listInventoryRequests, sendInventoryEmail, setInventoryStatus,
   updateInventoryItem, shopifyHairProducts } from '../domain/inventory.js';
 import { inventorySyncStatus, pushInventoryToShopify, searchSquareInventory, syncSquareInventory } from '../domain/squareInventory.js';
+import { storeNames } from '../integrations/registry.js';
 import { ah, logAction, parse } from './util.js';
 
 /**
@@ -24,7 +25,7 @@ const seesAll = (req: any) => manages(req) || can(req.user, 'inventory:read_all'
 
 inventoryRouter.use((req, _res, next) => {
   // Products and stock: inventory:view. Hair orders: ordering, or seeing everyone's orders.
-  const ok = req.path.startsWith('/products')
+  const ok = req.path === '/store-names' ? true : req.path.startsWith('/products')
     ? can(req.user, 'inventory:view') || manages(req)
     : can(req.user, 'inventory:order') || seesAll(req);
   if (!ok) return next(forbidden());
@@ -75,6 +76,7 @@ inventoryRouter.post('/requests', ah(async (req, res) => {
   const b = parse(z.object({
     forStaffId: z.string().uuid().optional().nullable(),
     note: z.string().trim().max(1000).optional().nullable(),
+    customerName: z.string().trim().max(120).optional().nullable(),
     neededBy: dateField.optional(),
     submissionId: z.string().uuid().optional().nullable(),
     items: z.array(itemSchema.refine((i) => !!i.sku || !!i.collection, 'choose a product or type one')).min(1, 'add at least one product').max(60),
@@ -118,6 +120,11 @@ inventoryRouter.patch('/requests/:id/items/:itemId', ah(async (req, res) => {
   res.json(out);
 }));
 
+/** What each store is called in the CRM (e.g. Salon, AH-PRO, AH). */
+inventoryRouter.get('/store-names', ah(async (_req, res) => {
+  res.json(storeNames());
+}));
+
 // ---------- Square inventory (source of truth) ----------
 
 /** Search Square products by name, size/colour, SKU or UPC. */
@@ -125,7 +132,8 @@ inventoryRouter.get('/products', ah(async (req, res) => {
   const q = req.query as Record<string, string>;
   // First use: load the catalog from Square so search works straight away.
   if ((await inventorySyncStatus()).status === 'never') await syncSquareInventory();
-  const found = await searchSquareInventory({ q: q.q, inStock: q.inStock === 'true', orderable: q.orderable === 'true', limit: Number(q.limit) || undefined });
+  const kind = (['shared', 'separate', 'salon_only', 'service', 'unset', 'products', 'all', 'discontinued'] as const).find((k) => k === q.kind);
+  const found = await searchSquareInventory({ q: q.q, inStock: q.inStock === 'true', orderable: q.orderable === 'true', limit: Number(q.limit) || undefined, kind });
   const isAdmin = can(req.user, 'shopify:push');
   res.json({
     ...found,

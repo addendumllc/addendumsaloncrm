@@ -63,7 +63,7 @@ export class AnthropicAIService implements AIService {
         ctx.signature && `End with signature: ${ctx.signature}`,
       ].filter(Boolean).join('\n');
       const text = await this.complete(
-        `You write SMS replies for ${ctx.salonName}, a premium hair salon. Tone: ${ctx.tone}. Keep it under 320 characters, warm and specific, no hashtags, at most one emoji. Never invent prices, availability, or facts not given. Output only the message text.`,
+        `You write SMS replies for ${ctx.salonName}, a premium hair salon. Tone: ${ctx.tone}. Keep it short (under 220 characters), warm and plain, no hashtags, at most one emoji. Say services simply as given (never tiers or long names), never name a stylist, and don't include a link unless one is given. Never invent prices, availability, or facts not given. Output only the message text.`,
         `${facts}\n\nRecent conversation:\n${convo || '(none)'}`,
       );
       return text || this.fallback.draft(ctx);

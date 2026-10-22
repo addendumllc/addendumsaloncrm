@@ -9,6 +9,7 @@ import {
 } from '../lib/format';
 import { Button, EmptyState, ErrorNote, PageHeader, PageLoading, Segmented, cx, useToast } from '../components/ui';
 import { APPT_STYLE } from '../components/domain/appointmentStyles';
+import { Tc } from '../lib/titleCase';
 
 type View = 'day' | 'week' | 'month' | 'list';
 const START_HOUR = 8;
@@ -138,21 +139,49 @@ function Block({ a, onOpen, style }: { a: AppointmentDTO; onOpen: (a: Appointmen
     <button
       onClick={() => onOpen(a)}
       style={style}
-      className={cx('absolute inset-x-1 overflow-hidden rounded-md border-l-[3px] px-2 py-1 text-left text-xs shadow-sm transition-shadow hover:shadow-lift', st.block)}
+      className={cx('absolute overflow-hidden rounded-md border border-l-[3px] border-white px-1.5 py-1 text-left text-xs shadow-sm transition-shadow hover:z-20 hover:shadow-lift', st.block)}
       title={`${a.clientName ?? 'Client'} — ${a.serviceNames.join(', ')} (${st.label})`}
     >
-      <span className="block truncate font-medium text-ink">{a.clientName ?? 'Client'}</span>
-      <span className="block truncate text-ink-soft">{time(a.startAt)} · {a.serviceNames.join(', ')}</span>
+      <span className="block truncate font-medium leading-tight text-ink">{a.clientName ?? 'Client'}</span>
+      <span className="block truncate leading-tight text-ink-soft">{time(a.startAt)}</span>
+      <span className="block truncate leading-tight text-stone">{a.serviceNames.join(', ')}</span>
       {a.rescheduledFrom && <span className="block truncate text-plum">Rescheduled</span>}
     </button>
   );
 }
 
-const pos = (a: AppointmentDTO) => {
+const span = (a: AppointmentDTO) => {
   const s = Math.max(hourOfDay(a.startAt), START_HOUR);
-  const e = Math.min(hourOfDay(a.endAt) || END_HOUR, END_HOUR);
-  return { top: (s - START_HOUR) * HOUR_PX, height: Math.max((e - s) * HOUR_PX - 2, 30) };
+  const e = Math.max(Math.min(hourOfDay(a.endAt) || END_HOUR, END_HOUR), s + 0.25);
+  return { s, e };
 };
+
+/**
+ * Lays out one column's appointments so overlapping ones sit side by side instead of on top of each other:
+ * each group of overlapping appointments is split into lanes, and every appointment gets its lane's share of the width.
+ */
+function layout(items: AppointmentDTO[]) {
+  const sorted = [...items].sort((a, b) => span(a).s - span(b).s || span(b).e - span(a).e);
+  const out = new Map<string, { lane: number; lanes: number }>();
+  let group: { a: AppointmentDTO; lane: number }[] = [];
+  let laneEnds: number[] = [];
+  let groupEnd = -1;
+  const flush = () => { for (const g of group) out.set(g.a.id, { lane: g.lane, lanes: laneEnds.length }); group = []; laneEnds = []; };
+  for (const a of sorted) {
+    const { s, e } = span(a);
+    if (group.length && s >= groupEnd) flush();
+    let lane = laneEnds.findIndex((end) => end <= s);
+    if (lane < 0) { lane = laneEnds.length; laneEnds.push(e); } else laneEnds[lane] = e;
+    group.push({ a, lane });
+    groupEnd = Math.max(groupEnd, e);
+  }
+  flush();
+  return { pos: (a: AppointmentDTO): React.CSSProperties => {
+    const { s, e } = span(a);
+    const { lane, lanes } = out.get(a.id) ?? { lane: 0, lanes: 1 };
+    return { top: (s - START_HOUR) * HOUR_PX, height: Math.max((e - s) * HOUR_PX - 2, 30), left: `calc(${(lane / lanes) * 100}% + 2px)`, width: `calc(${100 / lanes}% - 4px)` };
+  }, maxLanes: Math.max(1, ...[...out.values()].map((v) => v.lanes)) };
+}
 
 function HourGutter() {
   return (
@@ -184,16 +213,16 @@ function DayView({ appts, dayKeyStr, staff, onOpen }: { appts: AppointmentDTO[];
     <div className="panel overflow-x-auto">
       <div className="flex min-w-max">
         <div className="sticky left-0 z-10 bg-white"><div className="h-11 border-b border-line" /><HourGutter /></div>
-        {columns.map((c) => (
-          <div key={c.key} className="w-[180px] border-l border-line sm:w-[200px]">
+        {columns.map((c) => { const lay = layout(c.items); return (
+          <div key={c.key} className="border-l border-line" style={{ width: Math.max(180, lay.maxLanes * 120) }}>
             <div className="flex h-11 items-center gap-2 border-b border-line px-3 text-sm font-medium"><span className="h-2.5 w-2.5 rounded-full" style={{ background: c.color }} />{c.name}<span className="num text-xs font-normal text-stone">{c.items.length}</span></div>
             <div className="relative" style={{ height: (END_HOUR - START_HOUR) * HOUR_PX }}>
               {Array.from({ length: END_HOUR - START_HOUR }, (_, i) => <div key={i} className="border-b border-line/60" style={{ height: HOUR_PX }} />)}
               <NowLine dayKeyStr={dayKeyStr} />
-              {c.items.map((a) => <Block key={a.id} a={a} onOpen={onOpen} style={pos(a)} />)}
+              {c.items.map((a) => <Block key={a.id} a={a} onOpen={onOpen} style={lay.pos(a)} />)}
             </div>
           </div>
-        ))}
+        ); })}
       </div>
     </div>
   );
@@ -205,11 +234,13 @@ function WeekView({ appts, from, onOpen, onDay }: { appts: AppointmentDTO[]; fro
   return (
     <div className="panel overflow-x-auto">
       <div className="flex min-w-[860px]">
-        <div><div className="h-12 border-b border-line" /><HourGutter /></div>
+        <div className="sticky left-0 z-30 bg-white"><div className="h-12 border-b border-line" /><HourGutter /></div>
         {days.map((d) => {
           const items = appts.filter((a) => dayKey(a.startAt) === d);
+          const lay = layout(items);
+          // Busy days get wider (each overlapping appointment keeps a readable width); the week scrolls sideways.
           return (
-            <div key={d} className="flex-1 border-l border-line">
+            <div key={d} className="flex-1 border-l border-line" style={{ minWidth: Math.max(120, lay.maxLanes * 96) }}>
               <button onClick={() => onDay(d)} className={cx('flex h-12 w-full flex-col items-center justify-center border-b border-line text-xs hover:bg-mist', d === today && 'text-plum')}>
                 <span>{labelOfKey(d, { weekday: 'short' })}</span>
                 <span className="font-display text-lg leading-none">{labelOfKey(d, { day: 'numeric' })}</span>
@@ -217,7 +248,7 @@ function WeekView({ appts, from, onOpen, onDay }: { appts: AppointmentDTO[]; fro
               <div className="relative" style={{ height: (END_HOUR - START_HOUR) * HOUR_PX }}>
                 {Array.from({ length: END_HOUR - START_HOUR }, (_, i) => <div key={i} className="border-b border-line/60" style={{ height: HOUR_PX }} />)}
                 <NowLine dayKeyStr={d} />
-                {items.map((a) => <Block key={a.id} a={a} onOpen={onOpen} style={pos(a)} />)}
+                {items.map((a) => <Block key={a.id} a={a} onOpen={onOpen} style={lay.pos(a)} />)}
               </div>
             </div>
           );
@@ -272,7 +303,7 @@ function ListView({ appts, onOpen }: { appts: AppointmentDTO[]; onOpen: (a: Appo
     <div className="space-y-6">
       {groups.map(([k, items]) => (
         <section key={k}>
-          <h2 className="mb-2 font-display text-xl">{labelOfKey(k, { weekday: 'long', month: 'long', day: 'numeric' })}</h2>
+          <h2 className="mb-2 font-display text-xl"><Tc>{labelOfKey(k, { weekday: 'long', month: 'long', day: 'numeric' })}</Tc></h2>
           <ul className="divide-y divide-line overflow-hidden rounded-xl2 border border-line bg-white">
             {items.map((a) => {
               const st = APPT_STYLE[a.displayStatus];

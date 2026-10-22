@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { db } from '../src/db/index.js';
 import { startInventorySync } from '../src/domain/inventorySync.js';
@@ -24,6 +24,7 @@ beforeAll(async () => {
 async function freshStart() {
   await db().query('DELETE FROM inventory_sync_links');
   await db().query('DELETE FROM inventory_sync_runs');
+  await db().query('DELETE FROM inventory_sync_separate');
   resetDemoSquareStock();
   MockShopifyService.reset();
   setIntegrationOverride({ square: new MockSquareService(), shopify: new MockShopifyService() });
@@ -78,6 +79,31 @@ describe('Square ↔ Shopify inventory sync', () => {
     expect(MockShopifyService.stock.get(SH.tape)).toBe(15);
   });
 
+  it('relinks by SKU when the Square product was deleted and re-created', async () => {
+    await sync();
+    const before = await link(SQ.weft60);
+    // The link still points at the old (now gone) Square product.
+    await db().query("UPDATE inventory_sync_links SET square_variation_id = 'demo-gone' WHERE id = $1", [before.id]);
+    const run = await sync();
+    const after = await db().one<any>('SELECT * FROM inventory_sync_links WHERE id = $1', [before.id]);
+    expect(after.square_variation_id).toBe(SQ.weft60);
+    expect(after.status).toBe('in_sync');
+    expect(run.attention).toBe(1); // only the care kit, as before
+  });
+
+  it('a relinked product whose counts differ is held for review, not overwritten', async () => {
+    await sync();
+    const before = await link(SQ.weft60);
+    await db().query("UPDATE inventory_sync_links SET square_variation_id = 'demo-gone' WHERE id = $1", [before.id]);
+    demoSquareStock.set(SQ.weft60, 0);
+    await sync();
+    const after = await db().one<any>('SELECT * FROM inventory_sync_links WHERE id = $1', [before.id]);
+    expect(after.square_variation_id).toBe(SQ.weft60);
+    expect(after.status).toBe('needs_attention');
+    expect(after.issue).toMatch(/Relinked by SKU/);
+    expect(MockShopifyService.stock.get(SH.weft60)).toBe(12);
+  });
+
   it('changes on both sides are combined, not overwritten', async () => {
     await sync(); // both 7
     demoSquareStock.set(SQ.ktip, 6); // sold 1 in the salon
@@ -115,7 +141,7 @@ describe('Square ↔ Shopify inventory sync', () => {
     demoSquareStock.set(SQ.weft60, 11); // Square sale → Shopify should become 11
     MockShopifyService.onBeforeSet = () => MockShopifyService.stock.set(SH.weft60, 9); // online sale lands mid-sync
     const run = await sync();
-    expect(run.details.find((d) => d.sku === 'htw-20-60')?.result).toBe('retry');
+    expect(run.details.find((d) => d.sku === 'HTW-20-60')?.result).toBe('retry');
     expect(MockShopifyService.stock.get(SH.weft60)).toBe(9); // the online sale survived
     await sync(); // 12 + (-1) + (-3) = 8
     expect(MockShopifyService.stock.get(SH.weft60)).toBe(8);
@@ -146,7 +172,7 @@ describe('Square ↔ Shopify inventory sync', () => {
     MockShopifyService.failNext = new IntegrationError('shopify', 'Shopify could not be reached. Try again in a moment.', true);
     const run = await sync();
     expect(run.status).toBe('partial'); // Square still received the Shopify-side change for the tape-in
-    expect(run.details.find((d) => d.sku === 'htw-20-60')?.result).toBe('failed');
+    expect(run.details.find((d) => d.sku === 'HTW-20-60')?.result).toBe('failed');
     expect(demoSquareStock.get(SQ.tape)).toBe(3);
     MockShopifyService.failNext = null;
   });
@@ -212,7 +238,7 @@ describe('Per-product “Sync to Shopify”', () => {
     expect(MockShopifyService.stock.get(SH.tape)).toBe(5);
     expect(demoSquareStock.get(SQ.tape)).toBe(20);
     expect(run.updatedShopify).toBe(1);
-    expect(run.message).toContain('1 skipped (Sync to Shopify off)');
+    expect(run.message).toContain('1 skipped (separate stock — not synced)');
     expect(MockShopifyService.stock.get(SH.weft60)).toBe(12); // untouched products unchanged
   });
 
@@ -275,5 +301,151 @@ describe('Per-product “Sync to Shopify”', () => {
     const r = await agent.put('/api/inventory-sync/products/shopify-sync').set('X-Requested-With', 'addendum-crm').send({ variationIds: [SQ.tape], enabled: false });
     expect(r.status).toBe(403);
     expect((await db().one('SELECT 1 FROM product_shopify_sync'))).toBeNull();
+  });
+});
+
+describe('Use Shopify’s SKU in Square', () => {
+  const extra = [
+    { sku: 'HTW-22-60-AH', inventoryItemId: 'gid://shopify/InventoryItem/9', label: 'Signature Hand-Tied Weft – 22" / #60 Platinum', tracked: true },
+    { sku: 'BOND-RMV', inventoryItemId: 'gid://shopify/InventoryItem/10', label: 'Bond Remover', tracked: true },
+  ];
+  beforeEach(async () => {
+    await freshStart();
+    MockShopifyService.catalog.push(...extra);
+    for (const e of extra) MockShopifyService.stock.set(e.inventoryItemId, 5);
+  });
+  afterEach(() => {
+    MockShopifyService.catalog.splice(MockShopifyService.catalog.findIndex((c) => c.sku === 'HTW-22-60-AH'), 2);
+  });
+
+  it('sets the Square product’s SKU to Shopify’s, pairs them, and the next sync handles their stock', async () => {
+    await sync();
+    const c = (await api.get('/api/inventory-sync/sku-candidates')).body;
+    expect(c.square.map((p: any) => p.variationId)).toContain('demo-v3');
+    expect(c.shopify.map((p: any) => p.sku)).toContain('HTW-22-60-AH');
+    const r = await api.post('/api/inventory-sync/links/from-shopify-sku', { squareVariationId: 'demo-v3', shopifyInventoryItemId: 'gid://shopify/InventoryItem/9' });
+    expect(r.status).toBe(201);
+    expect(r.body).toMatchObject({ sku: 'HTW-22-60-AH', previousSku: 'HTW-22-60', changedInSquare: true });
+    expect((await new MockSquareService().listProducts()).find((p) => p.variationId === 'demo-v3')!.sku).toBe('HTW-22-60-AH');
+    expect((await link('demo-v3')).shopify_inventory_item_id).toBe('gid://shopify/InventoryItem/9');
+    // Not paired twice; the next sync applies the first-sync rule (Square's count kept).
+    expect((await api.post('/api/inventory-sync/links/from-shopify-sku', { squareVariationId: 'demo-v3', shopifyInventoryItemId: 'gid://shopify/InventoryItem/9' })).status).toBe(400);
+    await sync();
+    expect(MockShopifyService.stock.get('gid://shopify/InventoryItem/9')).toBe(0);
+    expect((await link('demo-v3')).status).toBe('in_sync');
+  });
+
+  it('never creates duplicate SKUs, and only people who run the sync can use it', async () => {
+    await sync();
+    // BOND-RMV is already used by another Square product.
+    const dup = await api.post('/api/inventory-sync/links/from-shopify-sku', { squareVariationId: 'demo-v3', shopifyInventoryItemId: 'gid://shopify/InventoryItem/10' });
+    expect([dup.status, dup.body.error.message]).toEqual([400, expect.stringMatching(/already uses SKU BOND-RMV/)]);
+    expect((await new MockSquareService().listProducts()).find((p) => p.variationId === 'demo-v3')!.sku).toBe('HTW-22-60');
+    const agent = request.agent(app);
+    await agent.post('/api/auth/login').set('X-Requested-With', 'addendum-crm').send({ email: 'jennifer@addendumsalon.com', password: 'addendum-demo' });
+    expect((await agent.post('/api/inventory-sync/links/from-shopify-sku').set('X-Requested-With', 'addendum-crm').send({ squareVariationId: 'demo-v3', shopifyInventoryItemId: 'gid://shopify/InventoryItem/9' })).status).toBe(403);
+  });
+});
+
+describe('Products sold in one store only', () => {
+  beforeEach(freshStart);
+
+  it('can be taken off “Not matched”, stay unsynced, and still pair if a matching SKU appears', async () => {
+    await sync();
+    let o = (await api.get('/api/inventory-sync')).body;
+    const bond = o.unmatched.squareOnly.find((p: any) => p.sku === 'BOND-RMV');
+    expect(bond.id).toBeTruthy();
+    expect((await api.post('/api/inventory-sync/separate', { items: [{ store: 'square', itemId: bond.id, label: bond.label, sku: bond.sku }] })).status).toBe(200);
+    o = (await api.get('/api/inventory-sync')).body;
+    expect(o.unmatched.squareOnly.map((p: any) => p.sku)).not.toContain('BOND-RMV');
+    expect(o.separate).toEqual([expect.objectContaining({ store: 'square', itemId: bond.id, sku: 'BOND-RMV' })]);
+    await sync();
+    expect((await api.get('/api/inventory-sync')).body.unmatched.squareOnly.map((p: any) => p.sku)).not.toContain('BOND-RMV');
+    expect(await link(bond.id)).toBeNull();
+
+    // Paired products sync, so they can't be marked.
+    const paired = await api.post('/api/inventory-sync/separate', { items: [{ store: 'square', itemId: SQ.ktip, label: 'K-Tip', sku: null }] });
+    expect([paired.status, paired.body.error.message]).toEqual([400, expect.stringMatching(/paired by SKU/)]);
+
+    // A matching SKU in Shopify still pairs it, and the mark is dropped.
+    const item = { sku: 'BOND-RMV', inventoryItemId: 'gid://shopify/InventoryItem/11', label: 'Bond Remover', tracked: true };
+    MockShopifyService.catalog.push(item);
+    MockShopifyService.stock.set(item.inventoryItemId, 3);
+    try {
+      await sync();
+      expect((await link(bond.id)).shopify_inventory_item_id).toBe(item.inventoryItemId);
+      expect((await api.get('/api/inventory-sync')).body.separate).toEqual([]);
+    } finally {
+      MockShopifyService.catalog.splice(MockShopifyService.catalog.indexOf(item), 1);
+    }
+  });
+
+  it('can be undone, and Shopify-only products can be marked too', async () => {
+    await sync();
+    const o = (await api.get('/api/inventory-sync')).body;
+    const items = [
+      ...o.unmatched.squareOnly.map((p: any) => ({ store: 'square', itemId: p.id, label: p.label, sku: p.sku })),
+      ...o.unmatched.shopifyOnly.map((p: any) => ({ store: 'shopify', itemId: p.id, label: p.label, sku: p.sku })),
+    ];
+    await api.post('/api/inventory-sync/separate', { items });
+    expect((await api.get('/api/inventory-sync')).body.separate.length).toBe(items.length);
+    const first = items[0];
+    expect((await api.del(`/api/inventory-sync/separate/${first.store}/${encodeURIComponent(first.itemId)}`)).status).toBe(200);
+    const after = (await api.get('/api/inventory-sync')).body;
+    expect(after.separate.length).toBe(items.length - 1);
+    expect(after.unmatched.squareOnly.length + after.unmatched.shopifyOnly.length).toBe(1);
+  });
+});
+
+describe('Linking two products picked from “Not matched”', () => {
+  beforeEach(freshStart);
+
+  it('pairs them as they are (no SKU changes) and drops any “only here” mark', async () => {
+    const item = { sku: 'BR-PRO', inventoryItemId: 'gid://shopify/InventoryItem/12', label: 'Bond Remover Pro', tracked: true };
+    MockShopifyService.catalog.push(item);
+    MockShopifyService.stock.set(item.inventoryItemId, 2);
+    try {
+      await sync();
+      const bond = (await api.get('/api/inventory-sync')).body.unmatched.squareOnly.find((p: any) => p.sku === 'BOND-RMV');
+      await api.post('/api/inventory-sync/separate', { items: [{ store: 'square', itemId: bond.id, label: bond.label, sku: bond.sku }] });
+      const r = await api.post('/api/inventory-sync/links/by-id', { squareVariationId: bond.id, shopifyInventoryItemId: item.inventoryItemId });
+      expect(r.status).toBe(201);
+      expect((await link(bond.id))).toMatchObject({ match_method: 'manual', shopify_inventory_item_id: item.inventoryItemId });
+      expect((await new MockSquareService().listProducts()).find((p) => p.variationId === bond.id)!.sku).toBe('BOND-RMV');
+      expect((await api.get('/api/inventory-sync')).body.separate).toEqual([]);
+      expect((await api.post('/api/inventory-sync/links/by-id', { squareVariationId: bond.id, shopifyInventoryItemId: item.inventoryItemId })).status).toBe(400);
+    } finally {
+      MockShopifyService.catalog.splice(MockShopifyService.catalog.indexOf(item), 1);
+    }
+  });
+});
+
+describe('Editing a linked product in both stores', () => {
+  beforeEach(freshStart);
+
+  it('changes the SKU and stock count in Square and Shopify, and the next sync has nothing to do', async () => {
+    await sync();
+    const l = await link(SQ.tape);
+    const r = await api.patch(`/api/inventory-sync/links/${l.id}/product`, { sku: 'TAPE-16-8B', quantity: 15 });
+    expect(r.status).toBe(200);
+    expect(r.body.changed).toEqual(['SKU in Square', 'SKU in Shopify', 'stock in Shopify', 'stock in Square']);
+    expect((await new MockSquareService().listProducts()).find((p) => p.variationId === SQ.tape)!.sku).toBe('TAPE-16-8B');
+    expect((await new MockShopifyService().findBySkus(['TAPE-16-8B'])).map((i) => i.inventoryItemId)).toEqual([SH.tape]);
+    expect(demoSquareStock.get(SQ.tape)).toBe(15);
+    expect(MockShopifyService.stock.get(SH.tape)).toBe(15);
+    expect(await link(SQ.tape)).toMatchObject({ sku: 'TAPE-16-8B', baseline_quantity: 15, status: 'in_sync' });
+    const run = await sync();
+    expect(run.updatedShopify + run.updatedSquare).toBe(0);
+    expect((await link(SQ.tape)).id).toBe(l.id);
+  });
+
+  it('refuses a SKU another product already uses, and changes nothing', async () => {
+    await sync();
+    const l = await link(SQ.tape);
+    const r = await api.patch(`/api/inventory-sync/links/${l.id}/product`, { sku: 'KTIP-22-1B' });
+    expect(r.status).toBe(400);
+    expect(r.body.error.message).toMatch(/already uses SKU KTIP-22-1B/);
+    expect(MockShopifyService.skus.size).toBe(0);
+    expect((await api.patch(`/api/inventory-sync/links/${l.id}/product`, {})).status).toBe(400);
   });
 });

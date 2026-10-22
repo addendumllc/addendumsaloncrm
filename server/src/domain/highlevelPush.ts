@@ -62,9 +62,10 @@ export async function pushTaskToHighLevel(taskId: string, opts: { createContactI
 
     // 2) Create or update the task.
     const payload = {
-      title: `[${t.priority[0].toUpperCase()}${t.priority.slice(1)}] ${t.title}`,
+      // A follow-up to-do on the contact in HighLevel (their Tasks list), clearly labelled as one.
+      title: `${/^follow[\s-]?up/i.test(t.title) ? t.title : `Follow up: ${t.title}`}${t.priority === 'high' ? ' (high priority)' : ''}`,
       body: await buildDescription(t, phone, email, settings.business.timezone),
-      dueDate: new Date(t.due_at).toISOString(),
+      dueDate: (t.due_at ? new Date(t.due_at) : new Date()).toISOString(),
       assignedTo: t.highlevel_user_id ?? settings.highlevel.defaultAssigneeUserId ?? null,
     };
     let hlTaskId: string = t.hl_task_id;

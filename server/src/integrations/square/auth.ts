@@ -13,9 +13,12 @@ export const SQUARE_SCOPES = [
   'CUSTOMERS_READ',
   'EMPLOYEES_READ',
   'ITEMS_READ',
+  'ITEMS_WRITE', // Inventory Sync: set a Square product's SKU to match Shopify
   'MERCHANT_PROFILE_READ',
   'ORDERS_READ', // commission: sales, discounts and refunds
   'PAYMENTS_READ', // commission: tips and the team member who took each payment
+  'TIMECARDS_READ', // wages: hours from Square timecards (optional; hours can also be entered by hand)
+  'TIMECARDS_WRITE', // Payroll hours: send hours entered in the CRM to Square as timecards (optional)
 ];
 
 interface SquareOAuthCreds {

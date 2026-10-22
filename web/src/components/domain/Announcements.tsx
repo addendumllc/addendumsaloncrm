@@ -6,6 +6,7 @@ import { useCanDo, useMe } from '../../api/hooks';
 import { relative } from '../../lib/format';
 import { Badge, Button, EmptyState, Field, Modal, Spinner, Toggle, cx, useToast } from '../ui';
 import { useUsersRoles } from './useRoles';
+import { Tc } from '../../lib/titleCase';
 
 export interface Announcement {
   id: string; title: string; body: string; linkUrl: string | null; linkLabel: string | null; important: boolean; pinned: boolean;
@@ -23,7 +24,12 @@ export const useAnnouncements = (enabled = true) => useQuery({
  * Team announcements — a separate section from tasks: publishing one shows it to its audience, it never creates a task.
  * Editing/deleting is offered only where the person may do it; the server checks every action.
  */
-export function AnnouncementsSection() {
+/** The page for people without the dashboard (stylists by default). */
+export function AnnouncementsPage() {
+  return <div className="pt-2"><AnnouncementsSection /></div>;
+}
+
+export function AnnouncementsSection({ className = 'mb-8' }: { className?: string }) {
   const canDo = useCanDo();
   const { data: me } = useMe();
   const qc = useQueryClient();
@@ -38,16 +44,16 @@ export function AnnouncementsSection() {
   };
   const list = data?.announcements ?? [];
   return (
-    <section className="mb-8">
-      <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-        <h2 className="h-display flex items-center gap-2 text-[22px] leading-none"><Megaphone className="h-5 w-5 text-plum" />Team announcements{data?.unread ? <Badge tone="plum">{data.unread} new</Badge> : null}</h2>
+    <section className={cx('flex flex-col', className)}>
+      <div className="mb-3 flex min-h-9 flex-wrap items-end justify-between gap-2">
+        <h2 className="h-display flex items-center gap-2 text-[22px] leading-none"><Tc><Megaphone className="h-5 w-5 text-plum" />Team announcements{data?.unread ? <Badge tone="plum">{data.unread} new</Badge> : null}</Tc></h2>
         <div className="flex gap-2">
           {!!data?.unread && <Button size="sm" variant="ghost" onClick={() => act(() => api.post('/announcements/read-all'), 'All marked as read')}>Mark all read</Button>}
           {canPublish && <Button size="sm" variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEditing('new')}>New announcement</Button>}
         </div>
       </div>
       {isLoading && <div className="flex justify-center py-6"><Spinner /></div>}
-      {!isLoading && list.length === 0 && <div className="panel"><EmptyState icon={<Megaphone className="h-8 w-8" />} title="No announcements">Team-wide news shows here.</EmptyState></div>}
+      {!isLoading && list.length === 0 && <div className="panel flex flex-1 items-center justify-center"><EmptyState icon={<Megaphone className="h-8 w-8" />} title="No announcements">Team-wide news shows here.</EmptyState></div>}
       <ul className="space-y-3">
         {list.map((a) => (
           <li key={a.id} className={cx('rounded-xl2 border bg-white p-4', a.important ? 'border-plum/40' : 'border-line', !a.read && a.status === 'published' && 'shadow-lift')}>
@@ -58,7 +64,7 @@ export function AnnouncementsSection() {
               {!a.read && a.status === 'published' && <Badge tone="sage">New</Badge>}
               {a.audienceRoles && <Badge>For {a.audienceRoles.length} role{a.audienceRoles.length === 1 ? '' : 's'}</Badge>}
             </div>
-            <h3 className="mt-1.5 text-[17px] font-medium text-ink">{a.title}</h3>
+            <h3 className="mt-1.5 text-[17px] font-medium text-ink"><Tc>{a.title}</Tc></h3>
             {a.body && <p className="mt-1 whitespace-pre-wrap text-[15px] text-ink-soft">{a.body}</p>}
             {a.linkUrl && <a href={a.linkUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-1 text-[14px] text-plum hover:underline"><ExternalLink className="h-4 w-4" />{a.linkLabel || 'Open link'}</a>}
             <p className="mt-2 text-[12px] text-stone">{a.authorName ?? 'Someone'} · {a.publishedAt ? relative(a.publishedAt) : `saved ${relative(a.updatedAt)}`}{canChange(a) && a.status === 'published' ? ` · read by ${a.readCount}` : ''}</p>
@@ -119,7 +125,7 @@ function AnnouncementEditor({ a, onClose, onSaved }: { a: Announcement | null; o
         <Toggle checked={f.important} onChange={(v) => setF({ ...f, important: v })} label="Important" description="Highlighted for everyone." />
         <Toggle checked={f.pinned} onChange={(v) => setF({ ...f, pinned: v })} label="Pin to the top" />
         <div>
-          <span className="label">Who sees it</span>
+          <span className="label">Who Sees It</span>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => setF({ ...f, audience: null })} className={cx('rounded-lg border px-3 py-2 text-[13px]', f.audience === null ? 'border-plum bg-plum-tint' : 'border-line-strong')}>The whole team</button>
             <button type="button" onClick={() => setF({ ...f, audience: f.audience ?? [] })} className={cx('rounded-lg border px-3 py-2 text-[13px]', f.audience !== null ? 'border-plum bg-plum-tint' : 'border-line-strong')}>Only some roles</button>

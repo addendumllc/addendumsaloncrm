@@ -47,18 +47,20 @@ describe('Placing an order', () => {
   it('records it, takes the chosen items out of Shopify, then emails both addresses with every detail', async () => {
     const r = await place({
       note: 'Please send the platinum first.',
+      customerName: 'Maya Lopez',
       items: [{ sku: 'HTW-20-60', quantity: 3 }, { sku: 'ktip-22-1b', quantity: 2 }, { collection: 'Weft Thread', color: 'Blonde', quantity: 1 }],
     });
     expect(r.status).toBe(201);
     const o = r.body.request;
     expect(o.inventoryStatus).toBe('reserved');
+    expect(o.customerName).toBe('Maya Lopez');
     expect(o.items.map((i: any) => i.sku)).toEqual(['HTW-20-60', 'KTIP-22-1B', null]);
     expect(o.items[0]).toMatchObject({ collection: 'Signature Hand-Tied Weft', size: '20"', color: '#60 Platinum', quantity: 3, neededBy: D(5) });
     expect([stock(ITEM.weft), stock(ITEM.ktip)]).toEqual([47, 48]); // typed items don't touch stock
     const mail = MockEmailService.outbox.at(-1)!;
     expect(mail.to).toBe('gaby@addendumhair.com');
     expect(mail.cc).toContain('info@addendumhair.com');
-    for (const part of [`Order reference: #${o.number}`, 'Needed by:', 'Stylist: ', 'owner@addendumsalon.com', 'SKU: HTW-20-60', 'QTY: 3', 'SKU: KTIP-22-1B', 'Collection: Weft Thread', 'Please send the platinum first.']) {
+    for (const part of [`Order reference: #${o.number}`, 'Needed by:', 'Stylist: ', 'owner@addendumsalon.com', 'SKU: HTW-20-60', 'QTY: 3', 'SKU: KTIP-22-1B', 'Collection: Weft Thread', 'Please send the platinum first.', 'Client: Maya Lopez']) {
       expect(mail.text).toContain(part);
     }
   });
@@ -79,12 +81,13 @@ describe('Placing an order', () => {
     const before = await orders();
     const over = await place({ items: [{ sku: 'HTW-20-60', quantity: 51 }] });
     expect([over.status, over.body.error.code]).toEqual([409, 'inventory_unavailable']);
-    expect(over.body.error.message).toMatch(/only 50 in stock/);
+    expect(over.body.error.message).toMatch(/not enough in stock for/);
     // The same SKU on two lines counts together.
     expect((await place({ items: [{ sku: 'HTW-20-60', quantity: 30 }, { sku: 'HTW-20-60', quantity: 30 }] })).status).toBe(409);
     expect((await place({ items: [{ sku: 'NOT-A-SKU', quantity: 1 }] })).status).toBe(409);
     expect((await api.post('/api/inventory/requests', { submissionId: sid(), items: [{ sku: 'HTW-20-60', quantity: 1 }] })).status).toBe(400); // no date
     expect((await place({ neededBy: D(-1), items: [{ sku: 'HTW-20-60', quantity: 1 }] })).status).toBe(400); // past
+    expect((await place({ neededBy: D(0), items: [{ sku: 'HTW-20-60', quantity: 1 }] })).status).toBe(400); // same day
     expect((await place({ neededBy: '2026-02-30', items: [{ sku: 'HTW-20-60', quantity: 1 }] })).status).toBe(400);
     expect((await place({ neededBy: D(400), items: [{ sku: 'HTW-20-60', quantity: 1 }] })).status).toBe(400);
     expect(await orders()).toBe(before);

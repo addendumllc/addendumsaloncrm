@@ -3,15 +3,23 @@ import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ACCOUNT_STATUS_LABEL, DEFAULT_ROLE, PERMISSIONS_CATALOG, PERMISSION_CATEGORIES,
-  type AccountStatus, type PermissionPreviewDTO, type Role, type RoleTemplateDTO, type StaffAccountDTO, type StaffAccountDetailDTO,
+  type AccountStatus, type PermissionPreviewDTO, type Role, type RoleTemplateDTO, type SquareTeamMemberOptionDTO, type StaffAccountDTO, type StaffAccountDetailDTO,
 } from '@addendum/shared';
-import { AlertTriangle, ChevronRight, Clock, Copy, KeyRound, Layers, Link2, RotateCcw, ShieldAlert, ShieldCheck, UserCheck, UserPlus, UserX } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ChevronRight, Clock, Copy, KeyRound, Layers, Link2, RotateCcw, ShieldAlert, ShieldCheck, UserCheck, UserPlus, UserX } from 'lucide-react';
 import { api, ApiError } from '../../api/client';
 import { useCanDo, useMe, useStaff } from '../../api/hooks';
 import { useReauth } from '../../components/domain/Reauth';
-import { relative } from '../../lib/format';
+import { phone, relative } from '../../lib/format';
 import { Avatar, Badge, Button, Field, Modal, Segmented, Spinner, Toggle, cx, useToast } from '../../components/ui';
 import { Card, useSection } from './shared';
+import { StaffCommissionRates } from './CommissionTab';
+import { WagesSection } from './WagesSection';
+import { ScheduleSection } from './ScheduleSection';
+import { ShiftsList } from '../../components/domain/Shifts';
+
+const daysAgoKey = (n: number) => { const d = new Date(Date.now() - n * 86400_000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+import { PayGate } from '../../components/domain/PayGate';
+import { Tc } from '../../lib/titleCase';
 
 const ACTION_LABEL: Record<string, string> = { view: 'View', create: 'Create', edit: 'Edit', delete: 'Delete', approve: 'Approve', export: 'Export' };
 const PERM = new Map(PERMISSIONS_CATALOG.map((p) => [p.key, p]));
@@ -39,6 +47,9 @@ export function UsersSettings() {
   const pending = data.users.filter((u) => u.status === 'pending');
   const people = data.users.filter((u) => u.status !== 'pending' && (showInactive || u.status === 'active'));
   const goRoles = () => { const p = new URLSearchParams(params); p.set('tab', 'roles'); p.delete('open'); setParams(p, { replace: true }); };
+
+  // A team member opens as a full page (tabs for account, permissions, pay and taxes) in place of the list.
+  if (open) return <UserDetail id={open} onClose={() => setOpen(null)} />;
 
   return (
     <div className="space-y-5">
@@ -77,7 +88,7 @@ export function UsersSettings() {
                       {u.status === 'active' && !u.canSignIn && <Badge tone="amber">No password yet</Badge>}
                     </span>
                     <span className="block truncate text-[13px] text-stone">
-                      {u.email ?? 'No email'} · {u.effectiveCount} permissions{u.sensitiveCount ? ` · ${u.sensitiveCount} sensitive` : ''} · {u.lastLoginAt ? `signed in ${relative(u.lastLoginAt)}` : 'never signed in'}
+                      {u.email ?? 'No email'}{u.mobilePhone ? ` · ${phone(u.mobilePhone)}` : ' · no mobile'} · {u.effectiveCount} permissions{u.sensitiveCount ? ` · ${u.sensitiveCount} sensitive` : ''} · {u.lastLoginAt ? `signed in ${relative(u.lastLoginAt)}` : 'never signed in'}
                     </span>
                   </span>
                 </button>
@@ -86,7 +97,6 @@ export function UsersSettings() {
         </ul>
       </Card>
       {canDo('users:manage') && <AccessRequestsSetting />}
-      {open && <UserDetail id={open} onClose={() => setOpen(null)} />}
       {adding && <AddEmployee roles={data.roles} canApprove={data.canApprove} onClose={() => setAdding(false)} />}
     </div>
   );
@@ -189,7 +199,7 @@ function AddEmployee({ roles, canApprove, onClose }: { roles: RoleTemplateDTO[];
   const canDo = useCanDo();
   const toast = useToast();
   const qc = useQueryClient();
-  const [form, setForm] = useState({ name: '', email: '', role: DEFAULT_ROLE as Role, squareTeamMemberId: '', sendInvite: true, approveNow: false });
+  const [form, setForm] = useState({ name: '', email: '', mobilePhone: '', role: DEFAULT_ROLE as Role, squareTeamMemberId: '', sendInvite: true, approveNow: false });
   const [confirm, setConfirm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [done, setDone] = useState<{ link: string; emailed: boolean; expiresAt: string; pending: boolean } | null>(null);
@@ -197,10 +207,11 @@ function AddEmployee({ roles, canApprove, onClose }: { roles: RoleTemplateDTO[];
     setSaving(true);
     try {
       const r = await api.post<{ setupLink: string; emailed: boolean; expiresAt: string; user: StaffAccountDTO }>('/admin/users', {
-        name: form.name, email: form.email, role: form.role, squareTeamMemberId: form.squareTeamMemberId || null, sendInvite: form.sendInvite, approveNow: form.approveNow, confirm,
+        name: form.name, email: form.email, mobilePhone: form.mobilePhone.trim() || null, role: form.role, squareTeamMemberId: form.squareTeamMemberId || null, sendInvite: form.sendInvite, approveNow: form.approveNow, confirm,
       });
       qc.invalidateQueries({ queryKey: ['admin-users'] });
       qc.invalidateQueries({ queryKey: ['staff'] });
+      qc.invalidateQueries({ queryKey: ['square-team-members'] });
       setDone({ link: r.setupLink, emailed: r.emailed, expiresAt: r.expiresAt, pending: r.user.status === 'pending' });
     } catch (e) {
       if (e instanceof ApiError && e.code === 'confirm_required') setConfirm(true);
@@ -232,15 +243,58 @@ function AddEmployee({ roles, canApprove, onClose }: { roles: RoleTemplateDTO[];
           </select>
         </Field>
         {confirm && <p className="flex items-start gap-2 rounded-lg bg-amber/10 px-3 py-2 text-[13px] text-ink-soft"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber" />Admin includes sensitive access: API keys, payroll and commission, exports and user management. Click “Confirm and create” if that’s intended.</p>}
-        <Field label="Square team member ID (optional)" hint="Links their Square bookings and sales (for My Calendar and commission). Square imports team members automatically too.">
-          <input className="field font-mono text-[13px]" value={form.squareTeamMemberId} onChange={(e) => setForm({ ...form, squareTeamMemberId: e.target.value })} />
-        </Field>
+        <Field label="Mobile (optional)" hint="So the team can text them tasks and notifications."><input className="field" type="tel" value={form.mobilePhone} onChange={(e) => setForm({ ...form, mobilePhone: e.target.value })} placeholder="(619) 555-0100" /></Field>
+        <SquareMemberField label="Square team member (optional)" value={form.squareTeamMemberId} onChange={(v) => setForm({ ...form, squareTeamMemberId: v })} />
         <Toggle checked={form.sendInvite} onChange={(v) => setForm({ ...form, sendInvite: v })} label="Email them a link to choose a password" description="If email isn’t set up you’ll get a link to share instead." />
         {canApprove
           ? <Toggle checked={form.approveNow} onChange={(v) => setForm({ ...form, approveNow: v })} label="Approve their access now" description="Off: the account waits in “Waiting for approval” until an Admin approves it." />
           : <p className="text-[13px] text-stone">The account will wait for an Admin’s approval before it can be used.</p>}
       </div>
     </Modal>
+  );
+}
+
+/**
+ * Picks the Square team member an account is linked to (for My Calendar and commission). Lists Square's team by
+ * name; falls back to typing the ID when Square isn't connected or can't be reached.
+ */
+function SquareMemberField({ label, value, userId, onChange }: { label: string; value: string; userId?: string; onChange: (v: string) => void }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['square-team-members'],
+    queryFn: () => api.get<{ connected: boolean; error?: string; members: SquareTeamMemberOptionDTO[] }>('/admin/users/square-team-members'),
+    staleTime: 60_000,
+  });
+  const [manual, setManual] = useState(false);
+  const members = data?.members ?? [];
+  const hint = 'Links their Square bookings and sales (for My Calendar and commission).';
+  if (isLoading) return <Field label={label} hint={hint}><select className="field" disabled><option>Loading Square team…</option></select></Field>;
+  if (manual || !members.length) {
+    const why = !data?.connected ? 'Square isn’t connected, so enter the team member ID.' : data.error ? `Couldn’t load the Square team (${data.error}), so enter the ID.` : '';
+    return (
+      <Field label={label} hint={why ? `${why} ${hint}` : hint}>
+        <input className="field font-mono text-[13px]" value={value} placeholder="Square team member ID" onChange={(e) => onChange(e.target.value.trim())} />
+        {members.length > 0 && <button type="button" className="mt-1 text-[12px] text-plum" onClick={() => setManual(false)}>Choose from the Square team</button>}
+      </Field>
+    );
+  }
+  const current = members.find((m) => m.id === value);
+  const moving = current?.linkedTo && current.linkedTo.id !== userId && !current.linkedTo.signsIn ? current.linkedTo : null;
+  return (
+    <Field label={label} hint={moving ? `This moves the link from “${moving.name}”, a record the Square sync added that can’t sign in.` : hint}>
+      <select className="field" value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">Not linked</option>
+        {value && !current && <option value={value}>ID {value} (not in Square’s team list)</option>}
+        {members.map((m) => {
+          const other = m.linkedTo && m.linkedTo.id !== userId ? m.linkedTo : null;
+          return (
+            <option key={m.id} value={m.id} disabled={!!other?.signsIn}>
+              {m.name}{m.email ? ` · ${m.email}` : ''}{m.active ? '' : ' (inactive in Square)'}{other ? (other.signsIn ? ` — linked to ${other.name}` : ` — on “${other.name}” (no sign-in), will move`) : ''}
+            </option>
+          );
+        })}
+      </select>
+      <button type="button" className="mt-1 text-[12px] text-plum" onClick={() => setManual(true)}>Enter an ID instead</button>
+    </Field>
   );
 }
 
@@ -269,17 +323,25 @@ function UserDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const [clearRestrictions, setClearRestrictions] = useState(false);
   const [preview, setPreview] = useState<{ p: PermissionPreviewDTO; body: object } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [account, setAccount] = useState<{ name: string; email: string; squareTeamMemberId: string; color: string } | null>(null);
+  const [account, setAccount] = useState<{ name: string; email: string; squareTeamMemberId: string; color: string; mobilePhone: string } | null>(null);
   const [link, setLink] = useState<{ link: string; emailed: boolean } | null>(null);
   const [confirmStatus, setConfirmStatus] = useState(false);
   const [filter, setFilter] = useState<'all' | 'on' | 'custom'>('all');
+  const [tab, setTab] = useState<'account' | 'permissions' | 'pay' | 'taxes'>('account');
+  // Square's team list (cached; also used by the Square team member picker): their phone there, if any.
+  const { data: squareTeam } = useQuery({
+    queryKey: ['square-team-members'],
+    queryFn: () => api.get<{ connected: boolean; members: SquareTeamMemberOptionDTO[] }>('/admin/users/square-team-members'),
+    staleTime: 60_000, enabled: canDo('users:manage'),
+  });
+  const seesPay = ['commission:manage', 'commission:team'].some(canDo);
 
   const self = me?.id === id;
   const canPerms = canDo('users:permissions') && !self && (data?.status === 'active' || data?.status === 'disabled');
   const u = data;
   const roleNow = role ?? u?.role ?? 'assistant';
   const template = useMemo(() => new Set(roles.find((r) => r.role === roleNow)?.permissions ?? []), [roles, roleNow]);
-  if (isLoading || !u) return <Modal open onClose={onClose} title="Loading…" side><div className="flex justify-center py-10"><Spinner /></div></Modal>;
+  if (isLoading || !u) return <div className="flex justify-center py-10"><Spinner /></div>;
 
   const current = new Map(u.permissions.map((p) => [p.key, p]));
   const choiceOf = (k: string): Choice => choices[k] ?? (current.get(k)?.override === true ? 'allow' : current.get(k)?.override === false ? 'deny' : 'role');
@@ -296,6 +358,7 @@ function UserDetail({ id, onClose }: { id: string; onClose: () => void }) {
     qc.invalidateQueries({ queryKey: ['admin-user', id] });
     qc.invalidateQueries({ queryKey: ['admin-users'] });
     qc.invalidateQueries({ queryKey: ['staff'] });
+    qc.invalidateQueries({ queryKey: ['square-team-members'] });
   };
   const doPreview = async (extra: object = {}) => {
     setBusy('preview');
@@ -329,7 +392,7 @@ function UserDetail({ id, onClose }: { id: string; onClose: () => void }) {
     if (!account) return;
     setBusy('account');
     try {
-      await api.patch(`/admin/users/${id}`, { name: account.name, email: account.email, color: account.color, squareTeamMemberId: account.squareTeamMemberId || null });
+      await api.patch(`/admin/users/${id}`, { name: account.name, email: account.email, color: account.color, squareTeamMemberId: account.squareTeamMemberId || null, mobilePhone: account.mobilePhone.trim() || null });
       toast('Account saved');
       setAccount(null);
       reload();
@@ -366,17 +429,21 @@ function UserDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const visible = PERMISSIONS_CATALOG.filter((p) => filter === 'all' || (filter === 'on' ? effectiveOf(p.key) : choiceOf(p.key) !== 'role'));
 
   return (
-    <Modal open onClose={onClose} side wide title={u.name} footer={
-      canPerms ? (
-        <>
-          {dirty && <span className="mr-auto text-[13px] text-amber">Unsaved changes</span>}
-          {u.overrideCount > 0 && !dirty && <Button variant="ghost" icon={<RotateCcw className="h-4 w-4" />} onClick={() => doPreview({ resetToRole: true, overrides: {} })} loading={busy === 'preview'}>Reset to role defaults</Button>}
-          {dirty && <Button variant="ghost" onClick={() => { setChoices({}); setRole(null); }}>Discard</Button>}
-          <Button variant="primary" disabled={!dirty} onClick={() => doPreview()} loading={busy === 'preview'}>Review changes</Button>
-        </>
-      ) : undefined
-    }>
+    <div className="pb-24">
+      <button onClick={onClose} className="mb-3 inline-flex items-center gap-1 text-sm text-stone hover:text-ink"><ArrowLeft className="h-4 w-4" />All employees</button>
+      <div className="mb-5 flex flex-wrap items-center gap-3">
+        <Avatar name={u.name} color={u.color} />
+        <div className="min-w-0 flex-1">
+          <h2 className="h-display text-[30px] leading-tight">{u.name}</h2>
+          <p className="flex flex-wrap items-center gap-1.5 text-[13px] text-stone"><Badge tone={u.role === 'admin' ? 'ink' : 'neutral'}>{roles.find((r) => r.role === u.role)?.label ?? u.role}</Badge><StatusBadge s={u.status} />{u.email}</p>
+        </div>
+      </div>
+      <Segmented className="mb-5 max-w-full overflow-x-auto" value={tab} onChange={setTab} options={[
+        { value: 'account', label: 'Account' }, { value: 'permissions', label: u.overrideCount ? `Role & permissions (${u.overrideCount} custom)` : 'Role & permissions' },
+        ...(seesPay ? [{ value: 'pay' as const, label: 'Pay' }, { value: 'taxes' as const, label: 'Taxes' }] : []),
+      ]} />
       <div className="space-y-6">
+        {tab === 'account' && <>
         {self && <p className="rounded-lg bg-mist px-3 py-2 text-[13px] text-ink-soft">This is your own account. Another administrator has to change your role, permissions or status.</p>}
         {(u.status === 'pending' || u.status === 'rejected') && (
           <section className="rounded-xl border border-amber/30 bg-amber/5 p-3">
@@ -387,29 +454,43 @@ function UserDetail({ id, onClose }: { id: string; onClose: () => void }) {
         )}
 
         <section>
-          <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-stone">Account</h3>
-          {account ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Name"><input className="field" value={account.name} onChange={(e) => setAccount({ ...account, name: e.target.value })} /></Field>
-              <Field label="Email"><input className="field" value={account.email} onChange={(e) => setAccount({ ...account, email: e.target.value })} /></Field>
-              <Field label="Square team member ID"><input className="field font-mono text-[13px]" value={account.squareTeamMemberId} onChange={(e) => setAccount({ ...account, squareTeamMemberId: e.target.value })} /></Field>
-              <Field label="Calendar colour"><input type="color" className="field h-10 p-1" value={account.color} onChange={(e) => setAccount({ ...account, color: e.target.value })} /></Field>
-              <div className="flex gap-2 sm:col-span-2"><Button variant="primary" size="sm" onClick={saveAccount} loading={busy === 'account'}>Save</Button><Button size="sm" variant="ghost" onClick={() => setAccount(null)}>Cancel</Button></div>
-            </div>
-          ) : (
+          <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-stone"><Tc>Account</Tc></h3>
+          {/* Details are editable straight away (no "Edit details" step) for people who manage accounts. */}
+          {canDo('users:manage') ? (() => {
+            const squarePhone = squareTeam?.members.find((m) => m.id === u.squareTeamMemberId)?.phone ?? null;
+            const cur = account ?? { name: u.name, email: u.email ?? '', squareTeamMemberId: u.squareTeamMemberId ?? '', color: u.color, mobilePhone: u.mobilePhone ?? '' };
+            const edit = (patch: Partial<typeof cur>) => setAccount({ ...cur, ...patch });
+            return (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Name"><input className="field" value={cur.name} onChange={(e) => edit({ name: e.target.value })} /></Field>
+                <Field label="Email"><input className="field" value={cur.email} onChange={(e) => edit({ email: e.target.value })} /></Field>
+                <Field label="Mobile" hint="For texting them tasks and notifications. Filled in from Square when it’s blank.">
+                  <input className="field" type="tel" value={cur.mobilePhone} onChange={(e) => edit({ mobilePhone: e.target.value })} placeholder="(619) 555-0100" />
+                  {!cur.mobilePhone.trim() && squarePhone && (
+                    <button type="button" className="mt-1 text-[12px] text-plum hover:underline" onClick={() => edit({ mobilePhone: phone(squarePhone) })}>Square has {phone(squarePhone)} · Use it</button>
+                  )}
+                </Field>
+                <SquareMemberField label="Square team member" userId={id} value={cur.squareTeamMemberId} onChange={(v) => edit({ squareTeamMemberId: v })} />
+                <Field label="Calendar colour"><input type="color" className="field h-10 p-1" value={cur.color} onChange={(e) => edit({ color: e.target.value })} /></Field>
+                {account && <div className="flex items-end gap-2"><Button variant="primary" size="sm" onClick={saveAccount} loading={busy === 'account'}>Save</Button><Button size="sm" variant="ghost" onClick={() => setAccount(null)}>Undo changes</Button></div>}
+              </div>
+            );
+          })() : (
             <div className="flex flex-wrap items-center gap-2 text-[14px]">
               <span className="text-ink-soft">{u.email ?? 'No email'}</span>
-              <StatusBadge s={u.status} />
-              <span className="text-[13px] text-stone">{u.squareTeamMemberId ? 'Linked to Square' : 'Not linked to Square (optional)'} · {u.lastLoginAt ? `last sign-in ${relative(u.lastLoginAt)}` : 'never signed in'}{u.approvedAt ? ` · approved ${relative(u.approvedAt)}${u.approvedByName ? ` by ${u.approvedByName}` : ''}` : ''}</span>
-              {canDo('users:manage') && (
-                <span className="flex w-full flex-wrap gap-2 pt-1">
-                  <Button size="sm" onClick={() => setAccount({ name: u.name, email: u.email ?? '', squareTeamMemberId: u.squareTeamMemberId ?? '', color: u.color })}>Edit details</Button>
-                  {(u.status === 'active' || u.status === 'pending') && <Button size="sm" icon={<KeyRound className="h-4 w-4" />} onClick={passwordLink} loading={busy === 'link'}>{u.canSignIn ? 'Password reset link' : 'Set-up link'}</Button>}
-                  {!self && (u.status === 'active' || u.status === 'disabled') && <Button size="sm" variant={u.active ? 'ghost' : 'secondary'} className={u.active ? 'text-rose' : ''} onClick={() => setConfirmStatus(true)}>{u.active ? 'Deactivate' : 'Reactivate'}</Button>}
-                </span>
-              )}
+              {u.mobilePhone ? <a className="text-plum hover:underline" href={`sms:${u.mobilePhone}`}>{phone(u.mobilePhone)}</a> : <span className="text-[13px] text-amber">No mobile</span>}
             </div>
           )}
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-[14px]">
+            <StatusBadge s={u.status} />
+            <span className="text-[13px] text-stone">{u.squareTeamMemberId ? 'Linked to Square' : 'Not linked to Square (optional)'} · {u.lastLoginAt ? `last sign-in ${relative(u.lastLoginAt)}` : 'never signed in'}{u.approvedAt ? ` · approved ${relative(u.approvedAt)}${u.approvedByName ? ` by ${u.approvedByName}` : ''}` : ''}</span>
+            {canDo('users:manage') && (
+              <span className="flex w-full flex-wrap gap-2 pt-1">
+                {(u.status === 'active' || u.status === 'pending') && <Button size="sm" icon={<KeyRound className="h-4 w-4" />} onClick={passwordLink} loading={busy === 'link'}>{u.canSignIn ? 'Password reset link' : 'Set-up link'}</Button>}
+                {!self && (u.status === 'active' || u.status === 'disabled') && <Button size="sm" variant={u.active ? 'ghost' : 'secondary'} className={u.active ? 'text-rose' : ''} onClick={() => setConfirmStatus(true)}>{u.active ? 'Deactivate' : 'Reactivate'}</Button>}
+              </span>
+            )}
+          </div>
           {link && (
             <div className="mt-3 rounded-lg border border-line bg-white p-3 text-[13px]">
               <p className="flex items-center gap-1.5 text-ink-soft"><Link2 className="h-4 w-4" />{link.emailed ? 'Emailed to them. You can also share it:' : 'Email isn’t set up — share this link with them:'}</p>
@@ -419,12 +500,57 @@ function UserDetail({ id, onClose }: { id: string; onClose: () => void }) {
           )}
         </section>
 
+
+
+        {canDo('users:manage') && <SignInCode u={u} canEdit={!!users?.canApprove} />}
+
+        {u.permissions.find((p) => p.key === 'appointments:read')?.effective && <CalendarAccess u={u} canEdit={canPerms} onSaved={reload} />}
+        </>}
+
+        {tab === 'pay' && ['commission:manage', 'commission:team', 'commission:approve'].some(canDo) && (
+          <section>
+            <h3 className="mb-1 text-[13px] font-semibold uppercase tracking-wide text-stone"><Tc>Commission rates</Tc></h3>
+            <p className="mb-2 text-[13px] text-stone">Service and product rates for {u.name.split(' ')[0]} only. The same rates show in Settings → Commission.</p>
+            <StaffCommissionRates staffId={u.id} staffName={u.name} />
+          </section>
+        )}
+
+        {tab === 'pay' && seesPay && (
+          <section>
+            <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-stone"><Tc>Wages, tips & hours</Tc></h3>
+            <PayGate title={`Enter your password to see ${u.name.split(' ')[0]}’s pay`}><WagesSection staffId={u.id} staffName={u.name} part="pay" /></PayGate>
+          </section>
+        )}
+
+        {tab === 'pay' && ['commission:manage', 'commission:team', 'users:manage'].some(canDo) && (
+          <section>
+            <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-stone"><Tc>Work schedule</Tc></h3>
+            <ScheduleSection staffId={u.id} staffName={u.name} />
+          </section>
+        )}
+
+        {tab === 'pay' && seesPay && (
+          <section>
+            <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-stone"><Tc>Time clock shifts (last 30 days)</Tc></h3>
+            <PayGate title={`Enter your password to see ${u.name.split(' ')[0]}’s shifts`}><ShiftsList staffId={u.id} from={daysAgoKey(30)} to={daysAgoKey(0)} /></PayGate>
+          </section>
+        )}
+
+        {tab === 'taxes' && seesPay && (
+          <section>
+            <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-stone"><Tc>Tax information</Tc></h3>
+            <PayGate title={`Enter your password to see ${u.name.split(' ')[0]}’s tax details`}><WagesSection staffId={u.id} staffName={u.name} part="taxes" /></PayGate>
+          </section>
+        )}
+
+        {tab === 'permissions' && <>
         <section>
-          <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-stone">Role</h3>
+          <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-stone"><Tc>Role</Tc></h3>
           <select className="field max-w-xs" value={roleNow} disabled={!canPerms} onChange={(e) => setRole(e.target.value)}>
             {roles.map((r) => <option key={r.role} value={r.role}>{r.label}</option>)}
           </select>
           <p className="mt-1 text-[13px] text-stone">{roles.find((r) => r.role === roleNow)?.description}</p>
+          <p className="mt-1 text-[12px] text-stone">Need something different for {u.name.split(' ')[0]}? Allow or deny single permissions below — or make a reusable template under Role templates.</p>
           {roleChanged && (
             <div className="mt-2 rounded-lg bg-amber/10 px-3 py-2 text-[13px] text-ink-soft">
               Changing the role removes the extra permissions given to {u.name.split(' ')[0]} individually, so nothing carries over by accident.
@@ -432,14 +558,9 @@ function UserDetail({ id, onClose }: { id: string; onClose: () => void }) {
             </div>
           )}
         </section>
-
-        {canDo('users:manage') && <SignInCode u={u} canEdit={!!users?.canApprove} />}
-
-        {u.permissions.find((p) => p.key === 'appointments:read')?.effective && <CalendarAccess u={u} canEdit={canPerms} onSaved={reload} />}
-
         <section>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-[13px] font-semibold uppercase tracking-wide text-stone">Permissions</h3>
+            <h3 className="text-[13px] font-semibold uppercase tracking-wide text-stone"><Tc>Permissions</Tc></h3>
             <Segmented value={filter} onChange={setFilter} options={[{ value: 'all', label: 'All' }, { value: 'on', label: 'Allowed' }, { value: 'custom', label: 'Custom only' }]} />
           </div>
           <p className="mb-3 text-[12px] text-stone">“Role” follows the {roles.find((r) => r.role === roleNow)?.label ?? 'role'} template. “Allow” or “Deny” applies to {u.name.split(' ')[0]} only — no one else with this role is affected.</p>
@@ -468,7 +589,7 @@ function UserDetail({ id, onClose }: { id: string; onClose: () => void }) {
                         <div className="flex overflow-hidden rounded-lg border border-line text-[12px]">
                           {(['role', 'allow', 'deny'] as Choice[]).map((x) => (
                             <button key={x} disabled={!canPerms} onClick={() => setChoices({ ...choices, [p.key]: x })}
-                              className={cx('px-2.5 py-1', c === x ? (x === 'deny' ? 'bg-rose text-white' : x === 'allow' ? 'bg-sage text-white' : 'bg-ink text-white') : 'bg-white text-ink-soft hover:bg-mist', !canPerms && 'cursor-not-allowed opacity-60')}>
+                              className={cx('px-2.5 py-1', c === x ? (x === 'deny' ? 'bg-rose text-white' : x === 'allow' ? 'bg-sage text-white' : 'bg-plum text-white') : 'bg-white text-ink-soft hover:bg-mist', !canPerms && 'cursor-not-allowed opacity-60')}>
                               {x === 'role' ? 'Role' : x === 'allow' ? 'Allow' : 'Deny'}
                             </button>
                           ))}
@@ -481,7 +602,20 @@ function UserDetail({ id, onClose }: { id: string; onClose: () => void }) {
             );
           })}
         </section>
+        </>}
       </div>
+
+      {/* Role and permission changes are reviewed before saving; the bar stays in view on every tab. */}
+      {canPerms && (dirty || u.overrideCount > 0) && (
+        <div className="fixed inset-x-0 bottom-[calc(3.6rem+env(safe-area-inset-bottom))] z-30 border-t border-line bg-white px-4 py-3 backdrop-blur lg:bottom-0 lg:left-[232px]">
+          <div className="mx-auto flex max-w-[1240px] flex-wrap items-center justify-end gap-2">
+            {dirty && <span className="mr-auto text-[13px] text-amber">Unsaved role or permission changes</span>}
+            {u.overrideCount > 0 && !dirty && <Button variant="ghost" icon={<RotateCcw className="h-4 w-4" />} onClick={() => doPreview({ resetToRole: true, overrides: {} })} loading={busy === 'preview'}>Reset to role defaults</Button>}
+            {dirty && <Button variant="ghost" onClick={() => { setChoices({}); setRole(null); }}>Discard</Button>}
+            {dirty && <Button variant="primary" onClick={() => doPreview()} loading={busy === 'preview'}>Review changes</Button>}
+          </div>
+        </div>
+      )}
 
       {preview && (
         <Modal open onClose={() => setPreview(null)} title="Review changes" footer={<><Button variant="ghost" onClick={() => setPreview(null)}>Back</Button><Button variant="primary" onClick={apply} loading={busy === 'apply'}>{preview.p.sensitiveAdded.length ? 'Confirm sensitive access and save' : 'Save'}</Button></>}>
@@ -502,7 +636,7 @@ function UserDetail({ id, onClose }: { id: string; onClose: () => void }) {
           <p className="text-[15px] text-ink-soft">{u.active ? 'They’re signed out immediately and can’t sign in. Their history, appointments and commission records are kept.' : 'They can sign in again with their existing password and permissions.'}</p>
         </Modal>
       )}
-    </Modal>
+    </div>
   );
 }
 
@@ -533,7 +667,7 @@ function CalendarAccess({ u, canEdit, onSaved }: { u: StaffAccountDetailDTO; can
   };
   return (
     <section>
-      <h3 className="mb-1 text-[13px] font-semibold uppercase tracking-wide text-stone">Team calendars</h3>
+      <h3 className="mb-1 text-[13px] font-semibold uppercase tracking-wide text-stone"><Tc>Team calendars</Tc></h3>
       <p className="mb-2 text-[13px] text-stone">Whose appointments {u.name.split(' ')[0]} can see. Viewing never lets them change, cancel or reschedule anything — that happens in Square.</p>
       <Segmented value={draft === null ? 'all' : 'some'} onChange={(v) => canEdit && setDraft(v === 'all' ? null : (u.calendarStaffIds ?? []))}
         options={[{ value: 'all', label: 'Everyone' }, { value: 'some', label: 'Only these people' }]} />
@@ -596,7 +730,7 @@ function SignInCode({ u, canEdit }: { u: StaffAccountDetailDTO; canEdit: boolean
   if (!status) return null;
   return (
     <section>
-      <h3 className="mb-1 text-[13px] font-semibold uppercase tracking-wide text-stone">Sign-in code</h3>
+      <h3 className="mb-1 text-[13px] font-semibold uppercase tracking-wide text-stone"><Tc>Sign-in code</Tc></h3>
       <p className="mb-2 text-[13px] text-stone">An alternative to a password: {u.name.split(' ')[0]} signs in with their email and this code. It’s the CRM’s own code — not a Square passcode — and it’s never shown again after it’s set.</p>
       <div className="flex flex-wrap items-center gap-2 text-[14px]">
         {!status.set ? <Badge>No code</Badge> : status.locked ? <Badge tone="rose">Locked until {new Date(status.lockedUntil!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</Badge>

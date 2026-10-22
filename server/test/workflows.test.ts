@@ -208,7 +208,7 @@ describe('Workflow 5 — Follow-up → Push to HighLevel → contact matched →
     expect(task.highlevel.taskId).toBeTruthy();
     const hl = await loadDemoHL();
     const hlTask = hl.tasks.find((x) => x.id === task.highlevel.taskId)!;
-    expect(hlTask.title).toBe('[High] Follow up with Sarah Johnson');
+    expect(hlTask.title).toBe('Follow up with Sarah Johnson (high priority)');
     expect(hlTask.body).toMatch(/Last Square appointment/);
     expect(hlTask.body).toMatch(/follow-ups\?task=/);
     expect(hl.contacts.filter((c) => c.phone === sarah.phone)).toHaveLength(1);
@@ -223,13 +223,20 @@ describe('Workflow 5 — Follow-up → Push to HighLevel → contact matched →
     expect((await loadDemoHL()).tasks.find((x) => x.id === task.highlevel.taskId)!.completed).toBe(true);
   });
 
-  it('asks before creating a missing HighLevel contact', async () => {
+  it('one click makes the follow-up a to-do in HighLevel, creating the contact only when none matches', async () => {
     const lead = await api.post('/api/leads', { name: 'Fresh Contact', phone: '619-555-7506' });
     const task = (await api.get(`/api/tasks?leadId=${lead.body.id}`)).body.tasks[0];
-    const first = await api.post(`/api/tasks/${task.id}/highlevel`);
-    expect(first.body.result.status).toBe('needs_contact');
-    const second = await api.post(`/api/tasks/${task.id}/highlevel`, { createContact: true });
-    expect(second.body.result.status).toBe('synced');
+    // Asked to use an existing contact only: there isn't one, so it says so.
+    expect((await api.post(`/api/tasks/${task.id}/highlevel`, { createContact: false })).body.result.status).toBe('needs_contact');
+    const r = await api.post(`/api/tasks/${task.id}/highlevel`);
+    expect(r.body.result.status).toBe('synced');
+    const hl = await loadDemoHL();
+    const todo = hl.tasks.find((x) => x.id === r.body.task.highlevel.taskId)!;
+    expect(todo.title).toMatch(/^Follow up/);
+    // Pushing again updates the same to-do and doesn't create a second contact.
+    const contacts = hl.contacts.length;
+    await api.post(`/api/tasks/${task.id}/highlevel`);
+    expect((await loadDemoHL()).contacts.length).toBe(contacts);
   });
 });
 
@@ -369,5 +376,63 @@ describe('Main domain', () => {
     expect((await app.get('/api/health').set('Host', 'app.addendumsalon.com')).status).toBe(200);
     expect((await app.get('/api/health').set('Host', 'addendumsalon.info')).status).toBe(200);
     loadConfig({ DEMO_MODE: 'true', OWNER_EMAIL: 'owner@addendumsalon.com', OWNER_PASSWORD: 'addendum-demo', APP_URL: 'http://localhost:4000' });
+  });
+});
+
+describe('Reached out — waiting for the client', () => {
+  it('keeps the follow-up open until the check-back date, and brings it back as soon as they text', async () => {
+    const { handleInboundSms } = await import('../src/domain/messaging.js');
+    const olivia = (await api.get('/api/clients?q=Olivia')).body.clients[0];
+    const detail = (await api.get(`/api/clients/${olivia.id}`)).body.client;
+    const t = await api.post('/api/tasks', { type: 'call', title: 'Ask Olivia about her color', dueAt: new Date().toISOString(), clientId: olivia.id });
+    const r = await api.post(`/api/tasks/${t.body.id}/reached-out`, { via: 'text', checkBackDays: 2 });
+    expect(r.status).toBe(200);
+    expect(r.body.task).toMatchObject({ status: 'snoozed', reachOutCount: 1 });
+    expect(new Date(r.body.task.dueAt).getTime()).toBeGreaterThan(Date.now() + 86400_000);
+    expect(r.body.task.notes).toMatch(/Reached out by text/);
+    // Reached out yesterday: recorded on that day.
+    const y = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
+    const again = await api.post(`/api/tasks/${t.body.id}/reached-out`, { checkBackDays: 1, on: y });
+    expect(again.body.task.reachOutCount).toBe(2);
+    expect(again.body.task.notes).toMatch(new RegExp(`on ${y}`));
+    expect((await api.post(`/api/tasks/${t.body.id}/reached-out`, { on: '2999-01-01' })).status).toBe(400);
+    // She replies: it's back on the list now.
+    await handleInboundSms({ from: detail.phone, body: 'Yes! Tuesday works' });
+    const back = (await api.get(`/api/tasks/${t.body.id}`)).body.task;
+    expect(back.status).toBe('due');
+    expect(new Date(back.dueAt).getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+    // Internal tasks (no client) can't be "reached out".
+    const internal = await api.post('/api/tasks', { kind: 'task', type: 'internal', title: 'Restock', dueAt: new Date().toISOString() });
+    expect((await api.post(`/api/tasks/${internal.body.id}/reached-out`, {})).status).toBe(400);
+  });
+});
+
+describe('Team phone numbers from Square', () => {
+  it('fills a blank mobile from the Square team member, and never replaces one typed in the CRM', async () => {
+    const linked = await db().query<any>('SELECT id FROM staff WHERE square_team_member_id IS NOT NULL ORDER BY name LIMIT 2');
+    expect(linked.length).toBe(2);
+    await db().query('UPDATE staff SET mobile_phone = NULL WHERE id = $1', [linked[0].id]);
+    await db().query("UPDATE staff SET mobile_phone = '+16195559999' WHERE id = $1", [linked[1].id]);
+    await runSquareSync();
+    const [a, b] = await Promise.all(linked.map((l) => db().one<any>('SELECT mobile_phone FROM staff WHERE id = $1', [l.id])));
+    expect(a.mobile_phone).toMatch(/^\+1619555\d{4}$/);
+    expect(b.mobile_phone).toBe('+16195559999');
+  });
+});
+
+describe('Internal tasks without a due date', () => {
+  it('an internal task can have just a priority; client follow-ups still need a due date', async () => {
+    const t = await api.post('/api/tasks', { kind: 'task', type: 'internal', title: 'Deep-clean the color bar', priority: 'high' });
+    expect(t.status).toBe(201);
+    const task = (await api.get(`/api/tasks/${t.body.id}`)).body.task;
+    expect([task.dueAt, task.isOverdue, task.priority]).toEqual([null, false, 'high']);
+    expect((await api.get('/api/tasks?status=open&kind=task')).body.tasks.some((x: any) => x.id === t.body.id)).toBe(true);
+    // A date can be added, and cleared again.
+    expect((await api.patch(`/api/tasks/${t.body.id}`, { dueAt: new Date(Date.now() + 86400_000).toISOString() })).body.task.dueAt).not.toBeNull();
+    expect((await api.patch(`/api/tasks/${t.body.id}`, { dueAt: null })).body.task.dueAt).toBeNull();
+    const olivia = (await api.get('/api/clients?q=Olivia')).body.clients[0];
+    expect((await api.post('/api/tasks', { type: 'call', title: 'Call Olivia', clientId: olivia.id })).status).toBe(400);
+    const f = await api.post('/api/tasks', { type: 'call', title: 'Call Olivia', clientId: olivia.id, dueAt: new Date().toISOString() });
+    expect((await api.patch(`/api/tasks/${f.body.id}`, { dueAt: null })).status).toBe(400);
   });
 });

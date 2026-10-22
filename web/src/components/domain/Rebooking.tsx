@@ -10,10 +10,10 @@ import { Badge, Button, EmptyState, Field, Modal, Spinner, Toggle, cx, useToast 
 /** Shared pieces for per-service, per-client rebooking schedules (client profile, follow-ups, settings). */
 
 export const STATUS_LABEL: Record<RebookingStatus, string> = {
-  overdue: 'Overdue', due_soon: 'Due soon', upcoming: 'Upcoming', booked: 'Booked', off: 'Follow-ups off', no_interval: 'No interval set', no_visit: 'No visit yet',
+  overdue: 'Overdue', due_soon: 'Due soon', upcoming: 'Upcoming', booked: 'Booked', off: 'Follow-ups off', not_needed: 'No follow-up needed', lapsed: 'Not seen in over a year', no_interval: 'No interval set', no_visit: 'No visit yet',
 };
 export const STATUS_TONE: Record<RebookingStatus, 'rose' | 'amber' | 'sage' | 'plum' | 'neutral'> = {
-  overdue: 'rose', due_soon: 'amber', upcoming: 'neutral', booked: 'sage', off: 'neutral', no_interval: 'neutral', no_visit: 'neutral',
+  overdue: 'rose', due_soon: 'amber', upcoming: 'neutral', booked: 'sage', off: 'neutral', not_needed: 'neutral', lapsed: 'neutral', no_interval: 'neutral', no_visit: 'neutral',
 };
 
 export const dayLabel = (key: string | null | undefined, withYear = false) =>
@@ -63,7 +63,7 @@ export function RebookingSchedulePanel({ clientId, firstName }: { clientId: stri
                   <Badge tone={STATUS_TONE[s.status]}>{STATUS_LABEL[s.status]}</Badge>
                   {s.override && <Badge tone="plum">Custom for {firstName}</Badge>}
                 </div>
-                <dl className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1 text-[13px] sm:grid-cols-4">
+                <dl className="mt-1.5 grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-x-4 gap-y-1 text-[13px] [&_dt]:whitespace-nowrap">
                   <div><dt className="text-stone">Last visit</dt><dd className="text-ink-soft">{dayLabel(s.lastVisitDate, true)}{s.lastVisitSource === 'manual' && ' (entered)'}</dd></div>
                   <div><dt className="text-stone">Every</dt><dd className="flex flex-wrap items-center gap-1 text-ink-soft">{weeksLabel(s.intervalDays)}</dd></div>
                   <div><dt className="text-stone">{s.status === 'booked' ? 'Booked for' : 'Recommended'}</dt><dd className="font-medium text-ink">{s.status === 'booked' ? dayLabel(s.nextBookedDate) : dayLabel(s.nextDate)}</dd></div>
@@ -75,8 +75,13 @@ export function RebookingSchedulePanel({ clientId, firstName }: { clientId: stri
                   {s.windowStart && s.windowEnd && <span>· Window {dayLabel(s.windowStart)}–{dayLabel(s.windowEnd)}</span>}
                   {s.otherBookingDate && s.status !== 'booked' && <span>· Has another visit {dayLabel(s.otherBookingDate)}: consider adding this service</span>}
                 </div>
+                {canEdit && (
+                  <button type="button" onClick={() => setEditing({ serviceId: s.serviceId })}
+                    className="mt-2 inline-flex items-center gap-1 rounded-md text-[12px] font-medium text-plum hover:underline">
+                    <SlidersHorizontal className="h-3.5 w-3.5" />Adjust rebooking schedule
+                  </button>
+                )}
               </div>
-              {canEdit && <Button size="sm" variant="ghost" icon={<SlidersHorizontal className="h-4 w-4" />} onClick={() => setEditing({ serviceId: s.serviceId })}>Adjust</Button>}
             </div>
           ))}
         </div>
@@ -215,7 +220,7 @@ export function ServiceRulesEditor() {
   const editable = canDo('rebooking:defaults');
   const { data, isLoading } = useQuery({
     queryKey: ['rebooking-services'],
-    queryFn: () => api.get<{ services: { serviceId: string; serviceName: string; rule: { minDays: number | null; maxDays: number | null; targetDays: number; remindBeforeDays: number; autoFollowUp: boolean } | null }[] }>('/rebooking/services'),
+    queryFn: () => api.get<{ services: { serviceId: string; serviceName: string; notNeeded: boolean; rule: { minDays: number | null; maxDays: number | null; targetDays: number; remindBeforeDays: number; autoFollowUp: boolean } | null }[] }>('/rebooking/services'),
   });
   const [edit, setEdit] = useState<string | null>(null);
   const [draft, setDraft] = useState({ min: '', max: '', target: '', remind: '7', auto: true });
@@ -240,6 +245,16 @@ export function ServiceRulesEditor() {
       setSaving(false);
     }
   };
+  const setNotNeeded = async (serviceId: string, notNeeded: boolean) => {
+    try {
+      await api.put(`/rebooking/services/${serviceId}/not-needed`, { notNeeded });
+      toast(notNeeded ? 'Marked “No follow-up needed”. It still shows on clients’ visits; open follow-ups for it were closed.' : 'Follow-ups are back on for this service.');
+      qc.invalidateQueries({ queryKey: ['rebooking-services'] });
+      qc.invalidateQueries({ queryKey: ['rebooking'] });
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  };
   const remove = async (serviceId: string) => {
     try {
       await api.del(`/rebooking/services/${serviceId}`);
@@ -256,10 +271,17 @@ export function ServiceRulesEditor() {
         <div key={s.serviceId} className="py-3">
           <div className="flex flex-wrap items-center gap-2">
             <p className="min-w-0 flex-1 font-medium text-ink">{s.serviceName}</p>
-            {s.rule
+            {s.notNeeded
+              ? <span className="text-[13px] text-ink-soft">No follow-up needed — still shows on clients’ visits for notes</span>
+              : s.rule
               ? <span className="text-[13px] text-ink-soft">Every {weeksLabel(s.rule.targetDays)}{s.rule.minDays && s.rule.maxDays ? ` (${weeksLabel(s.rule.minDays)}–${weeksLabel(s.rule.maxDays)})` : ''} · follow-up {s.rule.remindBeforeDays}d before · {s.rule.autoFollowUp ? 'auto follow-ups on' : 'auto follow-ups off'}</span>
               : <span className="text-[13px] text-stone">No default — uses each client’s visit history</span>}
-            {editable && edit !== s.serviceId && <Button size="sm" variant="ghost" onClick={() => start(s)}>{s.rule ? 'Edit' : 'Set default'}</Button>}
+            {editable && edit !== s.serviceId && !s.notNeeded && <Button size="sm" variant="ghost" onClick={() => start(s)}>{s.rule ? 'Edit' : 'Set default'}</Button>}
+            {editable && edit !== s.serviceId && (
+              <Button size="sm" variant="ghost" className={s.notNeeded ? 'text-plum' : 'text-stone'} onClick={() => setNotNeeded(s.serviceId, !s.notNeeded)}>
+                {s.notNeeded ? 'Needs follow-up' : 'No follow-up needed'}
+              </Button>
+            )}
           </div>
           {edit === s.serviceId && (
             <div className="mt-3 rounded-xl border border-line bg-mist/40 p-3">
@@ -286,7 +308,7 @@ export function ServiceRulesEditor() {
 
 /** Follow-Ups → "Rebooking schedule": everyone's upcoming recommended dates. */
 export function RebookingScheduleList() {
-  const [status, setStatus] = useState<'attention' | 'overdue' | 'due_soon' | 'upcoming' | 'booked' | 'off' | 'all'>('attention');
+  const [status, setStatus] = useState<'attention' | 'overdue' | 'due_soon' | 'upcoming' | 'booked' | 'off' | 'not_needed' | 'all'>('attention');
   const { data, isLoading } = useQuery({
     queryKey: ['rebooking-schedule', status],
     queryFn: () => api.get<{ rows: (ClientServiceScheduleDTO & { clientId: string; clientName: string })[] }>(`/rebooking/schedule?status=${status}&days=30`),
@@ -295,8 +317,8 @@ export function RebookingScheduleList() {
   return (
     <div>
       <div className="mb-4 flex flex-wrap gap-1.5">
-        {([['attention', 'Due in the next 30 days'], ['overdue', 'Overdue'], ['due_soon', 'Due soon'], ['upcoming', 'Upcoming'], ['booked', 'Booked'], ['off', 'Follow-ups off'], ['all', 'All']] as const).map(([v, l]) => (
-          <button key={v} onClick={() => setStatus(v)} className={cx('rounded-full px-3 py-1.5 text-[13px] font-medium', status === v ? 'bg-ink text-white' : 'bg-mist text-ink-soft')}>{l}</button>
+        {([['attention', 'Due in the next 30 days'], ['overdue', 'Overdue'], ['due_soon', 'Due soon'], ['upcoming', 'Upcoming'], ['booked', 'Booked'], ['off', 'Follow-ups off'], ['not_needed', 'No follow-up needed'], ['all', 'All']] as const).map(([v, l]) => (
+          <button key={v} onClick={() => setStatus(v)} className={cx('rounded-full px-3 py-1.5 text-[13px] font-medium', status === v ? 'bg-plum text-white' : 'bg-mist text-ink-soft')}>{l}</button>
         ))}
       </div>
       {isLoading ? <div className="flex justify-center py-8"><Spinner /></div> : !data?.rows.length ? (

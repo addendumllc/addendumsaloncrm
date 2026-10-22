@@ -20,8 +20,8 @@ const FILTERS: { value: Filter; label: string }[] = [
 const STATUS_TONE: Record<RebookStatus, 'sage' | 'plum' | 'neutral'> = { future: 'sage', returned: 'plum', not_rebooked: 'neutral' };
 const matches = (f: Filter, c: NewClientRowDTO) => f === 'all' || (f === 'rebooked' ? c.rebookStatus !== 'not_rebooked' : c.rebookStatus === f);
 
-export function NewClientStats() {
-  const dr = useDateRange('this_month');
+export function NewClientStats({ className = 'mt-12' }: { className?: string }) {
+  const dr = useDateRange('this_month', { payPeriods: false });
   const [staffId, setStaffId] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [q, setQ] = useState('');
@@ -47,7 +47,7 @@ export function NewClientStats() {
   const stylists = data?.byStylist.filter((b) => b.staffId) ?? [];
 
   return (
-    <section className="mt-12">
+    <section className={className}>
       <SectionTitle>New clients & rebooking</SectionTitle>
       <DateRangeBar {...dr} />
       {error && <ErrorNote error={error} onRetry={refetch} />}

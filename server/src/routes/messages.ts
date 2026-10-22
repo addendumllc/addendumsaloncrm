@@ -29,6 +29,28 @@ messagesRouter.get('/conversations/:id', requirePermission('messages:read'), ah(
   res.json({ ...data, upcomingAppointment: upcoming });
 }));
 
+/** Deletes a whole conversation and its messages from the CRM (texts on phones are untouched). */
+messagesRouter.delete('/conversations/:id', requirePermission('messages:delete'), ah(async (req, res) => {
+  const c = await db().one<{ phone: string }>('SELECT phone FROM conversations WHERE id = $1', [req.params.id]);
+  if (!c) throw notFound('That conversation');
+  const n = await db().one<{ n: number }>('SELECT count(*)::int n FROM messages WHERE conversation_id = $1', [req.params.id]);
+  await db().query('DELETE FROM conversations WHERE id = $1', [req.params.id]);
+  await logAction(req, 'message.delete_conversation', 'conversation', req.params.id, { messages: n?.n ?? 0 });
+  res.json({ ok: true });
+}));
+
+/** Deletes one message from the CRM; the conversation's latest-message time is recalculated. */
+messagesRouter.delete('/:id', requirePermission('messages:delete'), ah(async (req, res) => {
+  const m = await db().one<{ conversation_id: string }>('DELETE FROM messages WHERE id = $1 RETURNING conversation_id', [req.params.id]);
+  if (!m) throw notFound('That message');
+  await db().query(
+    `UPDATE conversations SET last_message_at = (SELECT max(created_at) FROM messages WHERE conversation_id = $1),
+       last_inbound_at = (SELECT max(created_at) FROM messages WHERE conversation_id = $1 AND direction = 'inbound') WHERE id = $1`,
+    [m.conversation_id]);
+  await logAction(req, 'message.delete', 'message', req.params.id);
+  res.json({ ok: true });
+}));
+
 messagesRouter.post('/conversations/:id/read', requirePermission('messages:read'), ah(async (req, res) => {
   await markConversationRead(req.params.id);
   res.json({ ok: true });

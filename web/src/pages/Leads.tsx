@@ -8,6 +8,7 @@ import { dateTime, phone, relative } from '../lib/format';
 import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, Segmented, cx, useToast } from '../components/ui';
 import { useActions } from '../components/domain/ActionsProvider';
 import { TaskCard } from '../components/domain/TaskCard';
+import { Tc } from '../lib/titleCase';
 
 const PIPELINE: LeadStatus[] = ['new', 'contacted', 'waiting', 'interested', 'consultation_scheduled', 'booked', 'follow_up_needed', 'won', 'lost'];
 const label = (s: LeadStatus) => LEAD_STATUSES.find((x) => x.value === s)!.label;
@@ -182,17 +183,17 @@ function LeadDrawer({ id, onClose }: { id: string; onClose: () => void }) {
           {lead.notes && <p className="rounded-xl bg-mist px-3 py-2 text-sm text-ink-soft">{lead.notes}</p>}
 
           <section>
-            <h3 className="mb-2 font-display text-xl">Follow-ups</h3>
+            <h3 className="mb-2 font-display text-xl"><Tc>Follow-ups</Tc></h3>
             {data.tasks.filter((t) => t.status !== 'cancelled').length === 0 && <p className="text-sm text-stone">None yet.</p>}
             <div className="space-y-2">{data.tasks.filter((t) => t.status !== 'cancelled').map((t) => <TaskCard key={t.id} task={t} compact />)}</div>
           </section>
 
           <section>
-            <h3 className="mb-2 font-display text-xl">Conversation</h3>
+            <h3 className="mb-2 font-display text-xl"><Tc>Conversation</Tc></h3>
             <div className="space-y-2 rounded-xl border border-line p-3">
               {data.messages.length === 0 && <p className="py-2 text-center text-sm text-stone">No texts yet.</p>}
               {data.messages.map((m) => (
-                <div key={m.id} className={cx('max-w-[85%] rounded-2xl px-3 py-2 text-sm', m.direction === 'inbound' ? 'bg-mist' : 'ml-auto bg-ink text-white')}>
+                <div key={m.id} className={cx('max-w-[85%] rounded-2xl px-3 py-2 text-sm', m.direction === 'inbound' ? 'bg-mist' : 'ml-auto bg-plum text-white')}>
                   {m.body}<span className={cx('mt-0.5 block text-[10px]', m.direction === 'inbound' ? 'text-stone' : 'text-white/60')}>{dateTime(m.createdAt)}</span>
                 </div>
               ))}
@@ -200,7 +201,7 @@ function LeadDrawer({ id, onClose }: { id: string; onClose: () => void }) {
           </section>
 
           <section>
-            <h3 className="mb-2 font-display text-xl">Notes</h3>
+            <h3 className="mb-2 font-display text-xl"><Tc>Notes</Tc></h3>
             <div className="space-y-2">
               {data.notes.map((n) => <div key={n.id} className="rounded-xl border border-line px-3 py-2 text-sm">{n.body}<span className="mt-1 block text-[11px] text-stone">{n.author ?? 'Team'} · {relative(n.createdAt)}</span></div>)}
             </div>

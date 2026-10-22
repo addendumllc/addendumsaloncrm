@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Plus, X, Bell } from 'lucide-react';
 import { Button, Field, Toggle, useToast } from '../../components/ui';
 import { Card, NumberField, SaveBar, useCan, useSection } from './shared';
+import { Tc } from '../../lib/titleCase';
 
 const TIMEZONES = ['America/Los_Angeles', 'America/Denver', 'America/Phoenix', 'America/Chicago', 'America/New_York', 'America/Anchorage', 'Pacific/Honolulu'];
 
@@ -64,6 +65,7 @@ export function RulesSettings({ onSaved }: { onSaved?: () => void }) {
       </RuleGroup>
       <RuleGroup title="Smart rebooking" toggle={<Toggle label="Suggest contacting clients who are overdue" description="Based on each client's own booking rhythm in Square." checked={d.rebookingEnabled} onChange={(v) => r.set('rebookingEnabled', v)} disabled={locked} />}>
         <NumberField label="Overdue once past their usual gap by" unit="days" value={d.rebookingGraceDays} max={120} onChange={(v) => r.set('rebookingGraceDays', v)} disabled={locked || !d.rebookingEnabled} />
+        <NumberField label="Stop following up when the last visit was over" unit="days ago (0 = never stop)" value={d.rebookingStopAfterDays ?? 365} max={3650} onChange={(v) => r.set('rebookingStopAfterDays', v)} disabled={locked || !d.rebookingEnabled} hint="365 = a year. Their open rebooking follow-ups close automatically." />
         <NumberField label="Only with at least" unit="past visits" value={d.rebookingMinVisits} min={2} max={20} onChange={(v) => r.set('rebookingMinVisits', v)} disabled={locked || !d.rebookingEnabled} hint="Fewer visits isn't enough history to guess a pattern." />
       </RuleGroup>
       <RuleGroup title="Unanswered texts" last>
@@ -76,7 +78,7 @@ export function RulesSettings({ onSaved }: { onSaved?: () => void }) {
 function RuleGroup({ title, toggle, children, last }: { title: string; toggle?: React.ReactNode; children: React.ReactNode; last?: boolean }) {
   return (
     <div className={last ? 'pt-4' : 'border-b border-line py-4 first:pt-0'}>
-      <h3 className="text-[13px] font-semibold uppercase tracking-wider text-stone">{title}</h3>
+      <h3 className="text-[13px] font-semibold uppercase tracking-wider text-stone"><Tc>{title}</Tc></h3>
       {toggle}
       <div className="mt-2 grid gap-4 sm:grid-cols-3">{children}</div>
     </div>

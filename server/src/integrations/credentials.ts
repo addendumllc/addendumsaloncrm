@@ -12,7 +12,7 @@ import { setRedactedSecrets } from '../lib/redact.js';
  *   uses them with no other changes. A saved value wins over the environment.
  * - Secret fields are write-only from the admin screen: it can see whether one is set and where from, never the value.
  */
-export type CredentialProvider = 'square' | 'shopify' | 'highlevel' | 'email' | 'ai';
+export type CredentialProvider = 'square' | 'shopify' | 'shopify2' | 'highlevel' | 'highlevel_hair' | 'email' | 'ai';
 
 export interface CredentialField {
   key: string; // environment variable name
@@ -40,6 +40,7 @@ export const CREDENTIAL_SPECS: Record<CredentialProvider, { label: string; field
     label: 'Square',
     requirement: 'An access token, or an application ID + secret (then press Connect with Square).',
     fields: [
+      { key: 'SQUARE_NAME', label: 'Name in the CRM', secret: false, placeholder: 'Salon', help: 'How Square is shown in Inventory Sync (e.g. Salon). Leave empty for “Square”.' },
       { key: 'SQUARE_ENVIRONMENT', label: 'Environment', secret: false, options: ['production', 'sandbox'], help: 'Use production for real salon data.' },
       { key: 'SQUARE_ACCESS_TOKEN', label: 'Access token', secret: true, group: 'token', validate: noSpaces, help: 'Developer Console → your app → Credentials → Production access token. Simplest for a single salon.' },
       { key: 'SQUARE_APPLICATION_ID', label: 'Application ID', secret: false, group: 'oauth', validate: noSpaces, help: 'Developer Console → your app → Credentials. Public identifier, used for “Connect with Square”.' },
@@ -53,11 +54,24 @@ export const CREDENTIAL_SPECS: Record<CredentialProvider, { label: string; field
     label: 'Shopify',
     requirement: 'The store’s myshopify.com address, plus either an Admin API access token or an app’s client ID + client secret.',
     fields: [
+      { key: 'SHOPIFY_NAME', label: 'Name in the CRM', secret: false, placeholder: 'AH-PRO', help: 'How this store is shown in Inventory Sync. Leave empty for “Shopify”.' },
       { key: 'SHOPIFY_STORE_DOMAIN', label: 'Store address', secret: false, required: true, placeholder: 'addendumhair.myshopify.com', validate: myshopify, help: 'Shopify admin → Settings → Domains → the myshopify.com domain.' },
       { key: 'SHOPIFY_CLIENT_ID', label: 'Client ID', secret: false, group: 'app', validate: noSpaces, help: 'Shopify Dev Dashboard → your app → Settings. Public identifier.' },
       { key: 'SHOPIFY_CLIENT_SECRET', label: 'Client secret', secret: true, group: 'app', validate: noSpaces, help: 'Shopify Dev Dashboard → your app → Settings → Client secret.' },
       { key: 'SHOPIFY_ADMIN_TOKEN', label: 'Admin API access token (older apps only)', secret: true, group: 'token', validate: shopifyAdminToken, placeholder: 'shpat_…', help: 'Leave empty for apps from the Shopify Dev Dashboard (they use the Client ID + secret above). Only for an older custom app made in the store admin, whose token starts with shpat_. If filled in, it is used instead of the Client ID + secret.' },
       { key: 'SHOPIFY_LOCATION_ID', label: 'Inventory location ID', secret: false, validate: noSpaces, help: 'Only if the store has more than one active location.' },
+    ],
+  },
+  shopify2: {
+    label: 'Second Shopify store',
+    requirement: 'Another store that sells from the same stock with the same SKUs: its myshopify.com address, plus an app’s client ID + client secret (or an Admin API token).',
+    fields: [
+      { key: 'SHOPIFY2_NAME', label: 'Store name', secret: false, required: true, placeholder: 'Addendum Hair Pro', help: 'How it’s shown in the CRM (Inventory Sync, Analytics).' },
+      { key: 'SHOPIFY2_STORE_DOMAIN', label: 'Store address', secret: false, required: true, placeholder: 'addendumhairpro.myshopify.com', validate: myshopify, help: 'That store’s admin → Settings → Domains → the myshopify.com domain.' },
+      { key: 'SHOPIFY2_CLIENT_ID', label: 'Client ID', secret: false, group: 'app', validate: noSpaces, help: 'Shopify Dev Dashboard → the app installed on this store → Settings. The same app as the first store works if it’s installed on both.' },
+      { key: 'SHOPIFY2_CLIENT_SECRET', label: 'Client secret', secret: true, group: 'app', validate: noSpaces, help: 'Shopify Dev Dashboard → the app → Settings → Client secret.' },
+      { key: 'SHOPIFY2_ADMIN_TOKEN', label: 'Admin API access token (older apps only)', secret: true, group: 'token', validate: shopifyAdminToken, placeholder: 'shpat_…', help: 'Leave empty for Dev Dashboard apps.' },
+      { key: 'SHOPIFY2_LOCATION_ID', label: 'Inventory location ID', secret: false, validate: noSpaces, help: 'Only if this store has more than one active location.' },
     ],
   },
   highlevel: {
@@ -66,6 +80,14 @@ export const CREDENTIAL_SPECS: Record<CredentialProvider, { label: string; field
     fields: [
       { key: 'HIGHLEVEL_PRIVATE_TOKEN', label: 'Private Integration token', secret: true, required: true, validate: noSpaces, help: 'HighLevel sub-account → Settings → Private Integrations → Create. Scopes: contacts.readonly, contacts.write, users.readonly, locations.readonly.' },
       { key: 'HIGHLEVEL_LOCATION_ID', label: 'Location (sub-account) ID', secret: false, required: true, validate: noSpaces, help: 'HighLevel sub-account → Settings → Business Profile → Location ID.' },
+    ],
+  },
+  highlevel_hair: {
+    label: 'Addendum Hair HighLevel',
+    requirement: 'Only if Addendum Hair has its own HighLevel sub-account: its Private Integration token and location ID. Without it, Addendum Hair clients are pulled from the GoHighLevel connection above (by tag).',
+    fields: [
+      { key: 'HIGHLEVEL_HAIR_PRIVATE_TOKEN', label: 'Private Integration token', secret: true, required: true, validate: noSpaces, help: 'Addendum Hair’s HighLevel sub-account → Settings → Private Integrations → Create. Scopes: contacts.readonly, locations.readonly.' },
+      { key: 'HIGHLEVEL_HAIR_LOCATION_ID', label: 'Location (sub-account) ID', secret: false, required: true, validate: noSpaces, help: 'Addendum Hair’s sub-account → Settings → Business Profile → Location ID.' },
     ],
   },
   email: {

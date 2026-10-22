@@ -1,6 +1,6 @@
 import { config } from '../../config.js';
 import { IntegrationError } from '../../lib/errors.js';
-import type { HighLevelService, HLContactInput, HLTaskInput, HLUser } from './HighLevelService.js';
+import type { HighLevelService, HLContact, HLContactCursor, HLContactInput, HLTaskInput, HLUser } from './HighLevelService.js';
 
 /** Live HighLevel client using a sub-account (location) Private Integration Token. */
 export class HighLevelApiService implements HighLevelService {
@@ -98,6 +98,23 @@ export class HighLevelApiService implements HighLevelService {
     const qs = new URLSearchParams({ companyId, locationId: this.locationId, limit: '100' });
     const r = await this.call<{ users?: any[] }>('GET', `/users/search?${qs}`);
     return (r?.users ?? []).filter((u) => !u.deleted).map((u) => ({ id: u.id, name: u.name ?? `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim(), email: u.email ?? null }));
+  }
+
+  async listContacts(after?: HLContactCursor) {
+    const qs = new URLSearchParams({ locationId: this.locationId, limit: '100' });
+    if (after) { qs.set('startAfterId', after.startAfterId); qs.set('startAfter', String(after.startAfter)); }
+    const r = await this.call<{ contacts?: any[]; meta?: { startAfterId?: string; startAfter?: number; nextPageUrl?: string | null } }>('GET', `/contacts/?${qs}`);
+    const contacts: HLContact[] = (r?.contacts ?? []).map((c) => ({
+      id: c.id,
+      name: (c.contactName || `${c.firstName ?? ''} ${c.lastName ?? ''}`).trim(),
+      email: c.email || null,
+      phone: c.phone || null,
+      company: c.companyName || null,
+      tags: Array.isArray(c.tags) ? c.tags : [],
+    }));
+    const m = r?.meta;
+    const next = contacts.length === 100 && m?.startAfterId && m.startAfter != null && m.nextPageUrl !== null ? { startAfterId: m.startAfterId, startAfter: Number(m.startAfter) } : null;
+    return { contacts, next };
   }
 
   async testConnection() {

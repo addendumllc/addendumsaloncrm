@@ -74,14 +74,19 @@ const toRuleDTO = (r: any): ServiceRebookingRuleDTO => ({
   updatedAt: iso(r.updated_at),
 });
 
-export async function listServiceRules(): Promise<{ serviceId: string; serviceName: string; rule: ServiceRebookingRuleDTO | null }[]> {
+export async function listServiceRules(): Promise<{ serviceId: string; serviceName: string; notNeeded: boolean; rule: ServiceRebookingRuleDTO | null }[]> {
   const rows = await db().query<any>(
-    `SELECT s.id, s.name, r.service_id, s.name AS service_name, r.min_days, r.max_days, r.target_days, r.remind_before_days,
+    `SELECT s.id, s.name, s.rebook_not_needed, r.service_id, s.name AS service_name, r.min_days, r.max_days, r.target_days, r.remind_before_days,
             r.auto_follow_up, r.updated_at
        FROM services s LEFT JOIN service_rebooking_rules r ON r.service_id = s.id
       ORDER BY (r.service_id IS NULL), lower(s.name)`,
   );
-  return rows.map((r) => ({ serviceId: r.id, serviceName: r.name, rule: r.service_id ? toRuleDTO(r) : null }));
+  return rows.map((r) => ({ serviceId: r.id, serviceName: r.name, notNeeded: !!r.rebook_not_needed, rule: r.service_id ? toRuleDTO(r) : null }));
+}
+
+/** Marks a service as never needing a rebooking follow-up (or back). */
+export async function setServiceNotNeeded(serviceId: string, notNeeded: boolean) {
+  await db().query('UPDATE services SET rebook_not_needed = $2, updated_at = now() WHERE id = $1', [serviceId, notNeeded]);
 }
 
 export interface RuleInput {
@@ -160,6 +165,8 @@ interface Inputs {
   today: string;
   minVisits: number;
   graceDays: number;
+  /** 0 = never stop. */
+  stopAfterDays: number;
   globalEnabled: boolean;
 }
 
@@ -186,6 +193,8 @@ export function computeSchedule(
     rule: ServiceRebookingRuleDTO | null;
     override: ClientRebookingOverrideDTO | null;
     openTaskId?: string | null;
+    /** The service is marked "No follow-up needed". */
+    notNeeded?: boolean;
   },
   x: Inputs,
 ): ClientServiceScheduleDTO {
@@ -223,6 +232,9 @@ export function computeSchedule(
   if (o?.followUpsEnabled != null) [followUpsEnabled, followUpsSource] = [o.followUpsEnabled, 'client'];
   else if (rule) [followUpsEnabled, followUpsSource] = [rule.autoFollowUp, 'service'];
   else [followUpsEnabled, followUpsSource] = [true, 'default'];
+  // "No follow-up needed" on the service (an add-on): off, unless this client's own setting turned follow-ups on.
+  const notNeeded = !!p.notNeeded && o?.followUpsEnabled !== true;
+  if (notNeeded) [followUpsEnabled, followUpsSource] = [false, 'service'];
   // The global "Rebooking follow-ups" switch in Settings → Follow-up rules turns them all off at once.
   if (!x.globalEnabled) [followUpsEnabled, followUpsSource] = [false, 'default'];
 
@@ -234,8 +246,11 @@ export function computeSchedule(
   let status: RebookingStatus;
   if (p.nextBookedDate) status = 'booked';
   else if (!lastVisitDate && !preferredValid) status = 'no_visit';
+  else if (notNeeded) status = 'not_needed';
   else if (!nextDate) status = 'no_interval';
   else if (!followUpsEnabled) status = 'off';
+  // Not seen for longer than "Stop after" (e.g. a year): no longer chased, unless the team set a preferred date.
+  else if (x.stopAfterDays > 0 && lastVisitDate && !preferredValid && daysBetween(lastVisitDate, x.today) > x.stopAfterDays) status = 'lapsed';
   else if (x.today > overdueFrom!) status = 'overdue';
   else if (x.today >= reminderDate!) status = 'due_soon';
   else status = 'upcoming';
@@ -282,6 +297,7 @@ async function inputs(now: Date): Promise<Inputs> {
     today: localDate(now, s.business.timezone),
     minVisits: s.rules.rebookingMinVisits,
     graceDays: s.rules.rebookingGraceDays,
+    stopAfterDays: s.rules.rebookingStopAfterDays ?? 365,
     globalEnabled: s.rules.rebookingEnabled,
   };
 }
@@ -306,7 +322,9 @@ export async function computeSchedules(opts: { clientId?: string } = {}, now = n
     `SELECT ${OVERRIDE_COLS} FROM client_service_rebooking o JOIN clients c ON c.id = o.client_id WHERE c.archived_at IS NULL ${ovFilter}`, op);
   const rules = new Map((await db().query<any>(
     'SELECT r.*, s.name AS service_name FROM service_rebooking_rules r JOIN services s ON s.id = r.service_id')).map((r) => [r.service_id, toRuleDTO(r)]));
-  const names = new Map((await db().query<{ id: string; name: string }>('SELECT id, name FROM services')).map((s) => [s.id, s.name]));
+  const svc = await db().query<{ id: string; name: string; rebook_not_needed: boolean }>('SELECT id, name, rebook_not_needed FROM services');
+  const names = new Map(svc.map((s) => [s.id, s.name]));
+  const notNeeded = new Set(svc.filter((s) => s.rebook_not_needed).map((s) => s.id));
   const tp: unknown[] = [];
   const tFilter = opts.clientId ? (tp.push(opts.clientId), 'AND client_id = $1') : '';
   const openTasks = new Map((await db().query<any>(
@@ -356,10 +374,11 @@ export async function computeSchedules(opts: { clientId?: string } = {}, now = n
         rule: rules.get(v.serviceId) ?? null,
         override: ovMap.get(k) ?? null,
         openTaskId: openTasks.get(k) ?? null,
+        notNeeded: notNeeded.has(v.serviceId),
       }, x),
     });
   }
-  const order: Record<RebookingStatus, number> = { overdue: 0, due_soon: 1, upcoming: 2, booked: 3, off: 4, no_interval: 5, no_visit: 6 };
+  const order: Record<RebookingStatus, number> = { overdue: 0, due_soon: 1, upcoming: 2, booked: 3, off: 4, not_needed: 5, lapsed: 6, no_interval: 7, no_visit: 8 };
   return out.sort((a, b) => order[a.status] - order[b.status] || (a.nextDate ?? '9999').localeCompare(b.nextDate ?? '9999'));
 }
 
@@ -421,7 +440,9 @@ export async function syncRebookingTasks(opts: { clientId?: string } = {}, now =
     if (!s) close = { note: 'Auto-closed: no longer applies.', status: 'cancelled' };
     else if (s.status === 'booked') close = { note: `Auto-closed: ${s.serviceName} booked for ${prettyDate(s.nextBookedDate!)} ✓`, status: 'completed' };
     else if (s.lastVisitDate !== cycle) close = { note: `Auto-closed: visited again on ${prettyDate(s.lastVisitDate!)} — schedule recalculated.`, status: 'completed' };
+    else if (s.status === 'not_needed') close = { note: `Cancelled: ${s.serviceName} is marked “No follow-up needed”.`, status: 'cancelled' };
     else if (!s.followUpsEnabled) close = { note: 'Cancelled: follow-ups turned off for this client and service.', status: 'cancelled' };
+    else if (s.status === 'lapsed') close = { note: `Cancelled: no visit since ${prettyDate(s.lastVisitDate!)} — longer than the follow-up limit.`, status: 'cancelled' };
     else if (!s.nextDate) close = { note: 'Cancelled: no rebooking interval set any more.', status: 'cancelled' };
     if (close) {
       await db().query(

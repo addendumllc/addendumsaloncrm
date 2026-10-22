@@ -1,0 +1,161 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { db } from '../src/db/index.js';
+import { startInventorySync } from '../src/domain/inventorySync.js';
+import { forgetStockCache } from '../src/domain/stock.js';
+import { setIntegrationOverride } from '../src/integrations/registry.js';
+import { MockShopifyService, MockShopifyStore2 } from '../src/integrations/shopify/ShopifyService.js';
+import { demoSquareStock, MockSquareService, resetDemoSquareStock } from '../src/integrations/square/MockSquareService.js';
+import { setup } from './helpers.js';
+
+let api: Awaited<ReturnType<typeof setup>>['api'];
+const SQ = { weft60: 'demo-v1', ktip: 'demo-v4' };
+const SH = { weft60: 'gid://shopify/InventoryItem/1', ktip: 'gid://shopify/InventoryItem/4' };
+// The second store lists HTW-20-60 twice (stylist and salon prices).
+const PRO = { weftA: 'gid://shopify/InventoryItem/201', weftB: 'gid://shopify/InventoryItem/202', ktip: 'gid://shopify/InventoryItem/204', only: 'gid://shopify/InventoryItem/299' };
+const sync = () => startInventorySync({ trigger: 'manual', wait: true });
+
+beforeAll(async () => {
+  ({ api } = await setup());
+});
+afterAll(() => setIntegrationOverride({ shopify2: null }));
+
+beforeEach(async () => {
+  for (const t of ['inventory_sync_links', 'inventory_sync_runs', 'inventory_sync_extra', 'stock_txns', 'stock_products', 'shopify_order_lines']) await db().query(`DELETE FROM ${t}`);
+  await db().query("DELETE FROM settings WHERE key LIKE 'stock.shopify-sales%'");
+  resetDemoSquareStock();
+  MockShopifyService.reset();
+  MockShopifyStore2.reset();
+  setIntegrationOverride({ square: new MockSquareService(), shopify: new MockShopifyService(), shopify2: new MockShopifyStore2() });
+  forgetStockCache();
+  await api.patch('/api/settings', { inventorySync: { enabled: false, firstSyncSource: 'square', holdChangesOver: 25 } });
+});
+
+describe('A second Shopify store with the same stock and SKUs', () => {
+  it('the first sync sets every listing of a SKU there (duplicates too) to the shared count; the store’s own SKUs are left alone', async () => {
+    const run = await sync();
+    expect(run.status).toBe('ok');
+    expect(MockShopifyStore2.stock.get(PRO.weftA)).toBe(12);
+    expect(MockShopifyStore2.stock.get(PRO.weftB)).toBe(12);
+    expect(MockShopifyStore2.stock.get(PRO.ktip)).toBe(7);
+    expect(MockShopifyStore2.stock.get(PRO.only)).toBe(50); // no matching product: untouched
+    // A second sync has nothing to do.
+    const again = await sync();
+    expect(again.message).not.toMatch(/updated in/);
+  });
+
+  it('turns on stock tracking for draft listings with a synced SKU and sets their count; live listings are left alone', async () => {
+    MockShopifyStore2.status.set(PRO.ktip, 'DRAFT');
+    MockShopifyStore2.tracked.set(PRO.ktip, false);
+    MockShopifyStore2.tracked.set(PRO.weftB, false); // an active listing without tracking: not ours to change
+    MockShopifyStore2.status.set(PRO.only, 'DRAFT');
+    MockShopifyStore2.tracked.set(PRO.only, false); // a draft with no matching product: untouched
+    const run = await sync();
+    expect(run.message).toMatch(/stock tracking turned on for 1 draft listing/);
+    expect(MockShopifyStore2.tracked.get(PRO.ktip)).toBe(true);
+    expect(MockShopifyStore2.stock.get(PRO.ktip)).toBe(7);
+    expect(MockShopifyStore2.tracked.get(PRO.weftB)).toBe(false);
+    expect(MockShopifyStore2.stock.get(PRO.weftB)).toBe(50);
+    expect(MockShopifyStore2.tracked.get(PRO.only)).toBe(false);
+    // Next time it's an ordinary tracked listing: nothing to do.
+    const again = await sync();
+    expect(again.message).not.toMatch(/tracking turned on|updated in/);
+  });
+
+  it('Shopify-only products (not in Square) sync between both Shopify stores, combining each store’s sales', async () => {
+    const main = { sku: 'PRO-ONLY-1', inventoryItemId: 'gid://shopify/InventoryItem/77', label: 'Pro starter kit', tracked: true };
+    MockShopifyService.catalog.push(main);
+    try {
+      MockShopifyService.stock.set(main.inventoryItemId, 8);
+      const first = await sync();
+      expect(first.message).toMatch(/1 online product synced between Shopify and/);
+      expect(MockShopifyStore2.stock.get(PRO.only)).toBe(8); // the main store's count is kept the first time
+      MockShopifyService.stock.set(main.inventoryItemId, 7); // sold one in the main store
+      MockShopifyStore2.stock.set(PRO.only, 6); // and two in the second store
+      await sync();
+      expect(MockShopifyService.stock.get(main.inventoryItemId)).toBe(5);
+      expect(MockShopifyStore2.stock.get(PRO.only)).toBe(5);
+      expect((await sync()).message).not.toMatch(/online product/); // settled: nothing to do
+      // A count set in the Products tab reaches both stores and isn't counted again by the next sync.
+      forgetStockCache();
+      const r = await api.post('/api/inventory-sync/stock/apply', { kind: 'count', reason: 'Stock count', changes: [{ key: `shopify:${main.inventoryItemId}`, quantity: 20 }] });
+      expect(r.status).toBe(200);
+      expect(MockShopifyStore2.stock.get(PRO.only)).toBe(20);
+      await sync();
+      expect(MockShopifyService.stock.get(main.inventoryItemId)).toBe(20);
+      expect(MockShopifyStore2.stock.get(PRO.only)).toBe(20);
+    } finally {
+      MockShopifyService.catalog.splice(MockShopifyService.catalog.indexOf(main), 1);
+    }
+  });
+
+  it('separate stock: salon and online counts are set on their own, and the online count is shared by both Shopify stores', async () => {
+    await sync();
+    await api.put('/api/inventory-sync/products/kind', { variationIds: [SQ.ktip], kind: 'separate' });
+    forgetStockCache();
+    const r = await api.post('/api/inventory-sync/stock/apply', { kind: 'count', reason: 'Stock count', changes: [{ key: SQ.ktip, quantity: 3, onlineQuantity: 30 }] });
+    expect(r.status).toBe(200);
+    expect(demoSquareStock.get(SQ.ktip)).toBe(3);
+    expect(MockShopifyService.stock.get(SH.ktip)).toBe(30);
+    expect(MockShopifyStore2.stock.get(PRO.ktip)).toBe(30);
+    // A sale online in the second store comes off the main store's online count; the salon stays as it is.
+    MockShopifyStore2.stock.set(PRO.ktip, 28);
+    await sync();
+    expect(MockShopifyService.stock.get(SH.ktip)).toBe(28);
+    expect(demoSquareStock.get(SQ.ktip)).toBe(3);
+    // A shared product can't be given a separate online count.
+    forgetStockCache();
+    const bad = await api.post('/api/inventory-sync/stock/apply', { kind: 'count', changes: [{ key: SQ.weft60, onlineQuantity: 5 }] });
+    expect(bad.status).toBe(400);
+  });
+
+  it('a sale in the second store comes off everywhere, including its other listing of the same SKU', async () => {
+    await sync();
+    MockShopifyStore2.stock.set(PRO.weftA, 11); // sold one at the stylist price
+    await sync();
+    expect(demoSquareStock.get(SQ.weft60)).toBe(11);
+    expect(MockShopifyService.stock.get(SH.weft60)).toBe(11);
+    expect(MockShopifyStore2.stock.get(PRO.weftB)).toBe(11);
+    expect(MockShopifyStore2.stock.get(PRO.weftA)).toBe(11);
+  });
+
+  it('sales in all three at once add up (nothing lost or counted twice)', async () => {
+    await sync();
+    demoSquareStock.set(SQ.weft60, 11); // −1 in the salon
+    MockShopifyService.stock.set(SH.weft60, 10); // −2 online
+    MockShopifyStore2.stock.set(PRO.weftB, 9); // −3 at the salon price in the second store
+    await sync();
+    for (const v of [demoSquareStock.get(SQ.weft60), MockShopifyService.stock.get(SH.weft60), MockShopifyStore2.stock.get(PRO.weftA), MockShopifyStore2.stock.get(PRO.weftB)]) expect(v).toBe(6);
+    const h = (await api.get(`/api/inventory-sync/stock/history?key=${SQ.weft60}&kind=sync`)).body.entries;
+    expect(h[0].reason).toMatch(/more than one store/);
+  });
+
+  it('counts and SKU changes from the CRM reach every listing in the second store', async () => {
+    await sync();
+    forgetStockCache();
+    const p = (await api.get('/api/inventory-sync/stock/products')).body;
+    expect(p.store2).toBeTruthy();
+    expect(p.products.find((x: any) => x.key === SQ.weft60).store2).toHaveLength(2);
+    expect((await api.post('/api/inventory-sync/stock/apply', { kind: 'count', changes: [{ key: SQ.weft60, quantity: 30 }] })).body.changed).toBe(1);
+    expect(MockShopifyStore2.stock.get(PRO.weftA)).toBe(30);
+    expect(MockShopifyStore2.stock.get(PRO.weftB)).toBe(30);
+    // The next sync sees nothing to do (its baseline followed).
+    await sync();
+    expect(demoSquareStock.get(SQ.weft60)).toBe(30);
+    expect((await api.post('/api/inventory-sync/stock/apply', { kind: 'sku', changes: [{ key: SQ.weft60, sku: 'RW-60-20' }] })).body.results[0].ok).toBe(true);
+    expect(MockShopifyStore2.skus.get(PRO.weftA)).toBe('RW-60-20');
+    expect(MockShopifyStore2.skus.get(PRO.weftB)).toBe('RW-60-20');
+    expect(MockShopifyService.skus.get(SH.weft60)).toBe('RW-60-20');
+  });
+
+  it('Analytics: the second store’s sales on their own, or with the others', async () => {
+    await sync();
+    forgetStockCache();
+    await api.post('/api/inventory-sync/stock/sales/refresh');
+    const pro = (await api.get('/api/analytics/products?period=30&store=shopify2')).body;
+    expect(pro.store2Name).toBeTruthy();
+    expect(pro.totals.units).toBeGreaterThan(0);
+    expect(pro.top[0]).toMatchObject({ key: SQ.weft60 });
+    const all = (await api.get('/api/analytics/products?period=30')).body;
+    expect(all.totals.units).toBe(all.totals.square.units + all.totals.shopify.units + all.totals.shopify2.units);
+  });
+});

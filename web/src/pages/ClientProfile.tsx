@@ -6,15 +6,16 @@ import {
 } from 'lucide-react';
 import type { AppointmentDTO } from '@addendum/shared';
 import { api } from '../api/client';
-import { useClient, useIntegrations, useMe, useRefreshAll, useSettings, useCanDo } from '../api/hooks';
+import { useClient, useIntegrations, useMe, useRefreshAll, useSettings, useCanDo, useStaff } from '../api/hooks';
 import { dateLong, dateShort, dateTime, phone, relative, time } from '../lib/format';
-import { Avatar, Badge, Button, EmptyState, ErrorNote, Menu, Modal, PageLoading, SectionTitle, cx, useToast } from '../components/ui';
+import { Avatar, Badge, Button, EmptyState, ErrorNote, Field, Menu, Modal, PageLoading, SectionTitle, cx, useToast } from '../components/ui';
 import { useActions } from '../components/domain/ActionsProvider';
 import { TaskCard } from '../components/domain/TaskCard';
 import { ClientFormModal } from '../components/domain/ClientFormModal';
 import { APPT_STYLE } from '../components/domain/appointmentStyles';
 import { RebookingSchedulePanel } from '../components/domain/Rebooking';
 import { openSquareBooking } from '../lib/square';
+import { Tc } from '../lib/titleCase';
 
 export function ClientProfilePage() {
   const { id } = useParams();
@@ -142,7 +143,7 @@ export function ClientProfilePage() {
             <div className="panel max-h-[360px] space-y-2 overflow-y-auto p-4">
               {data.messages.length === 0 && <p className="py-4 text-center text-sm text-stone">No texts yet.</p>}
               {data.messages.slice(-8).map((m) => (
-                <div key={m.id} className={cx('max-w-[85%] rounded-2xl px-3 py-2 text-sm', m.direction === 'inbound' ? 'bg-mist text-ink' : 'ml-auto bg-ink text-white')}>
+                <div key={m.id} className={cx('max-w-[85%] rounded-2xl px-3 py-2 text-sm', m.direction === 'inbound' ? 'bg-mist text-ink' : 'ml-auto bg-plum text-white')}>
                   {m.body}
                   <span className={cx('mt-0.5 block text-[10px]', m.direction === 'inbound' ? 'text-stone' : 'text-white/60')}>{dateTime(m.createdAt)}</span>
                 </div>
@@ -155,35 +156,14 @@ export function ClientProfilePage() {
             <p className="-mt-1 mb-2 text-[13px] text-stone">Internal only — never sent to the client.</p>
             <div className="space-y-2">
               {data.notes.length === 0 && <p className="text-sm text-stone-light">No notes yet.</p>}
-              {data.notes.map((n) => (
-                <div key={n.id} className={cx('group rounded-xl border px-3 py-2.5', n.pinned ? 'border-plum/20 bg-plum-tint/50' : 'border-line bg-white')}>
-                  <p className="whitespace-pre-line text-sm text-ink">{n.body}</p>
-                  <div className="mt-1 flex items-center justify-between text-[11px] text-stone">
-                    <span>{n.author ?? 'Team'} · {relative(n.createdAt)}</span>
-                    <span className="flex gap-2 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-                      <button onClick={() => api.patch(`/notes/${n.id}`, { pinned: !n.pinned }).then(refresh)} aria-label={n.pinned ? 'Unpin' : 'Pin'}><Pin className="h-3.5 w-3.5" /></button>
-                      <button onClick={() => api.del(`/notes/${n.id}`).then(refresh)} aria-label="Delete note"><Trash2 className="h-3.5 w-3.5" /></button>
-                    </span>
-                  </div>
-                </div>
-              ))}
+              {data.notes.map((n) => <NoteItem key={n.id} n={n} editable={canDo('clients:notes') || canDo('clients:write')} onChanged={refresh} />)}
             </div>
           </section>}
 
-          <section>
-            <SectionTitle>Details</SectionTitle>
-            <dl className="panel divide-y divide-line text-sm">
-              <Detail label="Preferred stylist" value={c.preferredStaffName} />
-              <Detail label="Also sees" value={data.staffAssignments.map((s) => s.name).join(', ') || null} />
-              <Detail label="Services" value={data.services.join(', ') || null} />
-              <Detail label="Visits" value={String(c.visitCount)} />
-              <Detail label="Birthday" value={c.birthday ? c.birthday.replace(/^0000-/, '') : null} />
-              <Detail label="Found us via" value={c.leadSource} />
-              <Detail label="Square customer ID" value={c.squareCustomerId} mono />
-              {integ?.highlevel.connected && <Detail label="HighLevel contact" value={c.highlevelContactId} mono />}
-              <Detail label="Client since" value={c.createdAt ? dateLong(c.createdAt) : null} />
-            </dl>
-          </section>
+          <ClientDetails
+            c={c} services={data.services} assignments={data.staffAssignments} showHighLevel={!!integ?.highlevel.connected}
+            canEditAll={canDo('clients:write')} canEditPrefs={canDo('clients:write') || canDo('clients:notes')} onSaved={refresh}
+          />
         </aside>
       </div>
 
@@ -262,11 +242,11 @@ function HistoryRow({ a, demo }: { a: AppointmentDTO; demo: boolean }) {
   );
 }
 
-function Detail({ label, value, mono }: { label: string; value: string | null; mono?: boolean }) {
+function Detail({ label, value, mono, multiline, alert }: { label: string; value: string | null; mono?: boolean; multiline?: boolean; alert?: boolean }) {
   return (
-    <div className="flex justify-between gap-4 px-4 py-2.5">
-      <dt className="text-stone">{label}</dt>
-      <dd className={cx('text-right text-ink', mono && 'break-all font-mono text-xs', !value && 'text-stone-light')}>{value ?? '—'}</dd>
+    <div className={cx('flex justify-between gap-4 px-4 py-2.5', alert && 'bg-rose-tint/60')}>
+      <dt className={cx('shrink-0', alert ? 'font-medium text-rose' : 'text-stone')}>{label}</dt>
+      <dd className={cx('min-w-0 text-right text-ink', mono && 'break-all font-mono text-xs', multiline && 'whitespace-pre-line', !value && 'text-stone-light')}>{value ?? '—'}</dd>
     </div>
   );
 }
@@ -296,5 +276,135 @@ function NoteModal({ clientId, onClose }: { clientId: string; onClose: () => voi
       <label className="mt-3 flex items-center gap-2 text-sm text-ink-soft"><input type="checkbox" className="accent-plum" checked={pinned} onChange={(e) => setPinned(e.target.checked)} />Pin to top</label>
       <p className="mt-2 text-xs text-stone">Notes are internal and never sent to the client.</p>
     </Modal>
+  );
+}
+
+/** One internal note: pin, edit the text in place, or delete. Buttons stay visible on touch screens. */
+function NoteItem({ n, editable, onChanged }: { n: { id: string; body: string; pinned: boolean; author: string | null; createdAt: string }; editable: boolean; onChanged: () => void }) {
+  const toast = useToast();
+  const [editing, setEditing] = useState(false);
+  const [body, setBody] = useState(n.body);
+  const save = async () => {
+    try {
+      await api.patch(`/notes/${n.id}`, { body: body.trim() });
+      setEditing(false);
+      onChanged();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  };
+  return (
+    <div className={cx('group rounded-xl border px-3 py-2.5', n.pinned ? 'border-plum/20 bg-plum-tint/50' : 'border-line bg-white')}>
+      {editing ? (
+        <>
+          <textarea className="field min-h-[80px]" value={body} maxLength={4000} onChange={(e) => setBody(e.target.value)} autoFocus />
+          <div className="mt-2 flex gap-2"><Button size="sm" variant="primary" disabled={!body.trim()} onClick={save}>Save</Button><Button size="sm" variant="ghost" onClick={() => { setBody(n.body); setEditing(false); }}>Cancel</Button></div>
+        </>
+      ) : <p className="whitespace-pre-line text-sm text-ink">{n.body}</p>}
+      <div className="mt-1 flex items-center justify-between text-[11px] text-stone">
+        <span>{n.author ?? 'Team'} · {relative(n.createdAt)}</span>
+        {editable && !editing && (
+          <span className="flex gap-3 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
+            <button onClick={() => setEditing(true)} aria-label="Edit note"><Pencil className="h-3.5 w-3.5" /></button>
+            <button onClick={() => api.patch(`/notes/${n.id}`, { pinned: !n.pinned }).then(onChanged)} aria-label={n.pinned ? 'Unpin' : 'Pin'}><Pin className="h-3.5 w-3.5" /></button>
+            <button onClick={() => api.del(`/notes/${n.id}`).then(onChanged)} aria-label="Delete note"><Trash2 className="h-3.5 w-3.5" /></button>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+type ClientInfo = NonNullable<ReturnType<typeof useClient>['data']>['client'];
+
+/**
+ * Details: preferred stylist, who else they see, birthday, how they found us, and their preferences and allergies —
+ * edited right here. Preferences and allergies can be kept up to date by anyone who adds notes.
+ */
+function ClientDetails({ c, services, assignments, showHighLevel, canEditAll, canEditPrefs, onSaved }: {
+  c: ClientInfo; services: string[]; assignments: { id: string; name: string }[]; showHighLevel: boolean; canEditAll: boolean; canEditPrefs: boolean; onSaved: () => void;
+}) {
+  const toast = useToast();
+  // The team list is only needed (and only allowed) for people who can change the stylists.
+  const { data: staff } = useStaff(canEditAll);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const start = () => ({
+    // "auto": kept up to date from their visits (their regular stylist for a service, else whoever they saw last).
+    preferredStaffId: c.preferredStaffAuto ? 'auto' : c.preferredStaffId ?? '', staffIds: assignments.map((a) => a.id), birthday: c.birthday ?? '', leadSource: c.leadSource ?? '',
+    preferences: c.preferences ?? '', allergies: c.allergies ?? '',
+  });
+  const [f, setF] = useState(start);
+  const save = async () => {
+    setSaving(true);
+    try {
+      if (canEditAll) {
+        await api.patch(`/clients/${c.id}`, { ...(f.preferredStaffId === 'auto' ? { preferredStaffAuto: true } : { preferredStaffId: f.preferredStaffId || null }), staffIds: f.staffIds, birthday: f.birthday.trim() || null, leadSource: f.leadSource.trim() || null });
+      }
+      await api.patch(`/clients/${c.id}/preferences`, { preferences: f.preferences.trim() || null, allergies: f.allergies.trim() || null });
+      toast('Details saved');
+      setEditing(false);
+      onSaved();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+  const active = (staff ?? []).filter((s) => s.active);
+  return (
+    <section>
+      <SectionTitle action={canEditPrefs && !editing && <Button size="sm" variant="quiet" icon={<Pencil className="h-4 w-4" />} onClick={() => { setF(start()); setEditing(true); }}>Edit</Button>}>Details</SectionTitle>
+      {editing ? (
+        <div className="panel space-y-3 p-4 text-sm">
+          {canEditAll && (
+            <>
+              <Field label="Preferred stylist" hint="Automatic: whoever they’ve seen 3+ times for the same service, else their last stylist (blank if that stylist has left). Choosing someone keeps that choice.">
+                <select className="field" value={f.preferredStaffId} onChange={(e) => setF({ ...f, preferredStaffId: e.target.value })}>
+                  <option value="auto">Automatic (from visits){c.preferredStaffAuto && c.preferredStaffName ? ` — ${c.preferredStaffName}` : ''}</option>
+                  <option value="">None</option>
+                  {active.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </Field>
+              <div>
+                <span className="label">Also sees</span>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {active.map((s) => {
+                    const on = f.staffIds.includes(s.id);
+                    return <button key={s.id} type="button" onClick={() => setF({ ...f, staffIds: on ? f.staffIds.filter((x) => x !== s.id) : [...f.staffIds, s.id] })}
+                      className={cx('rounded-full px-2.5 py-1 text-[13px]', on ? 'bg-plum text-white' : 'bg-mist text-ink-soft')}>{s.name}</button>;
+                  })}
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Birthday" hint="MM-DD or YYYY-MM-DD"><input className="field" value={f.birthday} onChange={(e) => setF({ ...f, birthday: e.target.value })} placeholder="03-14" /></Field>
+                <Field label="Found us via"><input className="field" maxLength={60} value={f.leadSource} onChange={(e) => setF({ ...f, leadSource: e.target.value })} placeholder="Instagram, referral…" /></Field>
+              </div>
+            </>
+          )}
+          <Field label="Preferences" hint="Drinks, products, how they like their appointment, conversation…">
+            <textarea className="field min-h-[80px]" maxLength={2000} value={f.preferences} onChange={(e) => setF({ ...f, preferences: e.target.value })} placeholder="e.g. Oat latte · quiet appointment · prefers ash tones" />
+          </Field>
+          <Field label="Allergies / sensitivities">
+            <textarea className="field min-h-[60px]" maxLength={1000} value={f.allergies} onChange={(e) => setF({ ...f, allergies: e.target.value })} placeholder="e.g. Sensitive scalp — patch test new color" />
+          </Field>
+          <div className="flex gap-2"><Button size="sm" variant="primary" loading={saving} onClick={save}>Save</Button><Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button></div>
+        </div>
+      ) : (
+        <dl className="panel divide-y divide-line text-sm">
+          {c.allergies && <Detail label="Allergies" value={c.allergies} alert />}
+          <Detail label="Preferences" value={c.preferences} multiline />
+          <Detail label="Preferred stylist" value={c.preferredStaffName ? `${c.preferredStaffName}${c.preferredStaffAuto ? ' (from visits)' : ''}` : null} />
+          <Detail label="Also sees" value={assignments.map((s) => s.name).join(', ') || null} />
+          <Detail label="Services" value={services.join(', ') || null} />
+          <Detail label="Visits" value={String(c.visitCount)} />
+          <Detail label="Birthday" value={c.birthday ? c.birthday.replace(/^0000-/, '') : null} />
+          <Detail label="Found us via" value={c.leadSource} />
+          <Detail label="Square customer ID" value={c.squareCustomerId} mono />
+          {showHighLevel && <Detail label="HighLevel contact" value={c.highlevelContactId} mono />}
+          <Detail label="Client since" value={c.createdAt ? dateLong(c.createdAt) : null} />
+        </dl>
+      )}
+    </section>
   );
 }

@@ -25,6 +25,9 @@ import {
   updateAccount,
   updateRoleTemplate,
 } from '../domain/users.js';
+import { rebuildCommission } from '../domain/commission.js';
+import { getSettings } from '../repos/settings.js';
+import { squareService } from '../integrations/registry.js';
 import { ah, logAction, parse } from './util.js';
 
 /**
@@ -43,6 +46,33 @@ usersRouter.get('/users', requireAnyPermission('users:manage', 'users:permission
   res.json({ users: await listAccounts(), roles: await roleTemplates(), canApprove: isApprover(req.user) });
 }));
 
+/** Square team members to link accounts to, with who (if anyone) each is linked to now. */
+usersRouter.get('/users/square-team-members', requirePermission('users:manage'), ah(async (_req, res) => {
+  const sq = await squareService();
+  if (!sq) return res.json({ connected: false, members: [] });
+  let team;
+  try {
+    team = await sq.listTeamMembers();
+  } catch (e) {
+    return res.json({ connected: true, error: (e as Error).message, members: [] });
+  }
+  const linked = new Map((await db().query<any>(
+    `SELECT id, name, square_team_member_id, password_hash IS NOT NULL OR last_login_at IS NOT NULL AS signs_in
+       FROM staff WHERE square_team_member_id IS NOT NULL`)).map((s) => [s.square_team_member_id as string, s]));
+  const members = team.map((m) => {
+    const s = linked.get(m.id);
+    return {
+      id: m.id,
+      name: `${m.given_name ?? ''} ${m.family_name ?? ''}`.trim() || 'Team member',
+      email: m.email_address ?? null,
+      phone: m.phone_number ?? null,
+      active: m.status !== 'INACTIVE',
+      linkedTo: s ? { id: s.id, name: s.name, signsIn: !!s.signs_in } : null,
+    };
+  }).sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name));
+  res.json({ connected: true, members });
+}));
+
 usersRouter.get('/users/:id', requireAnyPermission('users:manage', 'users:permissions'), ah(async (req, res) => {
   res.json({ user: await getAccount(req.params.id) });
 }));
@@ -54,6 +84,7 @@ usersRouter.post('/users', requirePermission('users:manage'), ah(async (req, res
     role: role.optional(),
     color: color.optional(),
     squareTeamMemberId: z.string().trim().max(64).nullable().optional(),
+    mobilePhone: z.string().trim().max(40).nullable().optional(),
     sendInvite: z.boolean().default(true),
     approveNow: z.boolean().default(false),
     confirm: z.boolean().default(false),
@@ -74,9 +105,12 @@ usersRouter.patch('/users/:id', requirePermission('users:manage'), ah(async (req
     color: color.optional(),
     squareTeamMemberId: z.string().trim().max(64).nullable().optional(),
     highlevelUserId: z.string().trim().max(100).nullable().optional(),
+    mobilePhone: z.string().trim().max(40).nullable().optional(),
   }).strict(), req.body);
   await updateAccount(req.user!, req.params.id, b);
   await logAction(req, 'user.update', 'staff', req.params.id, { fields: Object.keys(b) });
+  // Re-match Square sales to the newly linked person.
+  if (b.squareTeamMemberId !== undefined && (await getSettings()).commission.enabled) await rebuildCommission();
   res.json({ user: await getAccount(req.params.id) });
 }));
 

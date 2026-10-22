@@ -51,8 +51,8 @@ describe('Stylists: their own calendar, clients and follow-ups, plus Order Hair'
   it('are refused every other section, whatever the URL', async () => {
     const blocked: [string, string][] = [
       ['get', '/api/dashboard'], ['get', '/api/leads'],
-      ['get', '/api/messages/conversations'], ['get', '/api/analytics'], ['get', '/api/updates'],
-      ['get', '/api/notifications'], ['get', '/api/staff'], ['get', '/api/audit'],
+      ['get', '/api/messages/conversations'], ['get', '/api/analytics'],
+      ['get', '/api/staff'], ['get', '/api/audit'],
       ['get', '/api/integrations/status'], ['get', '/api/integrations/setup-info'], ['get', '/api/privacy/export'],
       ['post', '/api/leads'], ['post', '/api/clients'], ['post', '/api/messages/handoff'],
       ['patch', '/api/settings'], ['post', '/api/integrations/square/sync'], ['post', '/api/demo/reset'],
@@ -61,6 +61,12 @@ describe('Stylists: their own calendar, clients and follow-ups, plus Order Hair'
       const r = await (stylist as any)[m](url, {});
       expect([url, r.status]).toEqual([url, 403]);
     }
+    // Notifications: only ones addressed to them (e.g. a task sent to them) — never salon-wide alerts like new texts.
+    await db().query("INSERT INTO notifications(staff_id, kind, title) VALUES (NULL, 'message', 'New text from a client')");
+    const n = await stylist.get('/api/notifications');
+    expect(n.status).toBe(200);
+    expect(n.body.notifications.every((x: any) => x.title !== 'New text from a client')).toBe(true);
+    expect((await stylist.get('/api/updates')).body.unreadMessages).toBe(0);
   });
 
   it('search finds only their own clients, never leads or messages', async () => {
@@ -156,5 +162,21 @@ describe('Role changes apply immediately', () => {
     expect((await stylist.get('/api/auth/me')).body.user.permissions).toContain('clients:read');
     await db().query("UPDATE staff SET role = 'stylist' WHERE id = $1", [stylistId]);
     expect((await stylist.get('/api/leads')).status).toBe(403);
+  });
+});
+
+describe('Client preferences and notes', () => {
+  it('anyone who adds notes can keep preferences and allergies up to date, and edit a note', async () => {
+    const admin = (await setup()).api;
+    const c = (await admin.get('/api/clients')).body.clients[0];
+    expect((await admin.patch(`/api/clients/${c.id}/preferences`, { preferences: 'Oat latte · quiet appointment', allergies: 'Sensitive scalp' })).status).toBe(200);
+    let d = (await admin.get(`/api/clients/${c.id}`)).body.client;
+    expect([d.preferences, d.allergies]).toEqual(['Oat latte · quiet appointment', 'Sensitive scalp']);
+    await admin.patch(`/api/clients/${c.id}/preferences`, { allergies: '' }); // cleared; preferences untouched
+    d = (await admin.get(`/api/clients/${c.id}`)).body.client;
+    expect([d.preferences, d.allergies]).toEqual(['Oat latte · quiet appointment', null]);
+    const note = await admin.post(`/api/clients/${c.id}/notes`, { body: 'Likes it short' });
+    expect((await admin.patch(`/api/notes/${note.body.id}`, { body: 'Likes it shorter in summer' })).status).toBe(200);
+    expect((await admin.get(`/api/clients/${c.id}`)).body.notes.some((n: any) => n.body === 'Likes it shorter in summer')).toBe(true);
   });
 });

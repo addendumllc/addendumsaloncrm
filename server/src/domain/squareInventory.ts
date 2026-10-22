@@ -1,10 +1,11 @@
-import type { SquareInventoryDTO, SquareInventorySyncStatus, ShopifyPushResult } from '@addendum/shared';
+import { productSearchText, productSearchWords, type ProductKind, type SquareInventoryDTO, SquareInventorySyncStatus, ShopifyPushResult } from '@addendum/shared';
 import { db } from '../db/index.js';
 import { badRequest, IntegrationError } from '../lib/errors.js';
 import { iso } from '../lib/time.js';
-import { shopifyService, squareService } from '../integrations/registry.js';
+import { shopifyService, squareName, squareService } from '../integrations/registry.js';
 import { getKV, setKV } from '../repos/settings.js';
-import { recordPushedQuantities, shopifySyncOff } from './inventorySync.js';
+import { inactiveProducts, productKinds, recordPushedQuantities, shopifySyncOff } from './inventorySync.js';
+import { forgetStockCache } from './stock.js';
 
 /**
  * Retail inventory from Square (the source of truth). The Square catalog's retail variations and their
@@ -12,9 +13,6 @@ import { recordPushedQuantities, shopifySyncOff } from './inventorySync.js';
  * push those counts to Shopify by hand; nothing is ever sent to Shopify automatically.
  */
 const SYNC_KEY = 'square-inventory-sync';
-
-/** Lowercase, with curly quotes and doubled apostrophes (18”, 18'') written as a plain inch mark (18"). */
-const normalize = (v: string) => v.toLowerCase().replace(/[“”″]|''|’’/g, '"').replace(/[‘’′]/g, "'");
 
 export async function inventorySyncStatus(): Promise<SquareInventorySyncStatus> {
   return (await getKV<SquareInventorySyncStatus>(SYNC_KEY)) ?? { lastSyncAt: null, status: 'never', message: null, products: 0 };
@@ -47,14 +45,14 @@ export async function syncSquareInventory(): Promise<SquareInventorySyncStatus> 
         keep.push(p.variationId);
         const locs = byVariation.get(p.variationId);
         const total = locs ? Object.values(locs).reduce((a, n) => a + n, 0) : p.trackInventory && !countMessage ? 0 : null;
-        const search = normalize([p.itemName, p.variationName, p.sku, p.upc].filter(Boolean).join(' '));
+        const search = productSearchText(p.itemName, p.variationName, p.sku, p.upc, ...(p.categories ?? []));
         await q.query(
-          `INSERT INTO square_inventory(variation_id, item_id, item_name, variation_name, sku, upc, price_cents, track_inventory, quantity, quantities, search_text, updated_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11, now())
+          `INSERT INTO square_inventory(variation_id, item_id, item_name, variation_name, sku, upc, price_cents, track_inventory, quantity, quantities, search_text, image_url, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$13, now())
            ON CONFLICT (variation_id) DO UPDATE SET item_id = $2, item_name = $3, variation_name = $4, sku = $5, upc = $6, price_cents = $7,
              track_inventory = $8, quantity = CASE WHEN $12 THEN square_inventory.quantity ELSE $9 END,
-             quantities = CASE WHEN $12 THEN square_inventory.quantities ELSE $10::jsonb END, search_text = $11, updated_at = now()`,
-          [p.variationId, p.itemId, p.itemName, p.variationName, p.sku, p.upc, p.priceCents, p.trackInventory, total, JSON.stringify(locs ?? {}), search, !!countMessage],
+             quantities = CASE WHEN $12 THEN square_inventory.quantities ELSE $10::jsonb END, search_text = $11, image_url = $13, updated_at = now()`,
+          [p.variationId, p.itemId, p.itemName, p.variationName, p.sku, p.upc, p.priceCents, p.trackInventory, total, JSON.stringify(locs ?? {}), search, !!countMessage, p.imageUrl ?? null],
         );
       }
       // Products deleted or archived in Square disappear here too.
@@ -68,7 +66,7 @@ export async function syncSquareInventory(): Promise<SquareInventorySyncStatus> 
   }
 }
 
-function toDTO(r: any): SquareInventoryDTO {
+function toDTO(r: any, kinds: Map<string, ProductKind>, gone: Set<string>): SquareInventoryDTO {
   return {
     variationId: r.variation_id,
     itemName: r.item_name,
@@ -80,6 +78,9 @@ function toDTO(r: any): SquareInventoryDTO {
     quantity: r.quantity == null ? null : Number(r.quantity),
     shopify: { pushedAt: iso(r.shopify_pushed_at), pushedQuantity: r.shopify_pushed_quantity == null ? null : Number(r.shopify_pushed_quantity), error: r.shopify_push_error },
     shopifySync: { enabled: r.shopify_sync_enabled !== false, linked: r.link_status != null, linkStatus: r.link_status ?? null },
+    kind: kinds.get(r.variation_id) ?? null,
+    imageUrl: r.image_url ?? null,
+    discontinued: gone.has(r.variation_id),
   };
 }
 
@@ -87,14 +88,26 @@ function toDTO(r: any): SquareInventoryDTO {
  * Search by product name, variation (size/colour), SKU or UPC. Every word must match somewhere, so
  * "weft 60" finds "Signature Hand-Tied Weft · 20" / #60 Platinum". Exact SKU/UPC matches come first.
  */
-export async function searchSquareInventory(f: { q?: string; inStock?: boolean; orderable?: boolean; limit?: number }) {
-  const words = normalize(f.q ?? '').split(/\s+/).filter(Boolean).slice(0, 8);
+export async function searchSquareInventory(f: { q?: string; inStock?: boolean; orderable?: boolean; limit?: number; kind?: ProductKind | 'unset' | 'products' | 'all' | 'discontinued' }) {
+  const words = productSearchWords(f.q ?? '').slice(0, 8);
   const where: string[] = [];
   const p: unknown[] = [];
   for (const w of words) { p.push(`%${w.replace(/[%_\\]/g, (m) => `\\${m}`)}%`); where.push(`search_text LIKE $${p.length}`); }
   if (f.inStock) where.push('quantity > 0');
   // Order Hair: stocked products only (gift cards and other untracked items can't be ordered).
   if (f.orderable) where.push('track_inventory');
+  // Type filter. "products" (the default list) is everything except add-on services.
+  const kinds = await productKinds();
+  const ofKind = (k: string) => [...kinds].filter(([, v]) => v === k).map(([id]) => id);
+  const kind = f.kind === 'all' ? undefined : f.kind ?? 'products';
+  // Discontinued products are hidden unless asked for.
+  const gone = await inactiveProducts();
+  if (kind === 'discontinued') { p.push([...gone]); where.push(`variation_id = ANY($${p.length}::text[])`); }
+  else if (kind !== undefined) { p.push([...gone]); where.push(`NOT (variation_id = ANY($${p.length}::text[]))`); }
+  if (kind === 'products') { p.push(ofKind('service')); where.push(`NOT (variation_id = ANY($${p.length}::text[]))`); }
+  else if (kind === 'unset') { p.push([...kinds.keys()]); where.push(`NOT (variation_id = ANY($${p.length}::text[]))`); }
+  else if (kind && kind !== 'discontinued') { p.push(ofKind(kind)); where.push(`variation_id = ANY($${p.length}::text[])`); }
+  const filterCount = p.length;
   p.push((f.q ?? '').trim().toLowerCase());
   const exact = `$${p.length}`;
   p.push(Math.min(f.limit ?? 100, 500));
@@ -106,8 +119,37 @@ export async function searchSquareInventory(f: { q?: string; inStock?: boolean; 
       LIMIT $${p.length}`,
     p,
   );
-  const total = await db().one<{ n: number }>(`SELECT count(*)::int n FROM square_inventory ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`, p.slice(0, words.length));
-  return { products: rows.map(toDTO), total: total?.n ?? 0 };
+  const total = await db().one<{ n: number }>(`SELECT count(*)::int n FROM square_inventory ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`, p.slice(0, filterCount));
+  return { products: rows.map((r) => toDTO(r, kinds, gone)), total: total?.n ?? 0 };
+}
+
+/**
+ * Changes one product's SKU in Square (only its SKU). A SKU another Square product already uses is refused. A paired
+ * product stays paired (the pairing is by product, not SKU); an unpaired one pairs at the next sync if a Shopify product
+ * has the same SKU. Logged in Stock history.
+ */
+export async function setSquareSku(variationId: string, sku: string, staffId: string | null) {
+  const next = sku.trim();
+  if (!next) throw badRequest('Enter a SKU.');
+  const sq = await squareService();
+  if (!sq) throw badRequest(`${squareName()} isn’t connected.`);
+  const products = await sq.listProducts();
+  const p = products.find((x) => x.variationId === variationId);
+  if (!p) throw badRequest(`That product wasn’t found in ${squareName()}. Refresh and try again.`);
+  if (p.sku === next) return { sku: next, changed: false };
+  const clash = products.find((x) => x.variationId !== variationId && (x.sku ?? '').trim().toLowerCase() === next.toLowerCase());
+  if (clash) throw badRequest(`SKU ${next} is already used by ${[clash.itemName, clash.variationName].filter(Boolean).join(' · ')}.`);
+  // A fresh key each time: reusing one makes Square return the earlier result without changing anything.
+  await sq.setVariationSku(variationId, next, `sku-${variationId}-${Date.now().toString(36)}`);
+  await db().query(`UPDATE square_inventory SET sku = $2, search_text = search_text || ' ' || lower($2), updated_at = now() WHERE variation_id = $1`, [variationId, next]);
+  await db().query(`UPDATE inventory_sync_links SET sku = $2, updated_at = now() WHERE square_variation_id = $1`, [variationId, next]);
+  const label = [p.itemName, p.variationName].filter(Boolean).join(' · ');
+  await db().query(
+    `INSERT INTO stock_txns(product_key, label, sku, kind, reason, old_sku, new_sku, staff_id) VALUES ($1,$2,$3,'sku',$4,$5,$3,$6)`,
+    [variationId, label, next, `SKU changed in ${squareName()}`, p.sku ?? null, staffId],
+  );
+  forgetStockCache();
+  return { sku: next, changed: true, previousSku: p.sku ?? null };
 }
 
 /**

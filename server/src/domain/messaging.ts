@@ -153,6 +153,14 @@ export async function handleInboundSms(input: { from: string; body: string; prov
     `UPDATE conversations SET unread_count = unread_count + 1, last_message_at = now(), last_inbound_at = now(), insight = $2::jsonb, archived_at = NULL, updated_at = now() WHERE id = $1`,
     [convo.id, JSON.stringify(insight)],
   );
+  // They replied: follow-ups waiting on them ("Reached out") come back to the top now.
+  if (convo.client_id || convo.lead_id) {
+    await db().query(
+      `UPDATE tasks SET status = 'due', due_at = now(), snoozed_until = NULL,
+         notes = trim(both E'\\n' FROM COALESCE(notes, '') || E'\\n' || 'They replied — back on the list.'), updated_at = now()
+       WHERE status = 'snoozed' AND reached_out_at IS NOT NULL AND (client_id = $1 OR lead_id = $2)`,
+      [convo.client_id ?? null, convo.lead_id ?? null]);
+  }
   const name = await displayNameFor(convo);
   await notifications.notify({ kind: 'message', title: `New text from ${name}`, body: body.slice(0, 120), link: `/messages/${convo.id}` });
   return { conversationId: convo.id, messageId: msg!.id, insight };
@@ -259,6 +267,24 @@ export function inQuietHours(now: Date, start: string, end: string, tz: string) 
 
 type DraftInput = { kind?: DraftKind; conversationId?: string; clientId?: string; leadId?: string; taskId?: string };
 
+/**
+ * Service names as a client would say them, for texts: no tiers, stylist names, bundles or add-on wording — e.g.
+ * "Weft Install - 1 Row - Tier 1, Haircut with Service - Tier 1, Toner Add On - Tier 1" → "weft install, haircut and toner".
+ */
+export function simpleServices(list: string | null | undefined): string | null {
+  if (!list) return null;
+  const names = list.split(/\s*,\s*/).map((s) => s
+    .split(/\s+[-–—|]\s+/)[0] // the part before " - " (tier, stylist, size…)
+    .replace(/\([^)]*\)/g, ' ')
+    .toLowerCase()
+    .replace(/\b(with service|add[- ]?on|package|treatments?|per bundle|tier \d+|service)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()).filter(Boolean);
+  const unique = [...new Set(names)];
+  if (!unique.length) return null;
+  return unique.length === 1 ? unique[0] : `${unique.slice(0, -1).join(', ')} and ${unique[unique.length - 1]}`;
+}
+
 /** Everything known about the person being texted: used by AI drafts and saved replies alike. */
 async function messageContext(input: DraftInput) {
   const settings = await getSettings();
@@ -319,7 +345,8 @@ async function messageContext(input: DraftInput) {
       `SELECT a.start_at, (SELECT string_agg(service_name, ', ') FROM appointment_services x WHERE x.appointment_id = a.id) AS svc
          FROM appointments a WHERE a.client_id = $1 AND a.square_status = 'ACCEPTED' AND a.end_at < now() ORDER BY a.start_at DESC LIMIT 1`, [clientId]);
     if (last) {
-      lastVisitText = `${formatDateShort(last.start_at, tz)} — ${last.svc}`;
+      // Just the date: the services are said once, simply, in the text itself.
+      lastVisitText = formatDateShort(last.start_at, tz);
       service ??= last.svc;
     }
   } else if (leadId) {
@@ -330,7 +357,8 @@ async function messageContext(input: DraftInput) {
   }
   return {
     settings, kind, clientId, leadId, insight, recent, appointmentText, appointmentDate, appointmentTime,
-    service, staffName, firstName, lastVisitText, taskType,
+    // Texts say services simply ("haircut", "toner") and never name a stylist.
+    service: simpleServices(service), staffName: null as string | null, firstName, lastVisitText, taskType,
   };
 }
 
@@ -350,7 +378,8 @@ export async function draftMessage(input: DraftInput) {
   }
   const text = await aiService().draft({
     kind, firstName, salonName: settings.business.name, tone: settings.ai.tone, signature: settings.messaging.signature,
-    bookingUrl: settings.business.bookingUrl, reviewUrl: settings.business.reviewUrl,
+    // The booking link is added only when someone ticks "Add booking link" in the composer.
+    bookingUrl: '', reviewUrl: settings.business.reviewUrl,
     service, staffName, appointmentText, lastVisitText, insight, recentMessages: recent,
   });
   return { draft: text, kind, provider: aiService().provider };

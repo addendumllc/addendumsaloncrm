@@ -15,14 +15,16 @@ import { demoRouter } from './routes/demo.js';
 import { integrationsRouter } from './routes/integrations.js';
 import { adminRouter } from './routes/admin.js';
 import { usersRouter } from './routes/users.js';
+import { timeclockRouter } from './routes/timeclock.js';
 import { commissionRouter } from './routes/commission.js';
 import { rebookingRouter } from './routes/rebooking.js';
 import { inventorySyncRouter } from './routes/inventorySync.js';
+import { hairRouter } from './routes/hair.js';
 import { inventoryRouter } from './routes/inventory.js';
 import { leadsRouter } from './routes/leads.js';
 import { messagesRouter } from './routes/messages.js';
 import { miscRouter } from './routes/misc.js';
-import { serveFont, serveLogo, settingsRouter } from './routes/settings.js';
+import { serveFont, serveLoginImage, serveLogo, settingsRouter } from './routes/settings.js';
 import { tasksRouter } from './routes/tasks.js';
 import { accessRouter } from './routes/access.js';
 import { announcementsRouter } from './routes/announcements.js';
@@ -49,7 +51,8 @@ export function createApp() {
           'default-src': ["'self'"],
           'script-src': ["'self'"],
           'style-src': ["'self'", "'unsafe-inline'"],
-          'img-src': ["'self'", 'data:'],
+          // Product photos from the listings: Shopify's CDN and Square's catalog image storage.
+          'img-src': ["'self'", 'data:', 'https://cdn.shopify.com', 'https://items-images-production.s3.us-west-2.amazonaws.com', 'https://items-images-sandbox.s3.us-west-2.amazonaws.com'],
           'font-src': ["'self'", 'data:'],
           'connect-src': ["'self'"],
           'frame-ancestors': ["'self'", ...embedOrigins],
@@ -79,10 +82,12 @@ export function createApp() {
   app.use(cookieParser());
   // Font uploads are larger than anything else the app receives; everything else stays at 1 MB.
   app.use('/api/settings/font', express.json({ limit: '2.5mb' }));
+  app.use('/api/settings/login-image', express.json({ limit: '2.5mb' }));
   app.use(express.json({ limit: '1mb' }));
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
   app.get('/brand/logo', (req, res, next) => serveLogo(req, res).catch(next));
   app.get('/brand/font/:slot', (req, res, next) => serveFont(req, res).catch(next));
+  app.get('/brand/login-image', (req, res, next) => serveLoginImage(req, res).catch(next));
 
   // CSRF defence: state-changing API calls must carry a custom header, which other sites can't send
   // cross-origin without a CORS preflight (and no CORS is enabled).
@@ -114,8 +119,10 @@ export function createApp() {
   app.use('/api/admin', adminRouter);
   app.use('/api/admin', usersRouter);
   app.use('/api/inventory-sync', inventorySyncRouter);
+  app.use('/api/hair', hairRouter);
   app.use('/api/rebooking', rebookingRouter);
   app.use('/api/commission', commissionRouter);
+  app.use('/api/timeclock', timeclockRouter);
   app.use('/api/inventory', inventoryRouter);
   app.use('/api/demo', demoRouter);
   app.use('/api', (_req, res) => res.status(404).json({ error: { code: 'not_found', message: 'Not found.' } }));

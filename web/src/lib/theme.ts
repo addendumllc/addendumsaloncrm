@@ -1,4 +1,4 @@
-import { DEFAULT_ACCENT, DEFAULT_APPEARANCE, fontUrl, logoUrl, type Appearance, type FontSlot } from '@addendum/shared';
+import { DEFAULT_ACCENT, DEFAULT_APPEARANCE, FONT_CHOICES, FONT_SCALES, fontUrl, logoUrl, resolveTheme, type Appearance, type ColorTheme, type FontScale, type FontSlot, type PersonalLook } from '@addendum/shared';
 
 /** Accent colour theming (Settings → Appearance). Derives the tint/soft/dark shades from one colour. */
 type RGB = [number, number, number];
@@ -19,6 +19,12 @@ function luminance([r, g, b]: RGB) {
   };
   return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
 }
+/** WCAG contrast ratio between two colours (#RRGGBB). */
+export const contrastRatio = (a: string, b: string) => {
+  if (!isHex(a) || !isHex(b)) return 21;
+  const [x, y] = [luminance(hexToRgb(a)), luminance(hexToRgb(b))].sort((m, n) => n - m);
+  return (x + 0.05) / (y + 0.05);
+};
 /** WCAG contrast ratio between a colour and white. */
 export const contrastWithWhite = (hex: string) => 1.05 / (luminance(hexToRgb(hex)) + 0.05);
 export const isHex = (v: string) => /^#[0-9a-fA-F]{6}$/.test(v);
@@ -50,15 +56,23 @@ export function applyAccent(hex: string | undefined | null) {
   root.setProperty('--accent-soft', ch(d.soft));
 }
 
-/** Background tones: page, light fills, borders. "tinted" is a whisper of the accent. */
-const BACKGROUNDS: Record<Exclude<Appearance['background'], 'tinted'>, { paper: RGB; mist: RGB; line: RGB; strong: RGB }> = {
-  warm: { paper: [250, 250, 248], mist: [242, 241, 238], line: [231, 228, 223], strong: [214, 210, 203] },
-  white: { paper: [255, 255, 255], mist: [244, 244, 245], line: [230, 230, 232], strong: [212, 212, 216] },
-  cool: { paper: [246, 248, 250], mist: [238, 241, 244], line: [225, 229, 234], strong: [205, 211, 218] },
-};
 const SERIF = '"Cormorant Garamond", Georgia, serif';
 const SANS = '"Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif';
-const FAMILY: Record<FontSlot, string> = { heading: 'Salon Heading', body: 'Salon Body' };
+const FAMILY: Record<FontSlot, string> = { heading: 'Salon Heading', body: 'Salon Body', link: 'Salon Link', button: 'Salon Button', nav: 'Salon Menu' };
+/** Corner sizes (Tailwind's rounded-md/lg/xl/xl2 read these): rounded, soft, or square for a sharper, modern look. */
+const CORNERS = {
+  rounded: { md: '0.375rem', lg: '0.5rem', xl: '0.75rem', xl2: '1.125rem' },
+  soft: { md: '0.25rem', lg: '0.375rem', xl: '0.5rem', xl2: '0.75rem' },
+  // Square: sharp buttons, fields and tabs (rounded-md/lg), with a barely-there edge on cards and panels.
+  square: { md: '0px', lg: '0px', xl: '2px', xl2: '2px' },
+};
+/** Which part of the CRM is showing (kept for callers; the look is the same everywhere now). */
+let currentArea: 'salon' | 'online' = 'salon';
+export function setArea(area: 'salon' | 'online') {
+  if (area === currentArea) return;
+  currentArea = area;
+  if (lastSalon) applyAppearance(lastSalon, lastPersonal);
+}
 
 /** Registers an uploaded font with the browser (once per version). Text uses the fallback until it has loaded. */
 const loaded = new Map<FontSlot, string>();
@@ -73,48 +87,188 @@ function loadCustomFont(slot: FontSlot, url: string | null) {
   }).catch(() => loaded.delete(slot));
 }
 
-/** Applies the whole look (Settings → Appearance) to the page. Missing values fall back to the defaults. */
-export function applyAppearance(input: Partial<Appearance> | undefined | null) {
-  const a = { ...DEFAULT_APPEARANCE, ...(input ?? {}) };
-  applyAccent(a.accent);
-  const accent = deriveAccent(current).accent;
-  const bg = a.background === 'tinted'
-    ? { paper: mix(accent, WHITE, 0.965), mist: mix(accent, WHITE, 0.925), line: mix(accent, WHITE, 0.86), strong: mix(accent, WHITE, 0.77) }
-    : BACKGROUNDS[a.background] ?? BACKGROUNDS.warm;
-  const sidebar = a.sidebar === 'white' ? WHITE : a.sidebar === 'accent' ? mix(accent, WHITE, 0.9) : mix(bg.mist, bg.paper, 0.3);
-  const root = document.documentElement.style;
-  const ch = (c: RGB) => c.map((v) => Math.round(v)).join(' ');
-  root.setProperty('--paper', ch(bg.paper));
-  root.setProperty('--mist', ch(bg.mist));
-  root.setProperty('--line', ch(bg.line));
-  root.setProperty('--line-strong', ch(bg.strong));
-  root.setProperty('--sidebar', ch(sidebar));
-  const headingUrl = a.headingFont === 'custom' ? fontUrl(a, 'heading') : null;
-  const bodyUrl = a.bodyFont === 'custom' ? fontUrl(a, 'body') : null;
-  loadCustomFont('heading', headingUrl);
-  loadCustomFont('body', bodyUrl);
-  root.setProperty('--font-display', headingUrl ? `"${FAMILY.heading}", ${SERIF}` : a.headingFont === 'sans' ? SANS : SERIF);
-  root.setProperty('--font-body', bodyUrl ? `"${FAMILY.body}", ${SANS}` : SANS);
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', rgbToHex(bg.paper));
-  // Browser tab icon: the uploaded logo if chosen, otherwise the built-in one.
+/** Dark palette (fixed, tuned for contrast): page, fills, borders, cards, text and status colours. */
+const DARK = {
+  paper: [24, 23, 22] as RGB, mist: [38, 37, 35] as RGB, line: [52, 50, 47] as RGB, strong: [72, 69, 65] as RGB, sidebar: [30, 29, 28] as RGB,
+  surface: [33, 32, 30] as RGB, ink: [236, 233, 228] as RGB, inkSoft: [208, 204, 198] as RGB, stone: [160, 155, 148] as RGB, stoneLight: [118, 114, 108] as RGB,
+  sage: [134, 176, 152] as RGB, sageTint: [33, 48, 40] as RGB, rose: [222, 136, 128] as RGB, roseTint: [62, 35, 33] as RGB, amber: [214, 170, 98] as RGB, amberTint: [58, 47, 29] as RGB,
+};
+const LIGHT_TEXT = { ink: [29, 28, 26] as RGB, inkSoft: [58, 56, 53] as RGB, stone: [117, 113, 107] as RGB, stoneLight: [162, 158, 151] as RGB };
+const LIGHT_STATUS = { sage: [85, 117, 99] as RGB, sageTint: [234, 241, 236] as RGB, rose: [168, 84, 78] as RGB, roseTint: [247, 233, 231] as RGB, amber: [168, 122, 47] as RGB, amberTint: [246, 238, 221] as RGB };
+
+let lastSalon: Partial<Appearance> | null = null;
+let lastPersonal: Partial<PersonalLook> | null = null;
+let autoListener: ((e: MediaQueryListEvent) => void) | null = null;
+const prefersDark = () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+
+/** Darkens or lightens a colour until it reads on `bg` at the given contrast (text and indicators). */
+/** Light text reads better on this colour than dark text (picks whichever gives more contrast). */
+const lightOn = (bg: RGB) => contrastRatio(rgbToHex(bg), '#FFFFFF') > contrastRatio(rgbToHex(bg), '#000000');
+function readableOn(c: RGB, bg: RGB, min: number): RGB {
+  const toward = lightOn(bg) ? WHITE : BLACK;
+  let x = c;
+  for (let i = 0; i < 20 && contrastRatio(rgbToHex(x), rgbToHex(bg)) < min; i++) x = mix(x, toward, 0.1);
+  return x;
+}
+
+/** The signed-in person's role (themes can be limited to roles). */
+let currentRole: string | null = null;
+export function setThemeRole(role: string | null | undefined) {
+  if ((role ?? null) === currentRole) return;
+  currentRole = role ?? null;
+  if (lastSalon) applyAppearance(lastSalon, lastPersonal);
+}
+const BUTTON_RADIUS = { square: '0px', soft: '4px', rounded: '8px' } as const;
+const scale = (v: FontScale) => FONT_SCALES.find((x) => x.value === v)?.factor ?? 1;
+
+/**
+ * Applies the look: one layout and component system for everyone and both businesses. The person's theme (or the
+ * organization's default) sets colours, fonts, text sizes and buttons; their own allowed adjustments go on top; light,
+ * dark or system is theirs. Text on the accent is black or white, whichever reads; accent-coloured text stays readable.
+ */
+export function applyAppearance(input: Partial<Appearance> | undefined | null, personal: Partial<PersonalLook> | null | undefined = lastPersonal) {
+  lastSalon = input ?? lastSalon;
+  lastPersonal = personal ?? null;
+  const org = { ...DEFAULT_APPEARANCE, ...(lastSalon ?? {}) };
+  const t = resolveTheme(org.themeSettings, lastPersonal, currentRole);
+  const c = t.colors;
+  const html = document.documentElement;
+  const root = html.style;
+  const ch = (x: RGB) => x.map((v) => Math.round(v)).join(' ');
+  const hex = (h: string, fb: RGB) => (isHex(h) ? hexToRgb(h) : fb);
+  current = isHex(c.accent) ? c.accent : DEFAULT_ACCENT;
+
+  const mode = lastPersonal?.mode ?? 'light';
+  const mq = typeof window !== 'undefined' ? window.matchMedia?.('(prefers-color-scheme: dark)') : null;
+  if (autoListener && mq) { mq.removeEventListener?.('change', autoListener); autoListener = null; }
+  if (mode === 'auto' && mq) { autoListener = () => applyAppearance(lastSalon, lastPersonal); mq.addEventListener?.('change', autoListener); }
+  const dark = mode === 'dark' || (mode === 'auto' && prefersDark());
+
+  let pal;
+  let cardTones: { ink: RGB; inkSoft: RGB; stone: RGB; stoneLight: RGB } | null = null;
+  if (dark) {
+    pal = { paper: DARK.paper, sidebar: DARK.sidebar, surface: DARK.surface, mist: DARK.mist, line: DARK.line, strong: DARK.strong, ink: DARK.ink, inkSoft: DARK.inkSoft, stone: readableOn(DARK.stone, DARK.surface, 4.5), stoneLight: readableOn(DARK.stoneLight, DARK.surface, 4.5), sage: DARK.sage, sageTint: DARK.sageTint, rose: DARK.rose, roseTint: DARK.roseTint, amber: DARK.amber, amberTint: DARK.amberTint };
+  } else {
+    const paper = hex(c.background, [247, 245, 242]);
+    const surface = hex(c.surface, WHITE);
+    const line = hex(c.line, [229, 224, 216]);
+    // Text as chosen, kept readable on everything it sits on (page, cards and fills), whatever the colours — light or
+    // dark. Softer tones keep the hierarchy but never drop below readable contrast.
+    const mist = mix(paper, lightOn(paper) ? WHITE : BLACK, 0.035);
+    // Page text: readable on the page background (and its light fills).
+    const onAll = (x: RGB, min: number) => [paper, mist].reduce((acc, g) => readableOn(acc, g, min), x);
+    // If the chosen text can't reach contrast on this page (e.g. dark text on a dark page), start from light or dark.
+    const chosen = hex(c.text, LIGHT_TEXT.ink);
+    const ink = onAll(contrastRatio(rgbToHex(chosen), rgbToHex(paper)) >= 4.5 ? chosen : lightOn(paper) ? WHITE : LIGHT_TEXT.ink, 7);
+    // Text on cards, panels and dialogs: worked out for the card colour itself (a dark page can have light cards).
+    const cardInk = readableOn(contrastRatio(rgbToHex(chosen), rgbToHex(surface)) >= 4.5 ? chosen : lightOn(surface) ? WHITE : LIGHT_TEXT.ink, surface, 7);
+    const base = lightOn(surface) ? WHITE : cardInk;
+    cardTones = { ink: cardInk, inkSoft: readableOn(mix(base, surface, 0.18), surface, 7), stone: readableOn(mix(base, surface, 0.45), surface, 4.5), stoneLight: readableOn(mix(base, surface, 0.6), surface, 4.5) };
+    // The sidebar colour over the main background at the chosen opacity (0 = same as the background).
+    const sideOp = Math.max(0, Math.min(100, t.sidebarOpacity ?? 100)) / 100;
+    pal = { paper, sidebar: mix(paper, hex(c.sidebar, [239, 236, 231]), sideOp), surface, mist, line, strong: mix(line, luminance(line) < 0.3 ? WHITE : BLACK, 0.08),
+      ink, inkSoft: onAll(mix(ink, paper, 0.18), 7), stone: onAll(mix(ink, paper, 0.45), 4.5), stoneLight: onAll(mix(ink, paper, 0.62), 4.5), ...LIGHT_STATUS };
+  }
+  for (const [k, v] of Object.entries({
+    paper: pal.paper, sidebar: pal.sidebar, surface: pal.surface, mist: pal.mist, line: pal.line, 'line-strong': pal.strong,
+    ink: pal.ink, 'ink-soft': pal.inkSoft, stone: pal.stone, 'stone-light': pal.stoneLight, heading: pal.ink,
+    sage: pal.sage, 'sage-tint': pal.sageTint, rose: pal.rose, 'rose-tint': pal.roseTint, amber: pal.amber, 'amber-tint': pal.amberTint,
+  })) root.setProperty(`--${k}`, ch(v));
+  // Menu text tones worked out for the sidebar itself (any colour, any opacity), so the menu is always readable.
+  html.removeAttribute('data-sidebar-tone');
+  const sideBase = lightOn(pal.sidebar) ? WHITE : pal.ink;
+  root.setProperty('--side-ink', ch(readableOn(lightOn(pal.sidebar) ? mix(WHITE, pal.sidebar, 0.08) : pal.ink, pal.sidebar, 7)));
+  root.setProperty('--side-ink-soft', ch(readableOn(mix(sideBase, pal.sidebar, 0.15), pal.sidebar, 7)));
+  root.setProperty('--side-stone', ch(readableOn(mix(sideBase, pal.sidebar, 0.4), pal.sidebar, 4.5)));
+  root.setProperty('--side-stone-light', ch(readableOn(mix(sideBase, pal.sidebar, 0.55), pal.sidebar, 4.5)));
+  root.setProperty('--side-line', ch(mix(pal.sidebar, luminance(pal.sidebar) < 0.3 ? WHITE : BLACK, 0.12)));
+  root.setProperty('--page-ink', ch(pal.ink));
+  root.setProperty('--page-stone', ch(pal.stone));
+  const ct = cardTones ?? { ink: pal.ink, inkSoft: pal.inkSoft, stone: pal.stone, stoneLight: pal.stoneLight };
+  root.setProperty('--card-ink', ch(ct.ink));
+  root.setProperty('--card-ink-soft', ch(ct.inkSoft));
+  root.setProperty('--card-stone', ch(ct.stone));
+  root.setProperty('--card-stone-light', ch(ct.stoneLight));
+  // Light fills inside cards (tabs, chips) come from the card colour, not the page's.
+  root.setProperty('--card-mist', ch(dark ? pal.mist : mix(pal.surface, luminance(pal.surface) < 0.3 ? WHITE : BLACK, 0.045)));
+
+  // Accent (primary): fills buttons, toggles and selected states as chosen; secondary: the active menu marker.
+  const fill = hex(c.accent, hexToRgb(DEFAULT_ACCENT));
+  const onAccent = contrastRatio(rgbToHex(fill), '#FFFFFF') >= contrastRatio(rgbToHex(fill), '#111111') ? WHITE : [17, 17, 17] as RGB;
+  root.setProperty('--accent', ch(fill));
+  root.setProperty('--accent-dark', ch(mix(fill, luminance(fill) < 0.2 ? WHITE : BLACK, 0.15)));
+  root.setProperty('--accent-tint', ch(mix(fill, pal.surface, dark ? 0.82 : 0.88)));
+  root.setProperty('--accent-soft', ch(mix(fill, pal.surface, dark ? 0.62 : 0.7)));
+  root.setProperty('--on-accent', ch(onAccent));
+  root.setProperty('--accent-ink', ch(readableOn(fill, pal.surface, 4.5)));
+  root.setProperty('--accent2', ch(readableOn(hex(c.accent2, fill), pal.sidebar, 3)));
+  root.setProperty('color-scheme', dark ? 'dark' : 'light');
+  html.dataset.mode = dark ? 'dark' : 'light';
+  for (const k of ['badges', 'badgeCase', 'headingCase']) delete html.dataset[k];
+
+  // Type: the theme's fonts and sizes (base text, headings, small text and labels) and text weight.
+  const ty = t.type;
+  root.setProperty('--area-scale', String(scale(ty.base)));
+  root.setProperty('--size-nav', String(scale(ty.base)));
+  root.setProperty('--size-heading', String(scale(ty.heading)));
+  root.setProperty('--size-small', String(scale(ty.small)));
+  root.setProperty('--size-button', '1');
+  root.setProperty('--body-weight', String(ty.weight));
+  root.setProperty('--heading-weight', '400');
+  root.setProperty('--heading-tracking', '-0.005em');
+  root.setProperty('--body-leading', '1.5');
+  const stack = (id: string, slot: 'heading' | 'body', fallback: string) => {
+    if (id === 'custom') {
+      const url = fontUrl(org, slot);
+      loadCustomFont(slot, url);
+      return url ? `"${FAMILY[slot]}", ${fallback}` : fallback;
+    }
+    return FONT_CHOICES.find((f) => f.id === id)?.stack ?? fallback;
+  };
+  root.setProperty('--font-display', stack(ty.headingFont, 'heading', SERIF));
+  root.setProperty('--font-body', stack(ty.font, 'body', SANS));
+  for (const k of ['--font-link', '--font-button', '--font-nav']) root.setProperty(k, 'var(--font-body)');
+
+  // Buttons: one size and corner style for every button (the theme's, or theirs).
+  const b = t.buttons;
+  if (b.size === 'default') html.removeAttribute('data-buttons'); else html.setAttribute('data-buttons', b.size === 'small' ? 'compact' : 'large');
+  root.setProperty('--radius-button', BUTTON_RADIUS[b.radius] ?? '0px');
+  for (const [k, v] of Object.entries(CORNERS.square)) root.setProperty(`--radius-${k}`, v);
+  html.dataset.corners = 'square';
+
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', rgbToHex(pal.paper));
   const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-  const logo = a.logoAsIcon ? logoUrl(a) : null;
+  const logo = org.logoAsIcon ? logoUrl(org) : null;
   if (icon) {
     icon.href = logo ?? '/favicon.svg';
     if (logo) icon.removeAttribute('type'); else icon.type = 'image/svg+xml';
   }
 }
 
-/** Curated accents that suit a salon brand and all pass contrast with white text. */
+/** The Appearance settings a theme stands for (also used to apply one as the salon's look). */
+export function themeAppearance(t: ColorTheme): Partial<Appearance> {
+  return { accent: t.accent, mode: t.mode, background: 'custom', backgroundColor: t.background, sidebar: 'custom', sidebarColor: t.sidebar, textColor: null, headingColor: null };
+}
+
+/** This person's own look changed (My look): re-apply over the salon's. */
+export const applyPersonalLook = (look: Partial<PersonalLook> | null) => applyAppearance(lastSalon, look);
+
+/** Curated accents for a premium salon and hair brand; any other colour via the picker or a hex code. */
 export const ACCENT_PRESETS = [
-  { name: 'Plum', hex: DEFAULT_ACCENT },
-  { name: 'Rosewood', hex: '#8A4B4F' },
-  { name: 'Terracotta', hex: '#9A5434' },
-  { name: 'Bronze', hex: '#7A5C2E' },
-  { name: 'Olive', hex: '#5B6436' },
-  { name: 'Sage', hex: '#47695A' },
-  { name: 'Teal', hex: '#2F6670' },
-  { name: 'Navy', hex: '#34486E' },
-  { name: 'Espresso', hex: '#5A4236' },
-  { name: 'Charcoal', hex: '#3A3835' },
+  { name: 'Warm Brown', hex: '#6B5242' },
+  { name: 'Espresso', hex: '#3A2A20' },
+  { name: 'Muted Taupe', hex: '#8C7B6B' },
+  { name: 'Dusty Rose', hex: '#B07A7E' },
+  { name: 'Terracotta', hex: '#B0603F' },
+  { name: 'Olive', hex: '#6B7445' },
+  { name: 'Lime', hex: '#C8DC45' },
+  { name: 'Sage', hex: '#6F8A76' },
+  { name: 'Slate Blue', hex: '#5A6E8C' },
+  { name: 'Charcoal', hex: '#2E2D2B' },
+];
+
+/** Each person's colour (calendar and next to their name): muted ones first, then brighter; any other via a picker. */
+export const USER_COLORS = [
+  '#9A6B7F', '#B5838D', '#A3716E', '#C08A5B', '#B08A5B', '#8F9E6B', '#7A8F6E', '#5F8F8A', '#6E8CA3', '#7B86B8', '#8C7BA8', '#9A8478', '#75716B',
+  '#C0504D', '#D9773B', '#C9A227', '#6A9A3A', '#2E8B6F', '#2C8BA6', '#3D6FB6', '#6250B0', '#9C4FA8', '#C2477F', '#4A4A4A',
 ];

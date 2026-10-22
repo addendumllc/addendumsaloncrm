@@ -5,6 +5,7 @@ import type {
   CommissionStatusDTO,
   CommissionSummaryDTO,
   CommissionTier,
+  CommissionSuggestion,
 } from '@addendum/shared';
 import { db } from '../db/index.js';
 import { squareService } from '../integrations/registry.js';
@@ -12,6 +13,7 @@ import type { SquareOrder, SquareOrderLineItem } from '../integrations/square/ty
 import { badRequest, IntegrationError, notFound } from '../lib/errors.js';
 import { iso } from '../lib/time.js';
 import { getKV, getSettings, setKV } from '../repos/settings.js';
+import { hoursSyncError, syncTimecards } from './wages.js';
 import { addDaysToDate, localDate } from './rebookingSchedule.js';
 
 /**
@@ -90,13 +92,15 @@ function toRuleDTO(r: any, today: string): CommissionRuleDTO {
     active: r.effective_from_s <= today && (!r.effective_to_s || r.effective_to_s >= today),
     label: ruleLabel(r),
     usedCount: r.used_count ?? 0,
+    locked: !!r.locked,
   };
 }
 
 const RULE_SELECT = `
   SELECT r.*, to_char(r.effective_from, 'YYYY-MM-DD') AS effective_from_s, to_char(r.effective_to, 'YYYY-MM-DD') AS effective_to_s,
          s.name AS staff_name, cb.name AS created_by_name,
-         (SELECT count(*)::int FROM commission_entries e WHERE e.rule_id = r.id AND e.status <> 'void') AS used_count
+         (SELECT count(*)::int FROM commission_entries e WHERE e.rule_id = r.id AND e.status <> 'void') AS used_count,
+         EXISTS (SELECT 1 FROM commission_entries e WHERE e.rule_id = r.id AND e.status = 'finalized') AS locked
     FROM commission_rules r LEFT JOIN staff s ON s.id = r.staff_id LEFT JOIN staff cb ON cb.id = r.created_by_staff_id`;
 
 export async function listRules(): Promise<CommissionRuleDTO[]> {
@@ -126,7 +130,8 @@ export function validateRuleInput(r: RuleInput): string | null {
   return null;
 }
 
-export async function createRule(r: RuleInput, staffId: string | null) {
+/** Validates a rule and looks up the name of the service or product it's for. */
+async function checkRuleInput(r: RuleInput): Promise<string | null> {
   const problem = validateRuleInput(r);
   if (problem) throw badRequest(problem);
   let targetName: string | null = null;
@@ -139,6 +144,11 @@ export async function createRule(r: RuleInput, staffId: string | null) {
     targetName = [p.item_name, p.variation_name].filter(Boolean).join(' — ');
   }
   if (r.staffId && !(await db().one('SELECT 1 FROM staff WHERE id = $1', [r.staffId]))) throw badRequest('That team member could not be found.');
+  return targetName;
+}
+
+export async function createRule(r: RuleInput, staffId: string | null) {
+  const targetName = await checkRuleInput(r);
   // A new rule for exactly the same person + item replaces the current one from its start date (history is kept).
   await db().query(
     `UPDATE commission_rules SET effective_to = ($6::date - 1), ended_by_staff_id = $7, ended_at = now()
@@ -160,6 +170,32 @@ export async function createRule(r: RuleInput, staffId: string | null) {
       r.effectiveFrom, r.effectiveTo, r.note, staffId],
   );
   return row!.id;
+}
+
+/**
+ * Changes a rule in place (fixing a typo, a wrong rate or dates). Rules already used for finalized commission can't be
+ * rewritten — that would misstate paid history — so those change by adding a new rate from a date instead.
+ */
+export async function updateRule(id: string, r: RuleInput) {
+  if (!(await db().one('SELECT 1 FROM commission_rules WHERE id = $1', [id]))) throw notFound('That rule');
+  if (await db().one("SELECT 1 FROM commission_entries WHERE rule_id = $1 AND status = 'finalized'", [id])) {
+    throw badRequest('This rate was used for finalized commission, so it can’t be changed in place. Add the new rate from the date it starts instead.');
+  }
+  const targetName = await checkRuleInput(r);
+  const overlap = await db().one(
+    `SELECT 1 FROM commission_rules WHERE id <> $1 AND staff_id IS NOT DISTINCT FROM $2 AND category = $3 AND target_type = $4
+        AND target_id IS NOT DISTINCT FROM $5 AND effective_from <= COALESCE($7::date, 'infinity'::date)
+        AND COALESCE(effective_to, 'infinity'::date) >= $6::date`,
+    [id, r.staffId, r.category, r.targetType, r.targetId, r.effectiveFrom, r.effectiveTo]);
+  if (overlap) throw badRequest('Those dates overlap another rate for the same person and item. Change the dates, or end or delete the other rate first.');
+  await db().query(
+    `UPDATE commission_rules SET staff_id = $2, category = $3, target_type = $4, target_id = $5, target_name = $6, method = $7,
+        rate_bps = $8, flat_cents = $9, tiers = $10::jsonb, tier_period = $11, effective_from = $12, effective_to = $13, note = $14
+      WHERE id = $1`,
+    [id, r.staffId, r.category, r.targetType, r.targetId, targetName, r.method, r.method === 'percent' ? r.rateBps : null,
+      r.method === 'flat' ? r.flatCents : null, r.method === 'tiered' ? JSON.stringify(r.tiers) : null, r.tierPeriod,
+      r.effectiveFrom, r.effectiveTo, r.note],
+  );
 }
 
 /** Ends a rule on a date (it stays in the history). */
@@ -186,7 +222,10 @@ export async function commissionStatus(): Promise<CommissionStatusDTO> {
   const s = (await getSettings()).commission;
   const sq = await squareService();
   const last = await db().one<any>('SELECT * FROM commission_sync_runs ORDER BY started_at DESC LIMIT 1');
-  const review = await db().one<{ n: number }>("SELECT count(*)::int AS n FROM commission_entries WHERE needs_review AND status = 'estimated'");
+  // The count by Needs review in the menu: the same last month it shows by default.
+  const range = await reviewRange();
+  const review = await db().one<{ n: number }>(
+    "SELECT count(*)::int AS n FROM commission_entries WHERE needs_review AND status = 'estimated' AND transaction_date BETWEEN $1::date AND $2::date", [range.from, range.to]);
   const unlinked = await db().query<{ t: string }>(
     `SELECT DISTINCT t FROM (
        SELECT jsonb_array_elements(a.raw->'appointment_segments')->>'team_member_id' AS t FROM appointments a
@@ -208,6 +247,9 @@ export async function commissionStatus(): Promise<CommissionStatusDTO> {
     needsReview: review?.n ?? 0,
     unlinkedTeamMembers: unlinked.map((u) => u.t),
     missing,
+    disclaimer: s.disclaimer ?? '',
+    hoursSyncError: await hoursSyncError(),
+    paySchedule: s.paySchedule,
   };
 }
 
@@ -272,6 +314,9 @@ async function doSync(opts: { trigger: 'manual' | 'auto'; staffId?: string | nul
         [p.id, p.order_id ?? null, p.team_member_id ?? null, p.status ?? null, cents(p.tip_money), p.created_at ?? null],
       );
     }
+    // Hours for hourly wages (never fails the sync; a missing TIMECARDS_READ permission is shown on Team Commission).
+    // The last 5 weeks are re-read, so changes made in Square to a past pay period reach My Commission too.
+    await syncTimecards(sq, new Date(Math.min(from.getTime(), now.getTime() - 35 * 86400_000)), now);
     const r = await rebuildCommission();
     if (maxUpdated) await setKV(CURSOR_KEY, maxUpdated);
     await setKV(LAST_SUCCESS_KEY, new Date().toISOString());
@@ -358,6 +403,8 @@ interface Desired {
   needs_review: boolean;
   review_reason: string | null;
   line_key: string | null;
+  /** Credited, but not counted in pay until confirmed (several stylists split evenly; a product-only sale). */
+  on_hold?: boolean;
 }
 
 interface Rule {
@@ -373,7 +420,9 @@ export async function rebuildCommission(now = new Date()) {
 
   const staffByTm = new Map((await db().query<any>('SELECT id, square_team_member_id FROM staff WHERE square_team_member_id IS NOT NULL'))
     .map((s) => [s.square_team_member_id as string, s.id as string]));
-  const staffNames = new Map((await db().query<any>('SELECT id, name FROM staff')).map((s) => [s.id, s.name]));
+  const staffRows = await db().query<any>('SELECT id, name, tip_eligible FROM staff');
+  const staffNames = new Map(staffRows.map((s) => [s.id, s.name]));
+  const notTipEligible = new Set(staffRows.filter((s) => s.tip_eligible === false).map((s) => s.id as string));
   const services = new Map((await db().query<any>('SELECT id, name, square_variation_id FROM services WHERE square_variation_id IS NOT NULL'))
     .map((s) => [s.square_variation_id as string, { id: s.id as string, name: s.name as string }]));
   const products = new Set((await db().query<any>('SELECT variation_id FROM square_inventory')).map((p) => p.variation_id as string));
@@ -407,6 +456,44 @@ export async function rebuildCommission(now = new Date()) {
   const desired: Desired[] = [];
   const tm = (id: string | null | undefined) => (id ? staffByTm.get(id) ?? null : null);
 
+  // When Square didn't record who checked out: the client's preferred stylist, whoever was on the clock, a backup person.
+  // Saved settings from before this option existed fall back to the defaults (settings are deep-merged on read).
+  const uc = cs.unrecordedCheckout ?? { clientStylist: true, onTheClock: true, fallbackStaffId: null, hold: true };
+  const roles = new Map((await db().query<any>('SELECT id, role, active FROM staff')).map((s) => [s.id as string, s]));
+  const preferredByCustomer = new Map((await db().query<any>(
+    'SELECT square_customer_id, preferred_staff_id FROM clients WHERE square_customer_id IS NOT NULL AND preferred_staff_id IS NOT NULL'))
+    .map((c) => [c.square_customer_id as string, c.preferred_staff_id as string]));
+  const shifts = await db().query<any>(
+    `SELECT s.staff_id, s.clock_in_at, s.clock_out_at,
+            COALESCE((SELECT json_agg(json_build_object('s', b.started_at, 'e', b.ended_at)) FROM time_clock_breaks b WHERE b.shift_id = s.id AND NOT b.paid), '[]') AS breaks
+       FROM time_clock_shifts s`);
+  const onTheClockAt = (at: Date) => shifts.filter((s) => {
+    if (new Date(s.clock_in_at) > at || (s.clock_out_at && new Date(s.clock_out_at) < at)) return false;
+    const breaks = typeof s.breaks === 'string' ? JSON.parse(s.breaks) : s.breaks;
+    return !breaks.some((b: any) => new Date(b.s) <= at && (!b.e || new Date(b.e) >= at)); // out on lunch
+  }).map((s) => s.staff_id as string);
+  const fallbackFor = (customerId: string | null | undefined, at: Date) => {
+    const suggestions: CommissionSuggestion[] = [];
+    const add = (id: string | null | undefined, why: string) => {
+      if (id && staffNames.has(id) && roles.get(id)?.active !== false && !suggestions.some((s) => s.staffId === id)) suggestions.push({ staffId: id, name: staffNames.get(id)!, why });
+      return suggestions.find((s) => s.staffId === id) ?? null;
+    };
+    let pick: CommissionSuggestion | null = null;
+    const pref = add(customerId ? preferredByCustomer.get(customerId) : null, 'the client’s preferred stylist');
+    if (uc.clientStylist && pref) pick = pref;
+    const time = at.toLocaleTimeString('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' });
+    const clocked = [...new Set(onTheClockAt(at))];
+    const desk = clocked.filter((id) => roles.get(id)?.role === 'receptionist');
+    for (const id of desk) add(id, `front desk, on the clock at ${time}`);
+    for (const id of clocked) add(id, `on the clock at ${time}`);
+    const only = desk.length === 1 ? desk[0] : clocked.length === 1 ? clocked[0] : null;
+    if (uc.onTheClock && !pick && only) pick = suggestions.find((s) => s.staffId === only) ?? null;
+    const backup = add(uc.fallbackStaffId, 'the backup person in commission settings');
+    if (!pick && backup) pick = backup;
+    return { pick, suggestions: suggestions.slice(0, 4) };
+  };
+  const NOBODY = 'No client on the ticket and Square didn’t record who checked out (sign in to Square POS as yourself when taking payment). Choose who gets credit.';
+
   const base = (o: any, txDate: string, at: Date): Pick<Desired, 'square_order_id' | 'transaction_at' | 'transaction_date' | 'posted_date' | 'square_payment_ids'> => ({
     square_order_id: o.id, transaction_at: at, transaction_date: txDate, posted_date: txDate,
     square_payment_ids: (paymentsByOrder.get(o.id) ?? []).map((p) => p.id),
@@ -423,9 +510,12 @@ export async function rebuildCommission(now = new Date()) {
     const providerTms = [...new Set(segs.map((s) => s.team_member_id))];
     const providers = providerTms.map(tm);
     const payTms = [...new Set((paymentsByOrder.get(o.id) ?? []).map((p) => p.team_member_id).filter(Boolean) as string[])];
-    const payStaff = payTms.length === 1 ? tm(payTms[0]) : null;
+    // Who checked the client out: the team member on the ticket's payment (with split payments, the first one linked to a CRM account).
+    const payStaff = payTms.map(tm).find(Boolean) ?? null;
     const serviceDate = visit ? localDate(visit.start_at, tz) : null;
     const saleRows: Desired[] = [];
+    // A ticket with only products (no service on it): credited to whoever checked out, on hold until confirmed.
+    const productOnly = o.line_items.every((l: any) => !(l.catalog_object_id && services.get(l.catalog_object_id)));
 
     for (const line of o.line_items) {
       const lineKey = `${o.id}:${line.uid}`;
@@ -438,6 +528,24 @@ export async function rebuildCommission(now = new Date()) {
       let category: Desired['category'] = svc ? 'service' : line.catalog_object_id && products.has(line.catalog_object_id) ? 'retail' : 'other';
       const steps: string[] = [];
       let reviewReason: string | null = null;
+      let onHold = false;
+      let suggestions: CommissionSuggestion[] = [];
+      /** Square didn't record who checked out: credit the likeliest person (on hold), or list them as choices. */
+      const useFallback = () => {
+        const fb = fallbackFor(o.customer_id, at);
+        suggestions = fb.suggestions;
+        if (!fb.pick) {
+          reviewReason = o.customer_id ? 'Square didn’t record who checked out, and nobody fits from the client or the time clock. Choose who gets credit.' : NOBODY;
+          return;
+        }
+        who = [{ staff: fb.pick.staffId, share: 1 }];
+        attribution = 'fallback';
+        steps.push(`Square didn’t record who checked out: credited to ${fb.pick.name} (${fb.pick.why}).`);
+        if (uc.hold) {
+          onHold = true;
+          reviewReason = `Square didn’t record who checked out — given to ${fb.pick.name} (${fb.pick.why}). On hold until you accept it or credit someone else.`;
+        }
+      };
       let eligible = cs.basis === 'before_discounts' ? gross : net;
       steps.push(`Square sale ${money(gross)}${discount ? ` − discount ${money(discount)} = ${money(net)}` : ''}.`);
       if (cs.basis === 'before_discounts' && discount) steps.push('Commission is on the price before discounts.');
@@ -481,8 +589,9 @@ export async function rebuildCommission(now = new Date()) {
           if (cs.multiProvider === 'split_evenly') {
             who = matching.map((t) => ({ staff: tm(t), share: 1 / matching.length }));
             attribution = 'split';
-            steps.push(`${matching.length} providers on the booking: split evenly (salon rule).`);
-            if (who.some((w) => !w.staff)) reviewReason = 'A provider on this booking isn’t linked to a CRM account.';
+            steps.push(`${matching.length} providers on the booking: split evenly for now — on hold until the split is confirmed.`);
+            onHold = true;
+            reviewReason = who.some((w) => !w.staff) ? 'A provider on this booking isn’t linked to a CRM account.' : 'Several stylists worked on this service — split evenly and on hold. Confirm the split (or change it).';
           } else {
             reviewReason = 'Several providers worked on this service — choose who gets credit.';
           }
@@ -494,6 +603,19 @@ export async function rebuildCommission(now = new Date()) {
         } else {
           reviewReason = visit ? 'The booking doesn’t show who did this service.' : 'No Square booking matches this sale (same customer and day).';
         }
+      } else if (category === 'retail' && productOnly && !visit) {
+        // Product-only sale with no visit: the receptionist (whoever checked out) gets it, on hold until confirmed.
+        if (payStaff) {
+          who = [{ staff: payStaff, share: 1 }];
+          attribution = 'payment';
+          onHold = true;
+          steps.push(`Product-only sale: credited to ${staffNames.get(payStaff) ?? 'the team member'} who checked out — on hold until confirmed.`);
+          reviewReason = `Product-only sale — given to ${staffNames.get(payStaff) ?? 'who checked out'} (checked out). On hold until you accept it or credit someone else.`;
+        } else if (payTms.length) {
+          reviewReason = `Square team member ${payTms[0]} isn’t linked to a CRM account.`;
+        } else {
+          useFallback();
+        }
       } else if (category === 'retail') {
         const byVisit = providerTms.length === 1 ? providers[0] : null;
         const pick = cs.productAttribution === 'payment_team_member' ? payStaff ?? byVisit : byVisit ?? payStaff;
@@ -501,11 +623,15 @@ export async function rebuildCommission(now = new Date()) {
           who = [{ staff: pick, share: 1 }];
           attribution = pick === byVisit && (cs.productAttribution === 'appointment_provider' || !payStaff) ? 'booking_single' : 'payment';
           steps.push(attribution === 'payment' ? 'Credited to the team member who took the payment in Square.' : 'Credited to the provider of that day’s visit.');
+        } else if (payTms.length && !payStaff) {
+          reviewReason = `Square team member ${payTms[0]} isn’t linked to a CRM account.`;
         } else {
-          reviewReason = payTms.length && !payStaff ? `Square team member ${payTms[0]} isn’t linked to a CRM account.` : 'Square doesn’t show who sold this product.';
+          useFallback();
         }
       }
       if (!who.length) who = [{ staff: null, share: 1 }];
+      // Anything left for review gets likely people as one-click choices.
+      if (reviewReason && !suggestions.length) suggestions = fallbackFor(o.customer_id, at).suggestions;
       for (const w of who) {
         const key = w.staff ? `sale:${lineKey}:${w.staff}` : `sale:${lineKey}:review`;
         const shareEligible = Math.round(eligible * w.share);
@@ -515,8 +641,9 @@ export async function rebuildCommission(now = new Date()) {
           item_name: [line.name, line.variation_name].filter(Boolean).join(' — ') || 'Item', quantity: qty, share: w.share, service_date: serviceDate,
           gross_cents: Math.round(gross * w.share), discount_cents: Math.round(discount * w.share), eligible_cents: shareEligible,
           net_sales_cents: Math.round(net * w.share), tip_cents: 0, rule_id: null, method: null, rate_bps: null, flat_cents: null,
-          commission_cents: 0, calc: { steps: [...steps, ...(w.share < 1 ? [`Share ${Math.round(w.share * 100)}% → ${money(shareEligible)}.`] : [])], basis: cs.basis },
+          commission_cents: 0, calc: { steps: [...steps, ...(w.share < 1 ? [`Share ${Math.round(w.share * 100)}% → ${money(shareEligible)}.`] : [])], basis: cs.basis, ...(suggestions.length ? { suggestions } : {}) },
           attribution, needs_review: !!reviewReason || !w.staff, review_reason: reviewReason ?? (w.staff ? null : 'Needs a team member.'), line_key: lineKey,
+          on_hold: onHold && !!w.staff,
         });
       }
     }
@@ -546,9 +673,17 @@ export async function rebuildCommission(now = new Date()) {
       }
       const total = split.reduce((a, x) => a + x.weight, 0);
       let left = tip;
+      // Someone who isn't tip eligible: their share is held for review (unless an admin credited this tip by hand).
+      let held = 0;
+      const heldFor: string[] = [];
       split.forEach((x, i) => {
         const amt = i === split.length - 1 ? left : Math.round(tip * (x.weight / total));
         left -= amt;
+        if (!manualTip && x.staff && notTipEligible.has(x.staff)) {
+          held += amt;
+          heldFor.push(staffNames.get(x.staff) ?? 'Someone');
+          return;
+        }
         desired.push({
           ...base(o, txDate, at), source_key: `tip:${o.id}:${x.staff}`, staff_id: x.staff, kind: 'tip', category: 'tip', square_line_item_uid: null,
           source_order_id: null, appointment_id: visit?.id ?? null, service_id: null, catalog_object_id: null, item_name: 'Tip', quantity: 1,
@@ -558,6 +693,16 @@ export async function rebuildCommission(now = new Date()) {
           attribution: null, needs_review: false, review_reason: null, line_key: null,
         });
       });
+      if (held > 0) {
+        desired.push({
+          ...base(o, txDate, at), source_key: `tip:${o.id}:review`, staff_id: null, kind: 'tip', category: 'tip', square_line_item_uid: null,
+          source_order_id: null, appointment_id: visit?.id ?? null, service_id: null, catalog_object_id: null, item_name: 'Tip', quantity: 1, share: held / tip,
+          service_date: serviceDate, gross_cents: 0, discount_cents: 0, eligible_cents: 0, net_sales_cents: 0, tip_cents: held, rule_id: null, method: null,
+          rate_bps: null, flat_cents: null, commission_cents: 0,
+          calc: { steps: [`Tip ${money(tip)} on this sale. ${how}`, `${money(held)} would go to ${heldFor.join(' and ')}, who ${heldFor.length > 1 ? 'aren’t' : 'isn’t'} tip eligible.`] },
+          attribution: null, needs_review: true, review_reason: `${heldFor.join(' and ')} ${heldFor.length > 1 ? 'aren’t' : 'isn’t'} tip eligible — credit this tip by hand.`, line_key: `${o.id}:tip`,
+        });
+      }
       if (!split.length && !manualTip) {
         desired.push({
           ...base(o, txDate, at), source_key: `tip:${o.id}:review`, staff_id: null, kind: 'tip', category: 'tip', square_line_item_uid: null,
@@ -592,12 +737,13 @@ export async function rebuildCommission(now = new Date()) {
     if (existing.get(d.source_key)?.status === 'finalized') continue;
     const rule = pickRule(rules, d.staff_id!, d.category as 'service' | 'retail', d.service_id, d.catalog_object_id, d.transaction_date);
     if (!rule) {
-      d.commission_cents = 0;
-      d.calc.steps.push('No commission rule covers this sale → $0.');
-      if (!d.needs_review) {
-        d.needs_review = true;
-        d.review_reason = 'No commission rule covers this — add one in Settings → Commission, or accept $0.';
-      }
+      // No rule for this stylist and item: the salon's default rates (40% services, 10% products unless changed).
+      const bps = d.category === 'service' ? cs.defaultServiceBps ?? 4000 : cs.defaultRetailBps ?? 1000;
+      d.method = 'percent';
+      d.rate_bps = bps;
+      d.commission_cents = Math.round((d.eligible_cents * bps) / 10000);
+      d.calc.rule = `Salon default · ${d.category === 'service' ? 'services' : 'products'} · ${pct(bps)}`;
+      d.calc.steps.push(`No rule for this — salon default ${pct(bps)}: ${money(d.eligible_cents)} × ${pct(bps)} = ${money(d.commission_cents)}.`);
       continue;
     }
     d.rule_id = rule.id;
@@ -690,6 +836,7 @@ export async function rebuildCommission(now = new Date()) {
   for (const d of desired) {
     if (d.needs_review && d.staff_id && accepted.has(d.source_key)) {
       d.needs_review = false;
+      d.on_hold = false;
       d.review_reason = null;
       d.calc.steps.push('Reviewed and accepted.');
     }
@@ -752,6 +899,11 @@ export async function rebuildCommission(now = new Date()) {
     await event(ex.id, 'voided', null, { reason: 'No longer in Square, or credited differently.' });
     voided++;
   }
+  // On hold: credited but not counted in pay until confirmed (set in one go for everything just written).
+  await db().query(
+    `UPDATE commission_entries SET on_hold = (source_key = ANY($1::text[])), updated_at = now()
+      WHERE status = 'estimated' AND source_key = ANY($2::text[]) AND on_hold <> (source_key = ANY($1::text[]))`,
+    [desired.filter((d) => d.on_hold).map((d) => d.source_key), desired.map((d) => d.source_key)]);
   const review = await db().one<{ n: number }>("SELECT count(*)::int AS n FROM commission_entries WHERE needs_review AND status = 'estimated'");
   return { created, updated, voided, needsReview: review?.n ?? 0 };
 }
@@ -835,7 +987,7 @@ export function toEntryDTO(r: any): CommissionEntryDTO {
     grossCents: r.gross_cents, discountCents: r.discount_cents, eligibleCents: r.eligible_cents, netSalesCents: r.net_sales_cents,
     tipCents: r.tip_cents, method: r.method, rateBps: r.rate_bps, flatCents: r.flat_cents, commissionCents: r.commission_cents,
     calc: typeof r.calc === 'string' ? JSON.parse(r.calc) : r.calc ?? { steps: [] }, attribution: r.attribution,
-    needsReview: r.needs_review, reviewReason: r.review_reason, note: r.note, finalizedAt: iso(r.finalized_at),
+    needsReview: r.needs_review, reviewReason: r.review_reason, onHold: !!r.on_hold, note: r.note, finalizedAt: iso(r.finalized_at),
   };
 }
 
@@ -851,20 +1003,34 @@ export async function listEntries(f: { staffId: string | null | 'all'; from: str
   return rows.map(toEntryDTO);
 }
 
-export async function reviewQueue() {
-  const rows = await db().query(`${ENTRY_SELECT} WHERE e.needs_review AND e.status = 'estimated' ORDER BY e.transaction_at DESC LIMIT 500`);
+/** Needs review looks back one month (sale date) unless other dates are chosen. */
+export async function reviewRange(range?: { from?: string | null; to?: string | null }) {
+  const today = localDate(new Date(), (await getSettings()).business.timezone);
+  const d = new Date(`${today}T12:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() - 1);
+  return { from: range?.from || d.toISOString().slice(0, 10), to: range?.to || today };
+}
+
+export async function reviewQueue(range?: { from?: string | null; to?: string | null }) {
+  const r = await reviewRange(range);
+  const rows = await db().query(
+    `${ENTRY_SELECT} WHERE e.needs_review AND e.status = 'estimated' AND e.transaction_date BETWEEN $1::date AND $2::date ORDER BY e.transaction_at DESC LIMIT 500`,
+    [r.from, r.to]);
   return rows.map(toEntryDTO);
 }
 
 export function summarize(entries: CommissionEntryDTO[], from: string, to: string, staffId: string | null): CommissionSummaryDTO {
   const sum = (pred: (e: CommissionEntryDTO) => boolean, f: (e: CommissionEntryDTO) => number) => entries.filter(pred).reduce((a, e) => a + f(e), 0);
-  const counted = (e: CommissionEntryDTO) => !!e.staffId; // unassigned records don't count for anyone yet
+  // Unassigned records don't count for anyone yet, nor do ones on hold (until confirmed in Needs review).
+  const counted = (e: CommissionEntryDTO) => !!e.staffId && !e.onHold;
   return {
     from, to, staffId,
     totalCommissionCents: sum(counted, (e) => e.commissionCents),
     serviceCommissionCents: sum((e) => counted(e) && e.kind === 'sale' && e.category === 'service', (e) => e.commissionCents),
     retailCommissionCents: sum((e) => counted(e) && e.kind === 'sale' && e.category === 'retail', (e) => e.commissionCents),
     refundsCents: sum((e) => counted(e) && e.kind === 'refund', (e) => e.commissionCents),
+    serviceRefundsCents: sum((e) => counted(e) && e.kind === 'refund' && e.category === 'service', (e) => e.commissionCents),
+    retailRefundsCents: sum((e) => counted(e) && e.kind === 'refund' && e.category === 'retail', (e) => e.commissionCents),
     adjustmentsCents: sum((e) => counted(e) && e.kind === 'adjustment', (e) => e.commissionCents),
     tipsCents: sum((e) => counted(e) && e.kind === 'tip', (e) => e.tipCents),
     estimatedCents: sum((e) => counted(e) && e.status === 'estimated', (e) => e.commissionCents),
@@ -885,17 +1051,31 @@ export async function entryHistory(entryId: string) {
 
 // ---------- Review, adjustments, finalizing ----------
 export async function attributeEntry(entryId: string, staffIds: string[], note: string | null, actor: string) {
-  const e = await db().one<any>("SELECT * FROM commission_entries WHERE id = $1 AND status = 'estimated'", [entryId]);
-  if (!e) throw notFound('That commission record');
+  await creditLine(entryId, staffIds, note, actor, true);
+  await rebuildCommission();
+}
+
+/** Credits several records to the same people (or no commission) with one rebuild. Records that can't be re-credited are skipped. */
+export async function attributeEntries(entryIds: string[], staffIds: string[], note: string | null, actor: string) {
   for (const s of staffIds) if (!(await db().one('SELECT 1 FROM staff WHERE id = $1', [s]))) throw badRequest('That team member could not be found.');
+  let n = 0;
+  for (const id of entryIds) if (await creditLine(id, staffIds, note, actor, false)) n++;
+  if (n) await rebuildCommission();
+  return n;
+}
+
+async function creditLine(entryId: string, staffIds: string[], note: string | null, actor: string, strict: boolean) {
+  const e = await db().one<any>("SELECT * FROM commission_entries WHERE id = $1 AND status = 'estimated'", [entryId]);
+  if (!e) { if (strict) throw notFound('That commission record'); return false; }
+  if (strict) for (const s of staffIds) if (!(await db().one('SELECT 1 FROM staff WHERE id = $1', [s]))) throw badRequest('That team member could not be found.');
   const lineKey = e.kind === 'tip' ? `${e.square_order_id}:tip` : e.square_line_item_uid ? `${e.square_order_id}:${e.square_line_item_uid}` : null;
-  if (!lineKey || e.kind === 'refund') throw badRequest('This record can’t be re-credited; accept it or add an adjustment instead.');
+  if (!lineKey || e.kind === 'refund') { if (strict) throw badRequest('This record can’t be re-credited; accept it or add an adjustment instead.'); return false; }
   await db().query(
     `INSERT INTO commission_attributions(line_key, staff_ids, note, set_by_staff_id) VALUES ($1,$2,$3,$4)
      ON CONFLICT (line_key) DO UPDATE SET staff_ids = EXCLUDED.staff_ids, note = EXCLUDED.note, set_by_staff_id = EXCLUDED.set_by_staff_id, set_at = now()`,
     [lineKey, staffIds, note, actor]);
   await event(entryId, 'attributed', actor, { staffIds, note });
-  await rebuildCommission();
+  return true;
 }
 
 export async function acceptEntry(entryId: string, note: string | null, actor: string) {
@@ -903,7 +1083,7 @@ export async function acceptEntry(entryId: string, note: string | null, actor: s
   if (!e) throw notFound('That commission record');
   if (!e.staff_id) throw badRequest('Choose who gets credit first.');
   await db().query('INSERT INTO commission_review_accepted(source_key, note, accepted_by_staff_id) VALUES ($1,$2,$3) ON CONFLICT (source_key) DO NOTHING', [e.source_key, note, actor]);
-  await db().query('UPDATE commission_entries SET needs_review = false, updated_at = now() WHERE id = $1', [entryId]);
+  await db().query('UPDATE commission_entries SET needs_review = false, on_hold = false, updated_at = now() WHERE id = $1', [entryId]);
   await event(entryId, 'accepted', actor, { note });
 }
 

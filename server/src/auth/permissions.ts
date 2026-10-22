@@ -79,15 +79,27 @@ export const API_RULES: { method: string; path: RegExp; anyOf: string[] }[] = [
   { method: 'GET', path: /^\/settings$/, anyOf: ANY_SIGNED_IN },
   // Location & Access: everyone can see whether they're on the salon network; changing it is Owner/Admin only (checked in the route).
   { method: 'GET', path: /^\/access\/status$/, anyOf: ANY_SIGNED_IN },
+  // Each person's own sidebar order and hidden items (Customize menu).
+  { method: '*', path: /^\/sidebar\/layout$/, anyOf: ANY_SIGNED_IN },
   { method: 'PUT', path: /^\/access$/, anyOf: ['settings:write'] },
-  { method: 'GET', path: /^\/notifications$/, anyOf: ['dashboard:view'] },
-  { method: 'POST', path: /^\/notifications\/read-all$/, anyOf: ['dashboard:view'] },
-  { method: 'GET', path: /^\/updates$/, anyOf: ['dashboard:view'] },
+  // Everyone gets notifications addressed to them (e.g. a task sent to them); salon-wide alerts need the Dashboard (the routes filter).
+  { method: 'GET', path: /^\/notifications$/, anyOf: ANY_SIGNED_IN },
+  { method: 'POST', path: /^\/notifications\/read-all$/, anyOf: ANY_SIGNED_IN },
+  { method: 'GET', path: /^\/updates$/, anyOf: ANY_SIGNED_IN },
+  // Time clock (each route checks its own permission).
+  { method: '*', path: /^\/timeclock(\/.*)?$/, anyOf: ['timeclock:use', 'commission:manage', 'commission:team', 'users:manage'] },
+  // Each person's own profile (mobile) and look (accent, light/dark).
+  { method: '*', path: /^\/my-profile$/, anyOf: ANY_SIGNED_IN },
+  { method: '*', path: /^\/look$/, anyOf: ANY_SIGNED_IN },
+  // Each person's own Dashboard arrangement.
+  { method: '*', path: /^\/dashboard\/layout$/, anyOf: ['dashboard:view'] },
+  { method: '*', path: /^\/analytics\/layout$/, anyOf: ['analytics:read', 'revenue:projections'] },
 
   { method: 'GET', path: /^\/dashboard$/, anyOf: ['dashboard:view'] },
   { method: 'GET', path: /^\/analytics$/, anyOf: ['analytics:read'] },
   { method: 'GET', path: /^\/projections(\/appointments)?$/, anyOf: ['revenue:projections'] },
   { method: 'GET', path: /^\/analytics\/new-clients$/, anyOf: ['analytics:read'] },
+  { method: 'GET', path: /^\/analytics\/products$/, anyOf: ['analytics:read'] },
   { method: 'GET', path: /^\/search$/, anyOf: ['clients:read', 'clients:read_assigned', 'leads:read'] },
   { method: 'GET', path: /^\/services$/, anyOf: ['services:read'] },
 
@@ -107,11 +119,13 @@ export const API_RULES: { method: string; path: RegExp; anyOf: string[] }[] = [
   { method: 'GET', path: /^\/admin\/locations$/, anyOf: ['users:manage'] },
   { method: '*', path: /^\/admin\/(users|roles|permissions)(\/.*)?$/, anyOf: ['users:manage', 'users:permissions'] },
   { method: '*', path: /^\/inventory-sync(\/.*)?$/, anyOf: ['inventory:sync'] },
+  { method: '*', path: /^\/hair(\/.*)?$/, anyOf: ['hair:manage'] },
   { method: '*', path: /^\/inventory(\/.*)?$/, anyOf: ['inventory:view', 'inventory:order', 'inventory:read_all', 'inventory:manage'] },
   { method: '*', path: /^\/commission(\/.*)?$/, anyOf: ['commission:own', 'commission:team', 'commission:manage', 'commission:approve', 'commission:export'] },
 
   { method: '*', path: /^\/settings\/logo$/, anyOf: ['settings:write'] },
-  { method: '*', path: /^\/settings\/font\/(heading|body)$/, anyOf: ['settings:write'] },
+  { method: '*', path: /^\/settings\/font\/(heading|body|link|button|nav)$/, anyOf: ['settings:write'] },
+  { method: '*', path: /^\/settings\/login-image$/, anyOf: ['settings:write'] },
   { method: 'PATCH', path: /^\/settings$/, anyOf: ['settings:rules', 'settings:write', 'integrations:manage', 'inventory:sync', 'users:manage'] },
   { method: 'GET', path: /^\/staff$/, anyOf: ['staff:read', 'users:manage', 'tasks:assign', 'inventory:order_for_others', 'commission:team'] },
   { method: 'PATCH', path: /^\/staff\/[^/]+$/, anyOf: ['users:manage'] },

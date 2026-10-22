@@ -1,12 +1,17 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Info, Table2, BarChart3 } from 'lucide-react';
 import { api } from '../api/client';
 import { useCanDo, useIntegrations } from '../api/hooks';
 import { ProjectionsSection } from '../components/domain/Projections';
+import { ProductSales } from '../components/domain/ProductSales';
+import { useSearchParams } from 'react-router-dom';
+import { SectionPicker } from '../components/layout/subNav';
+import { useStoreNames } from '../lib/storeNames';
 import { dateShort, money, pct } from '../lib/format';
 import { ErrorNote, PageHeader, PageLoading, Segmented, SectionTitle, cx } from '../components/ui';
+import { WidgetGrid, type WidgetDef } from '../components/domain/WidgetGrid';
 
 interface Analytics {
   days: number;
@@ -26,39 +31,56 @@ const SERIES = [
   { key: 'cancelled', label: 'Cancelled', color: '#B9822B' },
   { key: 'noShows', label: 'No-show', color: '#1E86A8' },
 ] as const;
-const AXIS = { fontSize: 12, fill: '#75716B' };
+const AXIS = { fontSize: 12, fill: 'rgb(var(--stone))' };
 
+/**
+ * Analytics, by store (side menu): the salon (projections, bookings & clients, salon product sales), online (the Shopify
+ * stores' product sales), or both. Each part is a widget the person can move, resize or hide (Customize), like the
+ * Dashboard; what they may see is still decided by their permissions (the server checks both).
+ */
 export function AnalyticsPage() {
   const canDo = useCanDo();
-  // Each part shows only with its permission; the server checks both.
+  const N = useStoreNames();
+  const [params] = useSearchParams();
+  const scope = params.get('scope') === 'salon' ? 'salon' : params.get('scope') === 'online' ? 'online' : 'all';
+  const online = [N.shopify, N.shopify2].filter(Boolean).join(' + ');
+  const title = scope === 'salon' ? `Analytics · ${N.square}` : scope === 'online' ? `Analytics · Online` : 'Analytics';
+  const salon = scope !== 'online';
+  const bookings = salon && canDo('analytics:read');
+  // One period for the bookings & clients widgets.
+  const [days, setDays] = useState('30');
+  const { data, isLoading, error, refetch } = useQuery({ queryKey: ['analytics', days], queryFn: () => api.get<Analytics>(`/analytics?days=${days}`), enabled: bookings });
+  const { data: integ } = useIntegrations();
+  const pending = isLoading ? <PageLoading /> : error ? <ErrorNote error={error} onRetry={refetch} /> : null;
+  const w = (node: (d: Analytics) => ReactNode) => (data ? node(data) : pending);
+
+  const defs: WidgetDef[] = [];
+  if (salon && canDo('revenue:projections')) defs.push({ id: 'projections', title: 'Projected service revenue', size: 'full', ownHeading: true, node: <div className="[&>section]:mb-0"><ProjectionsSection /></div> });
+  if (bookings) {
+    defs.push({ id: 'at_a_glance', title: 'Bookings & clients at a glance', size: 'full', node: w((d) => <Tiles d={d} />) });
+    defs.push({ id: 'booked_value', title: 'Booked service value', size: 'full', node: w((d) => <BookedValue d={d} />) });
+    defs.push({ id: 'weekly', title: 'Appointments by week', size: 'l', ownHeading: true, node: w((d) => <WeeklyChart weekly={d.weekly} />) });
+    defs.push({ id: 'new_vs_returning', title: 'New vs returning', size: 's', node: w((d) => <NewVsReturning n={d.newClients} r={d.returningClients} />) });
+    defs.push({ id: 'leads_by_week', title: 'New leads by week', size: 'm', node: w((d) => <LeadsByWeek weekly={d.weekly} />) });
+    defs.push({ id: 'popular_services', title: 'Popular services', size: 'm', node: w((d) => <PopularServices d={d} />) });
+  }
+  if (canDo('analytics:read')) defs.push({ id: 'product_sales', title: 'Product sales', size: 'full', ownHeading: true, node: <div className="[&>section]:mt-0"><ProductSales key={scope} scope={scope} /></div> });
+
   return (
     <div className="animate-rise">
-      {canDo('revenue:projections') && <><PageHeader title="Analytics" /><ProjectionsSection /></>}
-      {canDo('analytics:read') && <BusinessAnalytics showTitle={!canDo('revenue:projections')} />}
-    </div>
-  );
-}
-
-function BusinessAnalytics({ showTitle }: { showTitle: boolean }) {
-  const [days, setDays] = useState('30');
-  const { data, isLoading, error, refetch } = useQuery({ queryKey: ['analytics', days], queryFn: () => api.get<Analytics>(`/analytics?days=${days}`) });
-  const { data: integ } = useIntegrations();
-
-  return (
-    <div>
       <PageHeader
-        title={showTitle ? 'Analytics' : <span className="text-[26px]">Bookings & clients</span>}
-        subtitle={integ?.demoMode ? 'Calculated from demo data.' : 'Calculated from Square appointments, leads and follow-ups.'}
-        actions={<Segmented value={days} onChange={setDays} options={[{ value: '30', label: '30 days' }, { value: '90', label: '90 days' }, { value: '365', label: '12 months' }]} />}
+        title={title}
+        subtitle={scope === 'salon' ? 'The salon: revenue, bookings, clients and salon product sales.' : scope === 'online' ? `Online sales (${online}).` : `The salon and online (${online}) together.`}
+        actions={bookings && <Segmented value={days} onChange={setDays} options={[{ value: '30', label: '30 days' }, { value: '90', label: '90 days' }, { value: '365', label: '12 months' }]} />}
       />
-      {isLoading && <PageLoading />}
-      {error && <ErrorNote error={error} onRetry={refetch} />}
-      {data && <Body d={data} />}
+      <SectionPicker path="/analytics" names={N} can={canDo} className="mb-4" />
+      {bookings && <p className="text-[13px] text-stone">Bookings & clients: {integ?.demoMode ? 'calculated from demo data' : 'calculated from Square appointments, leads and follow-ups'}, for the last {days === '365' ? '12 months' : `${days} days`}.</p>}
+      <WidgetGrid page="analytics" defs={defs} />
     </div>
   );
 }
 
-function Body({ d }: { d: Analytics }) {
+function Tiles({ d }: { d: Analytics }) {
   const tiles: { label: string; value: string; sub?: string; warn?: boolean }[] = [
     { label: 'New leads', value: String(d.newLeads), sub: `${d.leadsConverted} converted` },
     { label: 'Lead conversion', value: pct(d.conversionRate), sub: 'booked or became a client' },
@@ -70,69 +92,68 @@ function Body({ d }: { d: Analytics }) {
     { label: 'Follow-ups done', value: String(d.followUpsCompleted), sub: `${d.followUpsOverdue} overdue now`, warn: d.followUpsOverdue > 0 },
   ];
   return (
-    <>
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl2 border border-line bg-line sm:grid-cols-4">
-        {tiles.map((t) => (
-          <div key={t.label} className="bg-white px-4 py-4 sm:px-5">
-            <span className="block text-[13px] text-stone">{t.label}</span>
-            <span className="num mt-1 block font-display text-[36px] font-medium leading-none text-ink">{t.value}</span>
-            {t.sub && <span className={cx('mt-1.5 block text-xs', t.warn ? 'text-plum' : 'text-stone')}>{t.sub}</span>}
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-xl2 border border-line bg-white px-5 py-4">
-        <span className="text-[13px] text-stone">Booked service value (completed)</span>
-        <span className="num font-display text-[30px] font-medium leading-none">{money(d.bookedValueCents)}</span>
-        <span className="flex items-center gap-1 text-xs text-stone"><Info className="h-3.5 w-3.5" />From Square service prices — not payments collected (excludes tips, discounts and retail){d.bookedValueIncomplete ? '; some services have no price in Square' : ''}.</span>
-      </div>
-
-      <div className="mt-10 grid gap-10 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
-        <WeeklyChart weekly={d.weekly} />
-        <section>
-          <SectionTitle>New vs returning</SectionTitle>
-          <NewVsReturning n={d.newClients} r={d.returningClients} />
-          <SectionTitle className="mt-10">New leads by week</SectionTitle>
-          <div className="panel p-4">
-            {d.weekly.some((w) => w.leads > 0) ? (
-              <div className="h-40">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={d.weekly} margin={{ top: 16, right: 4, left: -28, bottom: 0 }}>
-                    <CartesianGrid vertical={false} stroke="#EFEDE9" />
-                    <XAxis dataKey="week" tickFormatter={(w) => dateShort(w)} tick={AXIS} axisLine={false} tickLine={false} minTickGap={16} />
-                    <YAxis allowDecimals={false} tick={AXIS} axisLine={false} tickLine={false} />
-                    <Tooltip cursor={{ fill: '#F2F1EE' }} content={<Tip names={{ leads: 'New leads' }} />} />
-                    <Bar dataKey="leads" fill="#93527A" radius={[4, 4, 0, 0]} maxBarSize={28} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            ) : <p className="py-8 text-center text-sm text-stone">No new leads in this period.</p>}
-          </div>
-        </section>
-      </div>
-
-      <section className="mt-10">
-        <SectionTitle>Popular services</SectionTitle>
-        <div className="panel p-5">
-          {d.popularServices.length === 0 ? <p className="py-6 text-center text-sm text-stone">No completed services in this period.</p> : (
-            <ul className="space-y-3">
-              {d.popularServices.map((s) => {
-                const max = d.popularServices[0].count || 1;
-                return (
-                  <li key={s.name} className="grid grid-cols-[minmax(0,180px)_1fr] items-center gap-3 sm:grid-cols-[220px_1fr]">
-                    <span className="truncate text-sm text-ink-soft" title={s.name}>{s.name}</span>
-                    <span className="flex items-center gap-2">
-                      <span className="h-3 rounded-r" style={{ width: `${Math.max(2, (s.count / max) * 100)}%`, background: '#93527A' }} />
-                      <span className="num text-[13px] text-ink">{s.count}</span>
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+    <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl2 border border-line bg-line sm:grid-cols-4">
+      {tiles.map((t) => (
+        <div key={t.label} className="bg-white px-4 py-4 sm:px-5">
+          <span className="block text-[13px] text-stone">{t.label}</span>
+          <span className="num mt-1 block font-display text-[36px] font-medium leading-none text-ink">{t.value}</span>
+          {t.sub && <span className={cx('mt-1.5 block text-xs', t.warn ? 'text-plum' : 'text-stone')}>{t.sub}</span>}
         </div>
-      </section>
-    </>
+      ))}
+    </div>
+  );
+}
+
+function BookedValue({ d }: { d: Analytics }) {
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-xl2 border border-line bg-white px-5 py-4">
+      <span className="num font-display text-[30px] font-medium leading-none">{money(d.bookedValueCents)}</span>
+      <span className="text-[13px] text-stone">completed services</span>
+      <span className="flex items-center gap-1 text-xs text-stone"><Info className="h-3.5 w-3.5" />From Square service prices — not payments collected (excludes tips, discounts and retail){d.bookedValueIncomplete ? '; some services have no price in Square' : ''}.</span>
+    </div>
+  );
+}
+
+function LeadsByWeek({ weekly }: { weekly: Analytics['weekly'] }) {
+  return (
+    <div className="panel p-4">
+      {weekly.some((w) => w.leads > 0) ? (
+        <div className="h-40">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={weekly} margin={{ top: 16, right: 4, left: -28, bottom: 0 }}>
+              <CartesianGrid vertical={false} stroke="rgb(var(--line))" />
+              <XAxis dataKey="week" tickFormatter={(w) => dateShort(w)} tick={AXIS} axisLine={false} tickLine={false} minTickGap={16} />
+              <YAxis allowDecimals={false} tick={AXIS} axisLine={false} tickLine={false} />
+              <Tooltip cursor={{ fill: 'rgb(var(--mist))' }} content={<Tip names={{ leads: 'New leads' }} />} />
+              <Bar dataKey="leads" fill="#93527A" radius={[4, 4, 0, 0]} maxBarSize={28} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      ) : <p className="py-8 text-center text-sm text-stone">No new leads in this period.</p>}
+    </div>
+  );
+}
+
+function PopularServices({ d }: { d: Analytics }) {
+  return (
+    <div className="panel p-5">
+      {d.popularServices.length === 0 ? <p className="py-6 text-center text-sm text-stone">No completed services in this period.</p> : (
+        <ul className="space-y-3">
+          {d.popularServices.map((s) => {
+            const max = d.popularServices[0].count || 1;
+            return (
+              <li key={s.name} className="grid grid-cols-[minmax(0,180px)_1fr] items-center gap-3 sm:grid-cols-[220px_1fr]">
+                <span className="truncate text-sm text-ink-soft" title={s.name}>{s.name}</span>
+                <span className="flex items-center gap-2">
+                  <span className="h-3 rounded-r" style={{ width: `${Math.max(2, (s.count / max) * 100)}%`, background: '#93527A' }} />
+                  <span className="num text-[13px] text-ink">{s.count}</span>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -158,10 +179,10 @@ function WeeklyChart({ weekly }: { weekly: Analytics['weekly'] }) {
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={weekly} margin={{ top: 8, right: 4, left: -24, bottom: 0 }}>
-                <CartesianGrid vertical={false} stroke="#EFEDE9" />
+                <CartesianGrid vertical={false} stroke="rgb(var(--line))" />
                 <XAxis dataKey="week" tickFormatter={(w) => dateShort(w)} tick={AXIS} axisLine={false} tickLine={false} minTickGap={16} />
                 <YAxis allowDecimals={false} tick={AXIS} axisLine={false} tickLine={false} />
-                <Tooltip cursor={{ fill: '#F2F1EE' }} content={<Tip names={Object.fromEntries(SERIES.map((s) => [s.key, s.label]))} />} />
+                <Tooltip cursor={{ fill: 'rgb(var(--mist))' }} content={<Tip names={Object.fromEntries(SERIES.map((s) => [s.key, s.label]))} />} />
                 {SERIES.map((s, i) => (
                   <Bar key={s.key} dataKey={s.key} stackId="a" fill={s.color} stroke="#fff" strokeWidth={2} maxBarSize={36} radius={i === SERIES.length - 1 ? [4, 4, 0, 0] : 0}>
                     {i === 0 && weekly.length <= 8 && <LabelList dataKey="completed" position="insideBottom" fill="#fff" fontSize={11} formatter={(v: number) => (v > 1 ? v : '')} />}

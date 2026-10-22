@@ -16,7 +16,7 @@ import { SquareApiService } from './square/SquareApiService.js';
 import type { SquareService } from './square/types.js';
 import { resetShopifyToken, ShopifyApiService } from './shopify/ShopifyApiService.js';
 import { isProviderDisabled, onCredentialsChanged } from './credentials.js';
-import { MockShopifyService, type ShopifyService } from './shopify/ShopifyService.js';
+import { MockShopifyService, MockShopifyStore2, type ShopifyService } from './shopify/ShopifyService.js';
 
 /**
  * Picks the implementation for each integration. Demo Mode uses simulators for everything;
@@ -25,7 +25,7 @@ import { MockShopifyService, type ShopifyService } from './shopify/ShopifyServic
  */
 export const isDemo = () => config().DEMO_MODE;
 
-let overrides: Partial<{ square: SquareService | null; highlevel: HighLevelService | null; ai: AIService; email: EmailService | null; shopify: ShopifyService | null }> = {};
+let overrides: Partial<{ square: SquareService | null; highlevel: HighLevelService | null; ai: AIService; email: EmailService | null; shopify: ShopifyService | null; shopify2: ShopifyService | null }> = {};
 /** Test hook: swap an integration for a fake. */
 export function setIntegrationOverride(o: typeof overrides) {
   overrides = { ...overrides, ...o };
@@ -50,6 +50,19 @@ export function highLevelService(): HighLevelService | null {
   return null;
 }
 
+/**
+ * Where Addendum Hair's clients come from in HighLevel: its own sub-account when one is connected, otherwise the
+ * main HighLevel connection (then usually narrowed to a tag).
+ */
+export function hairHighLevelService(): { svc: HighLevelService; source: 'own' | 'main' } | null {
+  if ('highlevel' in overrides) return overrides.highlevel ? { svc: overrides.highlevel, source: 'main' } : null;
+  if (isDemo()) return { svc: new MockHighLevelService(), source: 'main' };
+  const c = config();
+  if (c.HIGHLEVEL_HAIR_PRIVATE_TOKEN && c.HIGHLEVEL_HAIR_LOCATION_ID) return { svc: new HighLevelApiService(c.HIGHLEVEL_HAIR_PRIVATE_TOKEN, c.HIGHLEVEL_HAIR_LOCATION_ID), source: 'own' };
+  const main = highLevelService();
+  return main ? { svc: main, source: 'main' } : null;
+}
+
 let smtp: SmtpEmailService | null = null;
 export function emailService(): EmailService | null {
   if ('email' in overrides) return overrides.email!;
@@ -68,10 +81,30 @@ export function shopifyService(): ShopifyService | null {
   return null;
 }
 
+let shopify2: ShopifyApiService | null = null;
+/** A second Shopify store that shares the same stock and SKUs (Settings → API & Integrations → Second Shopify store). */
+export function shopifyService2(): ShopifyService | null {
+  if ('shopify2' in overrides) return overrides.shopify2!;
+  if (isDemo()) return null;
+  if (isProviderDisabled('shopify2')) return null;
+  const c = config();
+  const domain = c.SHOPIFY2_STORE_DOMAIN?.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+  if (domain && (c.SHOPIFY2_ADMIN_TOKEN || (c.SHOPIFY2_CLIENT_ID && c.SHOPIFY2_CLIENT_SECRET))) return (shopify2 ??= new ShopifyApiService(domain, 'SHOPIFY2'));
+  return null;
+}
+/** What the second store is called in the CRM. */
+export const shopify2Name = () => config().SHOPIFY2_NAME?.trim() || 'Second Shopify store';
+/** What each store is called in the CRM (Settings → API & Integrations → Name in the CRM). */
+export const squareName = () => config().SQUARE_NAME?.trim() || 'Square';
+export const shopifyName = () => config().SHOPIFY_NAME?.trim() || 'Shopify';
+export const storeNames = () => ({ square: squareName(), shopify: shopifyName(), shopify2: shopifyService2() ? shopify2Name() : null });
+export { MockShopifyStore2 };
+
 // Rebuild cached clients when credentials are changed in Settings → API & Integrations.
 onCredentialsChanged.push(() => {
   smtp = null;
   shopify = null;
+  shopify2 = null;
   resetShopifyToken();
 });
 

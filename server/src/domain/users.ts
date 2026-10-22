@@ -16,9 +16,11 @@ import {
   type StaffAccountDetailDTO,
   type StaffAccountDTO,
 } from '@addendum/shared';
+import { canManageAccess } from '../auth/access.js';
 import { computeEffective, isApprover, permissionBreakdown, rolePermissions, staffOverrides } from '../auth/permissions.js';
 import { config } from '../config.js';
 import { db } from '../db/index.js';
+import { toE164 } from '../lib/phone.js';
 import { emailService } from '../integrations/registry.js';
 import { getSettings } from '../repos/settings.js';
 import { randomToken, sha256 } from '../lib/crypto.js';
@@ -83,6 +85,7 @@ function toAccount(r: any): StaffAccountDTO {
     color: r.color,
     canSignIn: !!r.password_hash && status === 'active',
     squareTeamMemberId: r.square_team_member_id,
+    mobilePhone: r.mobile_phone ?? null,
     lastLoginAt: iso(r.last_login_at),
     createdAt: iso(r.created_at)!,
     overrideCount: overridesOf(r).filter((o) => KNOWN.has(o.permission)).length,
@@ -137,15 +140,27 @@ function assertNotSelf(actor: CurrentUser, targetId: string, what: string) {
   if (actor.id === targetId) throw forbidden(`You can’t change your own ${what}. Ask another administrator.`);
 }
 
+/**
+ * What the actor counts as holding when giving out or comparing access. The away-from-the-salon exceptions
+ * (location:*) say where someone may work, not what they may do: whoever manages Location & Access (Owners/Admins)
+ * can hand them out without holding them.
+ */
+function held(actor: CurrentUser) {
+  const mine = new Set(actor.permissions);
+  // Owners/Admins hand out the per-person exceptions (away from the salon, time clock) without holding them themselves.
+  if (canManageAccess(actor)) for (const k of PERMISSION_KEYS) if (k.startsWith('location:') || k.startsWith('timeclock:')) mine.add(k);
+  return mine;
+}
+
 /** You may only manage people whose access is within your own. */
 async function assertCanManage(actor: CurrentUser, targetId: string) {
   const { effective } = await effectiveOf(targetId);
-  const mine = new Set(actor.permissions);
+  const mine = held(actor);
   if (effective.some((p) => !mine.has(p))) throw forbidden('This person has access you don’t have, so you can’t manage their account.');
 }
 
 function assertCanGrant(actor: CurrentUser, permissions: string[]) {
-  const mine = new Set(actor.permissions);
+  const mine = held(actor);
   const missing = permissions.filter((p) => !mine.has(p));
   if (missing.length) throw forbidden(`You can only give out permissions you have yourself (missing: ${missing.join(', ')}).`);
 }
@@ -311,6 +326,7 @@ export interface NewAccount {
   squareTeamMemberId?: string | null;
   /** An Admin adding someone can approve them in the same step; otherwise the account waits as pending. */
   approveNow?: boolean;
+  mobilePhone?: string | null;
 }
 
 export async function createAccount(actor: CurrentUser, a: NewAccount, confirm = false) {
@@ -326,9 +342,8 @@ export async function createAccount(actor: CurrentUser, a: NewAccount, confirm =
   }
   const email = a.email.trim().toLowerCase();
   if (await db().one('SELECT 1 FROM staff WHERE lower(email) = $1', [email])) throw badRequest('Someone already has an account with that email.');
-  if (a.squareTeamMemberId && (await db().one('SELECT 1 FROM staff WHERE square_team_member_id = $1', [a.squareTeamMemberId]))) {
-    throw badRequest('That Square team member is already linked to another account.');
-  }
+  if (a.squareTeamMemberId) await takeSquareLink(a.squareTeamMemberId, null);
+  if (a.mobilePhone && !toE164(a.mobilePhone)) throw badRequest("That mobile number doesn't look right.");
   const approved = !!a.approveNow;
   const row = await db().one<{ id: string }>(
     `INSERT INTO staff(name, email, role, color, square_team_member_id, approval_status, active, approval_requested_at, approved_at, approved_by_staff_id)
@@ -336,8 +351,26 @@ export async function createAccount(actor: CurrentUser, a: NewAccount, confirm =
     [a.name.trim(), email, role, a.color ?? null, a.squareTeamMemberId ?? null, approved ? 'approved' : 'pending', approved,
       approved ? new Date() : null, approved ? actor.id : null],
   );
+  if (a.mobilePhone) {
+    const mobile = toE164(a.mobilePhone);
+    if (mobile) await db().query('UPDATE staff SET mobile_phone = $2 WHERE id = $1', [row!.id, mobile]);
+  }
   if (!approved) await notifyApprovers(row!.id, a.name.trim(), `Added by ${actor.name}`, actor.id);
   return { id: row!.id, role, approved };
+}
+
+/**
+ * Frees a Square team member for linking to an account. The Square sync adds a staff record for any team member it
+ * couldn't match by email or name; the link moves off such a placeholder (no sign-in, so nobody loses access), but
+ * never off a real account.
+ */
+async function takeSquareLink(teamMemberId: string, forId: string | null) {
+  const holder = await db().one<any>(
+    `SELECT id, password_hash IS NOT NULL OR last_login_at IS NOT NULL AS signs_in FROM staff
+      WHERE square_team_member_id = $1 AND id IS DISTINCT FROM $2`, [teamMemberId, forId]);
+  if (!holder) return;
+  if (holder.signs_in) throw badRequest('That Square team member is already linked to another account.');
+  await db().query('UPDATE staff SET square_team_member_id = NULL, updated_at = now() WHERE id = $1', [holder.id]);
 }
 
 export interface AccountPatch {
@@ -346,6 +379,7 @@ export interface AccountPatch {
   color?: string;
   squareTeamMemberId?: string | null;
   highlevelUserId?: string | null;
+  mobilePhone?: string | null;
 }
 
 export async function updateAccount(actor: CurrentUser, id: string, p: AccountPatch) {
@@ -355,8 +389,14 @@ export async function updateAccount(actor: CurrentUser, id: string, p: AccountPa
     const e = p.email.trim().toLowerCase();
     if (await db().one('SELECT 1 FROM staff WHERE lower(email) = $1 AND id <> $2', [e, id])) throw badRequest('Someone already has an account with that email.');
   }
-  if (p.squareTeamMemberId && (await db().one('SELECT 1 FROM staff WHERE square_team_member_id = $1 AND id <> $2', [p.squareTeamMemberId, id]))) {
-    throw badRequest('That Square team member is already linked to another account.');
+  if (p.squareTeamMemberId) await takeSquareLink(p.squareTeamMemberId, id);
+  let mobile: string | null = null;
+  if (p.mobilePhone) {
+    mobile = toE164(p.mobilePhone);
+    if (!mobile) throw badRequest("That mobile number doesn't look right.");
+    await db().query('UPDATE staff SET mobile_phone = $2 WHERE id = $1', [id, mobile]);
+  } else if (p.mobilePhone === null || p.mobilePhone === '') {
+    await db().query('UPDATE staff SET mobile_phone = NULL WHERE id = $1', [id]);
   }
   await db().query(
     `UPDATE staff SET name = COALESCE($2, name), email = COALESCE($3, email), color = COALESCE($4, color),

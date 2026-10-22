@@ -6,6 +6,7 @@ import { RefreshCw, Wifi } from 'lucide-react';
 import { api } from '../../api/client';
 import { Button } from '../ui';
 import { BrandMark, useAppearance } from './Brand';
+import { Tc } from '../../lib/titleCase';
 
 /** Location & Access status for this connection. Re-checked when the server refuses a request for this reason. */
 export function useAccessStatus() {
@@ -39,7 +40,7 @@ export function NetworkBlocked({ status }: { status: AccessStatusDTO }) {
         <BrandMark a={a} size="login" />
         <div className="panel mt-8 p-6 text-left shadow-lift">
           <span className="flex h-11 w-11 items-center justify-center rounded-full bg-amber-tint text-amber"><Wifi className="h-5 w-5" /></span>
-          <h1 className="h-display mt-3 text-[26px] leading-tight">Connect to the salon or office network</h1>
+          <h1 className="h-display mt-3 text-[26px] leading-tight"><Tc>Connect to the salon or office network</Tc></h1>
           <p className="mt-2 text-[15px] text-ink-soft">
             On a computer, the CRM works on the salon’s or office’s internet connection. Connect this computer to one of those networks, then check again.
           </p>

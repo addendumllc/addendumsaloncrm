@@ -33,8 +33,8 @@ const shiftMonth = (k: string, n: number) => {
 };
 const fmt = (k: string, o: Intl.DateTimeFormatOptions) => labelOfKey(k, o);
 
-type Mode = 'week' | 'month' | 'future';
-type Future = '7' | '30' | '90' | 'custom';
+type Mode = 'week' | 'month' | 'future' | 'custom';
+type Future = '7' | '30' | '90';
 
 export function ProjectionsSection() {
   const today = dayKey(new Date());
@@ -42,12 +42,13 @@ export function ProjectionsSection() {
   const [week, setWeek] = useState(mondayOf(today));
   const [month, setMonth] = useState(monthStart(today));
   const [future, setFuture] = useState<Future>('30');
-  const [custom, setCustom] = useState({ from: today, to: addDaysKey(today, 59) });
+  // Custom dates can be in the past too (what was booked then), up to two years at a time.
+  const [custom, setCustom] = useState({ from: addDaysKey(today, -30), to: today });
 
   const range = useMemo(() => {
     if (mode === 'week') return { from: week, to: addDaysKey(week, 6), by: 'day' as const, label: `${fmt(week, { month: 'short', day: 'numeric' })} – ${fmt(addDaysKey(week, 6), { month: 'short', day: 'numeric', year: 'numeric' })}` };
     if (mode === 'month') return { from: month, to: monthEnd(month), by: 'week' as const, label: fmt(month, { month: 'long', year: 'numeric' }) };
-    const r = future === 'custom' ? custom : { from: today, to: addDaysKey(today, Number(future) - 1) };
+    const r = mode === 'custom' ? custom : { from: today, to: addDaysKey(today, Number(future) - 1) };
     const days = (Date.parse(`${r.to}T12:00:00Z`) - Date.parse(`${r.from}T12:00:00Z`)) / 86400_000 + 1;
     return { ...r, by: (days <= 14 ? 'day' : days <= 92 ? 'week' : 'month') as 'day' | 'week' | 'month', label: `${fmt(r.from, { month: 'short', day: 'numeric' })} – ${fmt(r.to, { month: 'short', day: 'numeric', year: 'numeric' })}` };
   }, [mode, week, month, future, custom, today]);
@@ -71,29 +72,29 @@ export function ProjectionsSection() {
         <span>Projections from booked salon appointments at their service prices — <b className="font-medium text-ink-soft">not collected sales</b>, and separate from hair product, retail and commission figures. Visible to administrators only.</span>
       </p>
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <Segmented value={mode} onChange={(v) => { setMode(v); setShowAppts(false); }} options={[{ value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'future', label: 'Future' }]} />
-        {mode !== 'future' ? (
+        <Segmented value={mode} onChange={(v) => { setMode(v); setShowAppts(false); }} options={[{ value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'future', label: 'Future' }, { value: 'custom', label: 'Custom dates' }]} />
+        {mode === 'custom' ? (
+          <span className="flex flex-wrap items-center gap-1.5 text-sm">
+            <input type="date" className="field h-9 w-auto" value={custom.from} max={custom.to} onChange={(e) => e.target.value && setCustom({ ...custom, from: e.target.value })} aria-label="From" />
+            <span className="text-stone">to</span>
+            <input type="date" className="field h-9 w-auto" value={custom.to} min={custom.from} onChange={(e) => e.target.value && setCustom({ ...custom, to: e.target.value })} aria-label="To" />
+          </span>
+        ) : mode !== 'future' ? (
           <div className="flex items-center gap-1">
             <Button size="sm" variant="ghost" icon={<ChevronLeft className="h-4 w-4" />} onClick={() => nav(-1)} aria-label={`Previous ${mode}`} />
-            <span className="min-w-[180px] text-center text-[14px] font-medium text-ink">{range.label}</span>
+            <span className="min-w-0 text-center text-[14px] font-medium text-ink sm:min-w-[180px]">{range.label}</span>
             <Button size="sm" variant="ghost" icon={<ChevronRight className="h-4 w-4" />} onClick={() => nav(1)} aria-label={`Next ${mode}`} />
             {!isCurrent && <Button size="sm" variant="ghost" onClick={() => (mode === 'week' ? setWeek(mondayOf(today)) : setMonth(monthStart(today)))}>This {mode}</Button>}
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-2">
-            <Segmented value={future} onChange={setFuture} options={[{ value: '7', label: 'Next 7 days' }, { value: '30', label: 'Next 30 days' }, { value: '90', label: 'Next 90 days' }, { value: 'custom', label: 'Custom' }]} />
-            {future === 'custom' && (
-              <span className="flex items-center gap-1.5 text-sm">
-                <input type="date" className="field h-9 w-auto" value={custom.from} min={today} onChange={(e) => setCustom({ ...custom, from: e.target.value })} aria-label="From" />
-                <span className="text-stone">to</span>
-                <input type="date" className="field h-9 w-auto" value={custom.to} min={custom.from} onChange={(e) => setCustom({ ...custom, to: e.target.value })} aria-label="To" />
-              </span>
-            )}
+            <Segmented className="max-w-full overflow-x-auto" value={future} onChange={setFuture} options={[{ value: '7', label: 'Next 7 days' }, { value: '30', label: 'Next 30 days' }, { value: '90', label: 'Next 90 days' }]} />
           </div>
         )}
       </div>
 
       {!valid && <p className="text-[13px] text-rose">The start date must be before the end date.</p>}
+      {valid && range.from < today && <p className="mb-3 flex items-start gap-1.5 text-[13px] text-stone"><Info className="mt-0.5 h-4 w-4 shrink-0" />Past dates show what was booked at service prices (cancellations and no-shows left out), not what was actually paid.</p>}
       {isLoading && <div className="flex justify-center py-8"><Spinner /></div>}
       {error && <ErrorNote error={error} onRetry={refetch} />}
       {data && (
@@ -144,10 +145,11 @@ function Breakdown({ p }: { p: Projection }) {
         <div className="h-56">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
-              <CartesianGrid vertical={false} stroke="#E7E4DF" />
-              <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#75716B' }} tickLine={false} axisLine={false} interval={0} />
-              <YAxis tick={{ fontSize: 11, fill: '#75716B' }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${Math.round(Number(v)).toLocaleString()}`} width={60} />
-              <Tooltip formatter={(v: number) => [`$${Math.round(v).toLocaleString()}`, 'Projected']} cursor={{ fill: '#F2F1EE' }} />
+              <CartesianGrid vertical={false} stroke="rgb(var(--line))" />
+              {/* Labels thin out on narrow screens instead of running into each other. */}
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: 'rgb(var(--stone))' }} tickLine={false} axisLine={false} interval="preserveStartEnd" minTickGap={12} />
+              <YAxis tick={{ fontSize: 11, fill: 'rgb(var(--stone))' }} tickLine={false} axisLine={false} tickFormatter={(v) => `$${Math.round(Number(v)).toLocaleString()}`} width={60} />
+              <Tooltip formatter={(v: number) => [`$${Math.round(v).toLocaleString()}`, 'Projected']} cursor={{ fill: 'rgb(var(--mist))' }} />
               <Bar dataKey="revenue" fill="#93527A" radius={[4, 4, 0, 0]} maxBarSize={36} />
             </BarChart>
           </ResponsiveContainer>

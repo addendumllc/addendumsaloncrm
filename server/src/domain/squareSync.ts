@@ -1,3 +1,4 @@
+import { updatePreferredStylists } from './preferredStylist.js';
 import { DEFAULT_ROLE } from '@addendum/shared';
 import { config } from '../config.js';
 import { db, type Queryable } from '../db/index.js';
@@ -63,6 +64,8 @@ async function doSync(opts: { full?: boolean }): Promise<SyncResult> {
       const change = await upsertBooking(b, { notify: !firstSync });
       tally(result, change);
     }
+    // Preferred stylists follow clients' visits (before the rules, so new follow-ups go to the right person).
+    await updatePreferredStylists().catch((e) => console.warn('[square-sync] preferred stylists:', (e as Error).message));
     result.message = firstSync
       ? `Imported ${bookings.length} Square appointments.`
       : `Checked ${bookings.length} appointments: ${result.created} new, ${result.cancelled} cancelled, ${result.rescheduled} rescheduled.`;
@@ -95,6 +98,8 @@ export async function syncSingleBooking(bookingId: string) {
   if (!booking) return null;
   await syncCustomers(svc, [booking]);
   const change = await upsertBooking(booking, { notify: true });
+  const appt = await db().one<{ client_id: string | null }>('SELECT client_id FROM appointments WHERE id = $1', [change.appointmentId]);
+  if (appt?.client_id) await updatePreferredStylists({ clientId: appt.client_id }).catch(() => undefined);
   await runRules();
   return change;
 }
@@ -112,9 +117,11 @@ async function syncReferenceData(svc: SquareService) {
   let i = existingCount;
   for (const m of team) {
     const name = `${m.given_name ?? ''} ${m.family_name ?? ''}`.trim() || 'Team member';
+    // Their phone from Square fills the CRM mobile only when that's blank — a number typed in the CRM is never replaced.
+    const phone = m.phone_number ? toE164(m.phone_number) : null;
     const linked = await db().one('SELECT id FROM staff WHERE square_team_member_id = $1', [m.id]);
     if (linked) {
-      await db().query('UPDATE staff SET name = $2, updated_at = now() WHERE id = $1', [linked.id, name]);
+      await db().query('UPDATE staff SET name = $2, mobile_phone = COALESCE(mobile_phone, $3), updated_at = now() WHERE id = $1', [linked.id, name, phone]);
       continue;
     }
     // Link to an existing staff record by email or exact name before creating a new one.
@@ -123,10 +130,10 @@ async function syncReferenceData(svc: SquareService) {
       [m.email_address ?? '', name],
     );
     if (match) {
-      await db().query('UPDATE staff SET square_team_member_id = $2, updated_at = now() WHERE id = $1', [match.id, m.id]);
+      await db().query('UPDATE staff SET square_team_member_id = $2, mobile_phone = COALESCE(mobile_phone, $3), updated_at = now() WHERE id = $1', [match.id, m.id, phone]);
     } else {
-      await db().query('INSERT INTO staff(name, email, role, square_team_member_id, color) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (email) DO NOTHING', [
-        name, m.email_address ?? null, DEFAULT_ROLE, m.id, STAFF_COLORS[i++ % STAFF_COLORS.length],
+      await db().query('INSERT INTO staff(name, email, role, square_team_member_id, color, mobile_phone) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (email) DO NOTHING', [
+        name, m.email_address ?? null, DEFAULT_ROLE, m.id, STAFF_COLORS[i++ % STAFF_COLORS.length], phone,
       ]);
     }
   }

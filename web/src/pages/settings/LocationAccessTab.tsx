@@ -119,6 +119,14 @@ export function LocationAccessSettings() {
             <Toggle checked={draft.restrictMobile} disabled={!can || draft.allowAnywhere} onChange={(v) => setDraft({ ...draft, restrictMobile: v })} label="Restrict phones and tablets too"
               description="Off by default. When on, phones and tablets also need the salon network. Use it if you want the strictest control: the phone-or-computer check relies on what the browser reports." />
           </div>
+          <div className="rounded-xl border border-line bg-mist/40 p-3 text-[13px] text-ink-soft">
+            <p className="font-medium text-ink">Exceptions for some people</p>
+            <p className="mt-1">While Allow Access Anywhere is off, you can still let chosen people or roles in from anywhere. In <b>Users &amp; Permissions</b> (one person) or <b>Role templates</b> (a whole role), under <b>Location and access</b>, turn on:</p>
+            <ul className="mt-1 list-disc pl-5">
+              <li><b>Use the app from anywhere</b>: the whole app, on any network.</li>
+              <li><b>Away from the salon: …</b> (Dashboard, Appointments, Follow-Ups &amp; Tasks, Clients, Messages, Order Hair, Earnings & Goals): away from the approved networks they see only the sections you turn on.</li>
+            </ul>
+          </div>
           <p className="flex items-start gap-2 text-[13px] text-stone"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />These rules decide where the CRM can be used, never what someone can do. Everyone still signs in with their own login (no Square account needed), and their role decides their access — being at the salon adds nothing.</p>
           {!can && <p className="text-[13px] text-stone">Only an Owner or Admin can change these settings.</p>}
         </div>

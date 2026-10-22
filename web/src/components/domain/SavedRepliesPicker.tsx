@@ -80,6 +80,7 @@ export function SavedRepliesPicker({ context, onPick, placement = 'down', size =
       <Button variant="secondary" size={size} className={size === 'md' ? 'h-11' : undefined} icon={<MessageSquareText className="h-4 w-4 text-plum" />} onClick={() => setOpen((o) => !o)} aria-expanded={open} title="Choose a saved reply">
         <span className={size === 'md' ? 'hidden sm:inline' : undefined}>Saved replies</span>
       </Button>
+      {open && placement !== 'inline' && <div className="fixed inset-0 z-[55] bg-ink/30 sm:hidden" onClick={() => setOpen(false)} aria-hidden="true" />}
       {open && (
         <div
           role="dialog" aria-label="Saved replies"
@@ -88,6 +89,8 @@ export function SavedRepliesPicker({ context, onPick, placement = 'down', size =
             placement === 'inline' ? 'mt-2 w-full shadow-sm' : 'absolute z-50 w-[min(380px,calc(100vw-2rem))] shadow-pop',
             placement === 'up' && 'bottom-full mb-2 right-0',
             placement === 'down' && 'top-full mt-1 left-0',
+            // Phones: a sheet along the bottom of the screen, so it never runs off the side.
+            placement !== 'inline' && 'max-sm:fixed max-sm:inset-x-2 max-sm:bottom-[calc(env(safe-area-inset-bottom)+0.5rem)] max-sm:top-auto max-sm:left-2 max-sm:right-2 max-sm:mt-0 max-sm:mb-0 max-sm:w-auto max-sm:z-[60]',
           )}
         >
           <div className="border-b border-line p-2">

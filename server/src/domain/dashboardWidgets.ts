@@ -12,7 +12,7 @@ import { projectionHighlights } from './projections.js';
  * its data — so a widget can't show anything the person couldn't open elsewhere. Commission figures come from the
  * same calculation as the commission pages (nothing is recalculated here).
  */
-export async function dashboardWidgets(user: CurrentUser) {
+export async function dashboardWidgets(user: CurrentUser, payUnlocked = false) {
   const w = (k: string) => can(user, `dashboard:${k}`);
   const tz = (await getSettings()).business.timezone;
   const today = localDate(new Date(), tz);
@@ -41,10 +41,11 @@ export async function dashboardWidgets(user: CurrentUser) {
   }
 
   const myCommission = w('my_commission') && can(user, 'commission:own')
-    ? { ...week, totalCents: summarize(await listEntries({ staffId: user.id, ...week }), week.from, week.to, user.id).totalCommissionCents }
+    // The amount only once they've confirmed their password (same as My Commission); otherwise it shows locked.
+    ? { ...week, totalCents: payUnlocked ? summarize(await listEntries({ staffId: user.id, ...week }), week.from, week.to, user.id).totalCommissionCents : null }
     : null;
   const teamCommission = w('team_commission') && can(user, 'commission:team')
-    ? { ...week, totalCents: summarize((await listEntries({ staffId: 'all', ...week })).filter((e) => e.staffId), week.from, week.to, null).totalCommissionCents }
+    ? { ...week, totalCents: payUnlocked ? summarize((await listEntries({ staffId: 'all', ...week })).filter((e) => e.staffId), week.from, week.to, null).totalCommissionCents : null }
     : null;
 
   // Projected service revenue: Admin/Owner by default; both the widget and the data permission are needed.
@@ -53,6 +54,7 @@ export async function dashboardWidgets(user: CurrentUser) {
   return {
     projections,
     schedule: w('schedule'),
+    priorities: w('priorities'),
     followups: w('followups'),
     clients: w('clients'),
     analytics: w('analytics') && can(user, 'analytics:read'),

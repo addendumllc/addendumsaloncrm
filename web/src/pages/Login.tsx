@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { applyAppearance } from '../lib/theme';
 import { BrandMark } from '../components/layout/Brand';
-import { DEFAULT_APPEARANCE, type Appearance } from '@addendum/shared';
+import { DEFAULT_APPEARANCE, DEFAULT_LOGIN, DEFAULT_WORKSPACES, type Appearance, type LoginSettings, type WorkspaceSettings } from '@addendum/shared';
 import { Button, Field, Segmented } from '../components/ui';
 
 export function LoginPage() {
@@ -21,7 +21,7 @@ export function LoginPage() {
   const [requesting, setRequesting] = useState<'off' | 'form' | 'sent'>('off');
   const qc = useQueryClient();
   const nav = useNavigate();
-  const { data: cfg } = useQuery({ queryKey: ['auth-config'], queryFn: () => api.get<{ demoMode: boolean; accent?: string; appearance?: Appearance; allowAccessRequests?: boolean }>('/auth/config').then((c) => { applyAppearance(c.appearance ?? { accent: c.accent }); return c; }), staleTime: Infinity });
+  const { data: cfg } = useQuery({ queryKey: ['auth-config'], queryFn: () => api.get<{ demoMode: boolean; accent?: string; appearance?: Appearance; allowAccessRequests?: boolean; login?: LoginSettings; businesses?: WorkspaceSettings['businesses'] }>('/auth/config').then((c) => { applyAppearance(c.appearance ?? { accent: c.accent }, null); return c; }), staleTime: Infinity });
   const embedded = typeof window !== 'undefined' && window.self !== window.top;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -44,12 +44,26 @@ export function LoginPage() {
       setBusy(false);
     }
   };
+  const login = { ...DEFAULT_LOGIN, ...(cfg?.login ?? {}) };
+  const biz = { ...DEFAULT_WORKSPACES.businesses, ...(cfg?.businesses ?? {}) };
+  const photo = login.imageVersion ? `/brand/login-image?v=${encodeURIComponent(login.imageVersion)}` : null;
   return (
-    <div className="flex min-h-[100dvh] items-center justify-center bg-paper px-5">
+    <div className="grid min-h-[100dvh] bg-paper lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+      {/* Umbrella brand panel: an editorial photo (Settings → Businesses) or a quiet typographic panel. Decorative only. */}
+      <aside className="relative flex min-h-[200px] flex-col justify-between overflow-hidden bg-[#14110E] px-6 py-6 text-[#F3EEE7] sm:px-10 lg:min-h-0 lg:py-10" aria-hidden>
+        {photo && <img src={photo} alt="" className="absolute inset-0 h-full w-full object-cover" />}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-black/30" />
+        <p className="relative text-[11px] font-medium uppercase tracking-[0.32em] text-[#F3EEE7]/80">{biz.salon.name} · {biz.hair.name}</p>
+        <div className="relative">
+          <p className="font-display text-[44px] uppercase leading-[0.95] tracking-[0.02em] sm:text-[64px] lg:text-[88px]" style={{ fontWeight: 300 }}>{login.headline || 'Addendum'}</p>
+          {login.message && <p className="mt-3 max-w-md text-[14px] text-[#F3EEE7]/80 sm:text-[15px]">{login.message}</p>}
+        </div>
+      </aside>
+      <div className="flex items-center justify-center px-5 py-10">
       <div className="w-full max-w-[380px]">
         <BrandMark a={{ ...DEFAULT_APPEARANCE, ...(cfg?.appearance ?? {}) }} size="login" />
-        <p className="mt-2 text-center text-[15px] text-stone">Sign in to the salon command center</p>
-        <form onSubmit={submit} className="panel mt-8 space-y-4 p-6 shadow-lift">
+        <p className="mt-2 text-center text-[15px] text-stone">Sign in to your workspace</p>
+        <form onSubmit={submit} className="mt-8 space-y-4 border border-line bg-white p-6">
           <Segmented className="w-full" value={mode} onChange={(v) => { setMode(v); setError(null); }} options={[{ value: 'password', label: 'Password' }, { value: 'code', label: 'Sign-in code' }]} />
           <Field label="Email"><input className="field" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></Field>
           {mode === 'password' ? (
@@ -93,6 +107,7 @@ export function LoginPage() {
         {requesting !== 'off' && <RequestAccess sent={requesting === 'sent'} onSent={() => setRequesting('sent')} onCancel={() => setRequesting('off')} />}
         {cfg?.demoMode && <p className="mt-4 text-center text-xs text-stone">Demo Mode · owner@addendumsalon.com · addendum-demo</p>}
         {embedded && !cookiesBlocked && <p className="mt-2 text-center text-xs text-stone"><a href={window.location.href} target="_blank" rel="noopener" className="underline">Open in a new tab</a></p>}
+      </div>
       </div>
     </div>
   );

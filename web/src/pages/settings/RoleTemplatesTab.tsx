@@ -8,6 +8,7 @@ import { useCanDo, useMe } from '../../api/hooks';
 import { Avatar, Badge, Button, EmptyState, Field, Modal, Spinner, cx, useToast } from '../../components/ui';
 import { Card } from './shared';
 import { StatusBadge, useUsersData } from './UsersTab';
+import { Tc } from '../../lib/titleCase';
 
 /**
  * Settings → Role templates: its own screen (separate from Users & Permissions), laid out for phones first —
@@ -180,7 +181,7 @@ function TemplateEditor({ t, people, onBack }: { t: RoleTemplateDTO; people: Sta
         ) : (
           <>
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="h-display text-[26px] leading-tight">{t.label}</h2>
+              <h2 className="h-display text-[26px] leading-tight"><Tc>{t.label}</Tc></h2>
               <Badge tone={t.builtin ? 'neutral' : 'plum'}>{t.builtin ? 'Built-in' : 'Custom'}</Badge>
             </div>
             {t.description && <p className="mt-1 text-[14px] text-stone">{t.description}</p>}
@@ -200,7 +201,7 @@ function TemplateEditor({ t, people, onBack }: { t: RoleTemplateDTO; people: Sta
 
       <div className="panel p-4 sm:p-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-[15px] font-medium text-ink">Permissions</h3>
+          <h3 className="text-[15px] font-medium text-ink"><Tc>Permissions</Tc></h3>
           <div className="flex gap-2">
             <Button size="sm" variant="ghost" onClick={() => setOpenCats(new Set(openCats.size ? [] : PERMISSION_CATEGORIES))}>{openCats.size ? 'Collapse all' : 'Expand all'}</Button>
             {canEdit && t.builtin && <Button size="sm" variant="ghost" onClick={() => setDraft(new Set(t.defaults))}>Built-in defaults</Button>}
@@ -259,7 +260,7 @@ function TemplateEditor({ t, people, onBack }: { t: RoleTemplateDTO; people: Sta
       </div>
 
       {canEdit && dirty && (
-        <div className="sticky bottom-[calc(68px+env(safe-area-inset-bottom))] z-20 flex items-center gap-2 rounded-xl2 border border-line bg-white/95 p-3 shadow-pop backdrop-blur lg:bottom-4">
+        <div className="sticky bottom-[calc(68px+env(safe-area-inset-bottom))] z-20 flex items-center gap-2 rounded-xl2 border border-line bg-white p-3 shadow-pop backdrop-blur lg:bottom-4">
           <span className="flex-1 text-[13px] text-amber">{added.length} adding · {removed.length} removing</span>
           <Button variant="ghost" onClick={() => setDraft(new Set(t.permissions))}>Discard</Button>
           <Button variant="primary" loading={busy === 'save'} onClick={() => save()}>Save</Button>
@@ -306,7 +307,7 @@ function Members({ t, members, people, canEdit, selfId, onChanged }: { t: RoleTe
   };
   return (
     <div className="panel p-4 sm:p-5">
-      <h3 className="mb-2 text-[15px] font-medium text-ink">People using it</h3>
+      <h3 className="mb-2 text-[15px] font-medium text-ink"><Tc>People using it</Tc></h3>
       {members.length === 0 ? <EmptyState title="Nobody yet">Assign it below, or choose it when approving a new login.</EmptyState> : (
         <ul className="-mx-1 divide-y divide-line">
           {members.map((m) => (
@@ -321,7 +322,7 @@ function Members({ t, members, people, canEdit, selfId, onChanged }: { t: RoleTe
       )}
       {canEdit && others.length > 0 && (
         <div className="mt-3 border-t border-line pt-3">
-          <span className="label">Assign to someone</span>
+          <span className="label">Assign to Someone</span>
           <div className="flex flex-col gap-2 sm:flex-row">
             <select className="field h-11" value={pick} onChange={(e) => { setPick(e.target.value); setConfirm(false); }}>
               <option value="">Choose a person…</option>

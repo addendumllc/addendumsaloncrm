@@ -32,6 +32,7 @@ async function usage(p: CredentialProvider): Promise<string[]> {
     if (s.commission.enabled) out.push('Commission is calculated from Square sales (needs ORDERS_READ and PAYMENTS_READ).');
   }
   if (p === 'shopify' && s.inventorySync.enabled) out.push('Inventory sync with Square is turned on.');
+  if (p === 'shopify2') out.push('Its stock is kept in step with Square and the main Shopify store, and its sales are in Analytics.');
   if (p === 'email') {
     const n = await db().one<{ n: number }>("SELECT count(*)::int n FROM inventory_requests WHERE status IN ('submitted','ordered')");
     out.push(`Order Hair emails are sent with it${n?.n ? ` (${n.n} open order${n.n === 1 ? '' : 's'})` : ''}.`);

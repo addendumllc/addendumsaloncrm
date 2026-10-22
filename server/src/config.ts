@@ -65,11 +65,16 @@ const schema = z.object({
   // ---- HighLevel ----
   HIGHLEVEL_PRIVATE_TOKEN: z.string().optional(),
   HIGHLEVEL_LOCATION_ID: z.string().optional(),
+  // Addendum Hair's own HighLevel sub-account (optional; otherwise its clients come from the main one, by tag).
+  HIGHLEVEL_HAIR_PRIVATE_TOKEN: z.string().optional(),
+  HIGHLEVEL_HAIR_LOCATION_ID: z.string().optional(),
   HIGHLEVEL_API_BASE: z.string().default('https://services.leadconnectorhq.com'),
   HIGHLEVEL_API_VERSION: z.string().default('2021-07-28'),
 
   // ---- Shopify (optional: remove ordered hair from Shopify inventory) ----
   /** The store's myshopify.com domain, e.g. addendumhair.myshopify.com */
+  SQUARE_NAME: z.string().optional(),
+  SHOPIFY_NAME: z.string().optional(),
   SHOPIFY_STORE_DOMAIN: z.string().optional(),
   /** Either a legacy custom-app Admin API token (shpat_…)… */
   SHOPIFY_ADMIN_TOKEN: z.string().optional(),
@@ -79,6 +84,13 @@ const schema = z.object({
   /** Location to deduct from. Optional when the store has a single active location. */
   SHOPIFY_LOCATION_ID: z.string().optional(),
   SHOPIFY_API_VERSION: z.string().default('2026-07'),
+  // ---- A second Shopify store that shares the same stock and SKUs (e.g. a pro store with its own prices) ----
+  SHOPIFY2_NAME: z.string().optional(),
+  SHOPIFY2_STORE_DOMAIN: z.string().optional(),
+  SHOPIFY2_ADMIN_TOKEN: z.string().optional(),
+  SHOPIFY2_CLIENT_ID: z.string().optional(),
+  SHOPIFY2_CLIENT_SECRET: z.string().optional(),
+  SHOPIFY2_LOCATION_ID: z.string().optional(),
   /** Square location whose stock is kept in step with Shopify. Optional when Square has a single location. */
   SQUARE_INVENTORY_LOCATION_ID: z.string().optional(),
 

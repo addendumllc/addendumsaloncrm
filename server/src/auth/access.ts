@@ -1,6 +1,6 @@
 import net from 'node:net';
 import type { NextFunction, Request, Response } from 'express';
-import { approvedNetworks, type AccessStatusDTO, type CurrentUser } from '@addendum/shared';
+import { AWAY_SECTIONS, approvedNetworks, type AccessStatusDTO, type AwaySection, type CurrentUser } from '@addendum/shared';
 import { config } from '../config.js';
 import { getSettings } from '../repos/settings.js';
 import { can } from './permissions.js';
@@ -40,10 +40,15 @@ export async function accessStatus(req: Request): Promise<AccessStatusDTO> {
   const overridden = config().ACCESS_ALLOW_ANYWHERE;
   const here = networks.find((n) => normalizeIp(n.ip) === ip) ?? null;
   const onSalonNetwork = !!here;
-  const restricted = !overridden && !s.allowAnywhere && configured && !onSalonNetwork && (!mobile || s.restrictMobile);
+  const away = !overridden && !s.allowAnywhere && configured && !onSalonNetwork && (!mobile || s.restrictMobile);
+  // Per-person exceptions (permissions): the whole app anywhere, or chosen sections while away.
+  const personalAnywhere = !!req.user && can(req.user, 'location:anywhere');
+  const sections = away && !personalAnywhere && req.user ? awaySections(req.user) : [];
+  const limited = sections.length ? sections : null;
+  const restricted = away && !personalAnywhere && !limited;
   const canManage = canManageAccess(req.user);
   return {
-    ip, mobile, onSalonNetwork, networkName: here?.name ?? null, allowAnywhere: s.allowAnywhere, configured, overridden, restricted, canManage,
+    ip, mobile, onSalonNetwork, networkName: here?.name ?? null, allowAnywhere: s.allowAnywhere, configured, overridden, restricted, limited, personalAnywhere, canManage,
     ...(canManage ? { networks, restrictMobile: s.restrictMobile } : {}),
   };
 }
@@ -55,11 +60,63 @@ const OPEN: { method: string; path: RegExp }[] = [
   { method: 'GET', path: /^\/settings$/ },
 ];
 
+/** The away sections this person has, and can open at all with their other permissions. */
+function awaySections(user: CurrentUser): AwaySection[] {
+  return AWAY_SECTIONS.filter((s) => can(user, s.permission) && s.needsAnyOf.some((p) => can(user, p))).map((s) => s.key);
+}
+
+type Rule = { method: string; path: RegExp };
+/** Any method on these API areas (and anything under them). Each route still checks the person's permissions. */
+const under = (method: string, ...areas: string[]): Rule => ({ method, path: new RegExp(`^/(${areas.join('|')})(/.*)?$`) });
+
+// Away from the salon: what each section needs. The app shell (notifications, team list…) works with any of them.
+const AWAY_COMMON: Rule[] = [
+  under('GET', 'me', 'notifications', 'updates', 'integrations', 'staff', 'services', 'look'),
+  { method: 'PUT', path: /^\/look$/ },
+  under('*', 'sidebar'),
+  under('*', 'my-profile'),
+  { method: 'POST', path: /^\/notifications\/read-all$/ },
+];
+const AWAY_API: Record<AwaySection, Rule[]> = {
+  dashboard: [
+    under('GET', 'dashboard', 'appointments', 'tasks', 'announcements', 'projections'),
+    { method: 'POST', path: /^\/announcements\/([^/]+\/read|read-all)$/ },
+    { method: 'POST', path: /^\/tasks\/[^/]+\/(complete|snooze|reopen|cancel|not-needed)$/ },
+    { method: 'PATCH', path: /^\/tasks\/[^/]+$/ },
+    { method: 'PUT', path: /^\/dashboard\/layout$/ },
+  ],
+  calendar: [under('*', 'appointments'), under('GET', 'rebooking'), { method: 'POST', path: /^\/integrations\/square\/sync$/ }],
+  // Internal tasks and announcements only — client follow-ups stay at the salon (the tasks routes filter them out).
+  // Addendum Hair's tasks are internal too.
+  tasks: [under('*', 'tasks', 'announcements', 'hair')],
+  clients: [under('*', 'clients', 'notes', 'leads', 'rebooking'), under('GET', 'tags', 'appointments', 'search', 'analytics/new-clients')],
+  messages: [under('*', 'messages'), under('GET', 'clients', 'leads', 'tags')],
+  orders: [under('*', 'inventory')],
+  commission: [under('GET', 'commission/me', 'commission/status', 'commission/entries')],
+};
+// "Clock in from anywhere": the time clock itself works away from the approved networks, even where the rest of the
+// app doesn't (the app shell's own reads come with it). Everyone else can only clock in or out on an approved network.
+const CLOCK: Rule[] = [{ method: 'GET', path: /^\/timeclock\/me$/ }, { method: 'POST', path: /^\/timeclock\/(in|out|break|break\/end)$/ }];
+const clockAnywhere = (req: Request) => !!req.user && can(req.user, 'timeclock:use') && can(req.user, 'timeclock:anywhere')
+  && [...AWAY_COMMON, ...CLOCK].some((o) => (o.method === '*' || o.method === req.method) && o.path.test(req.path));
+
+const allowedAway = (req: Request, sections: AwaySection[]) =>
+  [...AWAY_COMMON, ...sections.flatMap((s) => AWAY_API[s])].some((o) => (o.method === '*' || o.method === req.method) && o.path.test(req.path));
+
 /** Runs on every API request after the session is read. Signed-out requests are handled by the normal sign-in rules. */
 export async function networkGate(req: Request, res: Response, next: NextFunction) {
   try {
     if (!req.user || OPEN.some((o) => (o.method === '*' || o.method === req.method) && o.path.test(req.path))) return next();
-    if (!(await accessStatus(req)).restricted) return next();
+    const st = await accessStatus(req);
+    if (st.limited) {
+      // Routes use this, e.g. away from the salon tasks are internal tasks only (no client follow-ups).
+      req.away = true;
+      if (allowedAway(req, st.limited) || clockAnywhere(req)) return next();
+      const names = AWAY_SECTIONS.filter((s) => st.limited!.includes(s.key)).map((s) => s.label).join(', ');
+      res.status(403).json({ error: { code: 'network_restricted', message: `Away from the salon you can only use: ${names}. Connect to an approved network (the salon or office) for the rest of the CRM.` } });
+      return;
+    }
+    if (!st.restricted || clockAnywhere(req)) return next();
     res.status(403).json({ error: { code: 'network_restricted', message: 'The CRM on a computer only works on an approved network (the salon or office). Connect to one, or ask an Admin to turn on “Allow Access Anywhere”.' } });
   } catch (e) {
     next(e);

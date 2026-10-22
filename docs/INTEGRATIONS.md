@@ -60,7 +60,7 @@ server environment after testing.
 ## 4. Permissions each service needs
 
 - **Square:** `APPOINTMENTS_READ APPOINTMENTS_ALL_READ CUSTOMERS_READ EMPLOYEES_READ ITEMS_READ MERCHANT_PROFILE_READ
-  INVENTORY_READ INVENTORY_WRITE ORDERS_READ PAYMENTS_READ`. Webhooks: `booking.created`, `booking.updated`,
+  INVENTORY_READ INVENTORY_WRITE ITEMS_WRITE ORDERS_READ PAYMENTS_READ`. Webhooks: `booking.created`, `booking.updated`,
   `inventory.count.updated` to `https://<your address>/api/webhooks/square` (the same URL in the app's Square settings).
 - **Shopify** (Dev Dashboard app, client credentials; or an older store app's `shpat_` token):
   `read_products read_inventory write_inventory read_locations`. Test connection lists what's granted and warns about

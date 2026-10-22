@@ -236,8 +236,10 @@ source of truth; internal follow-ups are stored separately and never shown as ap
 The app asks for these read-only permissions:
 
 `APPOINTMENTS_READ`, `APPOINTMENTS_ALL_READ` (all stylists' bookings, not just one), `INVENTORY_READ` (retail stock),
-`INVENTORY_WRITE` (Shopify → Square stock updates by the inventory sync), `CUSTOMERS_READ`, `EMPLOYEES_READ`, `ITEMS_READ`,
-`MERCHANT_PROFILE_READ`, `ORDERS_READ` and `PAYMENTS_READ` (sales, refunds and tips for commission).
+`INVENTORY_WRITE` (Shopify → Square stock updates by the inventory sync), `ITEMS_WRITE` (optional: “Use Shopify SKU in Square” and editing SKUs on Inventory Sync), `CUSTOMERS_READ`, `EMPLOYEES_READ`, `ITEMS_READ`,
+`MERCHANT_PROFILE_READ`, `ORDERS_READ` and `PAYMENTS_READ` (sales, refunds and tips for commission), `TIMECARDS_READ`
+(optional: hours from Square timecards for hourly wages) and `TIMECARDS_WRITE` (optional: Owners/Admins send hours
+entered in the CRM to Square as timecards from Team Commission → Payroll hours).
 If you connected before these were added, press **Connect Square** again once to approve them. An access token from
 the Developer Console has all of them.
 
@@ -399,7 +401,7 @@ records include your email provider (your provider's setup guide covers this), s
 
 ### Square inventory (search) and the admin Shopify push
 
-**Order Hair → Square inventory** lists retail products from Square, the source of truth for stock.
+**Inventory Sync → Square inventory** lists retail products from Square, the source of truth for stock.
 You can search by product name, size/colour, SKU or barcode, and filter to in-stock items.
 It refreshes with every Square sync (every 15 minutes), or straight away with **Refresh from Square**.
 (Order Hair itself orders from Shopify inventory — see above.)
@@ -430,6 +432,8 @@ SHOPIFY_CLIENT_SECRET=…
 **Inventory Sync** in the menu (administrators) keeps product stock the same in Square and Shopify, both ways.
 Only products and quantities — never customers, appointments, services or bookings.
 
+- **All linked → search by name or SKU → Edit** changes a paired product's SKU and/or stock count in both Square and
+  Shopify at once (the count becomes the agreed baseline, so the next sync has nothing to do).
 - Products are paired by **SKU** (or linked by hand with *Link by SKU*). Nothing is ever created in either system;
   products found in only one are listed under *Not matched*. Duplicate SKUs are skipped so nothing is overwritten.
 - **How conflicts are handled** (shown on the page): after the first pairing, changes made on either side since the
@@ -441,7 +445,7 @@ Only products and quantities — never customers, appointments, services or book
   runs at a time.
 - **Sync Inventory** runs it now with live progress; turn on **Sync automatically** for a schedule (plus a sync shortly
   after Square reports a stock change). Failed items show the reason and **Retry failed**.
-- Needs Square `INVENTORY_READ` + `INVENTORY_WRITE` and Shopify `read_products, read_inventory, write_inventory,
+- Needs Square `INVENTORY_READ` + `INVENTORY_WRITE` (+ `ITEMS_WRITE` for “Use Shopify SKU in Square” and for editing a SKU) and Shopify `read_products, read_inventory, write_inventory,
   read_locations`. If either isn't connected, the page says exactly what's missing. If Square has more than one
   location, set *Inventory location ID* on the Square card.
 
@@ -464,11 +468,14 @@ Square doesn't calculate commission through its API, so the CRM calculates it fr
 plan you set in **Settings → Commission**:
 
 1. Make sure Square has `ORDERS_READ` and `PAYMENTS_READ` (reconnect once if needed), and that each stylist's account
-   is linked to their Square team member (Users & Permissions).
+   is linked to their Square team member: Users & Permissions → Edit details → *Square team member* lists Square's
+   team by name. Linking matches by email or name automatically on sync; when it doesn't, the sync adds a placeholder
+   record (no sign-in) — choosing that team member for the real account moves the link over.
 2. Turn commission on, choose the rules (before/after discounts, refunds, packages, split services, retail and tips),
    and add **rates**: everyone or one stylist; services or retail; all items or a specific service/product;
-   percentage, flat per item, or tiered by monthly/weekly sales; with a start date. To change a rate, add a new one
-   from its start date — the old one ends and stays in the history.
+   percentage, flat per item, or tiered by monthly/weekly sales; with a start date. **Edit** changes a rate in place;
+   a rate already used for finalized commission is changed from a date instead (the old one ends and stays in the
+   history). The *Note shown on My Commission* (an "estimates only" disclaimer by default) is edited here too.
 3. **Team Commission → Sync from Square** (or let it sync automatically).
 
 - Who did the work comes from the matching Square booking (same customer, same day, same service); retail and tips
@@ -476,6 +483,25 @@ plan you set in **Settings → Commission**:
 - Each stylist sees **My Commission** for any date range: services and retail separately, tips separately, refunds and
   adjustments, estimated vs finalized, total sales, and every transaction with *How this was worked out*.
   Stylists only ever see their own; team reports need *View team commission*.
+- **Wages & tips** (Users & Permissions → a person): hourly rate or salary (per week, 2 weeks, half-month, month or
+  year), and *Tip eligible*. Tips on a non-eligible person's work go to **Needs review** to be credited by hand. Hours
+  come from closed Square timecards on each sync (needs `TIMECARDS_READ`; unpaid breaks are taken off) plus hours
+  entered by hand. Team Commission shows hours, wages (hourly = hours × rate; salary prorated by days in the range)
+  and total pay; **Pay summary (CSV)** has one row per person with service and retail commission apart, tips, hours
+  and wages.
+- **Pay schedule** (Settings → Commission): every week, 2 weeks, twice a month or monthly, from one known period (default
+  every 2 weeks from Sep 26 – Oct 9, 2026, paid 7 days later on Oct 16). My Commission and Team Commission open on the
+  current pay period, with *This / Last pay period* buttons. Both show **Commission** (hours worked and estimated wages),
+  **Taxes** (estimated withholding and net pay) and **Year** (one line per pay period paid that year) tabs.
+- **Wage history**: changing a wage asks when it starts; hours before that date stay at the earlier wage, and each
+  wage pays the hours worked while it applied. Past wages can be corrected or removed under *Wage history*.
+- **Team Commission → Payroll hours**: a weekly timesheet (Mon–Sun) per person. Type hours not clocked in Square into
+  each day (saved when you leave the box); Square timecard hours show beside them and both count.
+- **Taxes (estimates only)**: per person in Wages & tips — W-2 or 1099, federal/state/local withholding %, and W-4
+  details (filing status, multiple jobs, dependents, other income, deductions, extra withholding). Salon rates (Social
+  Security, Medicare, FUTA, SUTA) are in Settings → Commission. A stylist's Team Commission page and the Pay summary CSV
+  show estimated withholding, net pay and employer taxes (no wage-base caps). No SSNs or bank details are stored — the
+  payroll provider does the real withholding.
 - **Pay periods → Finalize** locks a date range. Finalized amounts never change; later refunds are counted on the day
   they happen. **Export for payroll (CSV)** includes the rate and calculation of every record.
 

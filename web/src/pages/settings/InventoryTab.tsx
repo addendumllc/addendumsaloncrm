@@ -70,7 +70,7 @@ export function InventorySettings() {
         {locked && <p className="mt-3 text-[13px] text-stone">Only administrators (with “Edit business settings”) can change where requests are sent.</p>}
       </Card>
 
-      <Card title="Shopify inventory" description="Square is the source of truth for stock. Administrators can push Square's counts to Shopify by hand from Order Hair → Square inventory; products are matched by SKU. Nothing is sent to Shopify automatically, and hair orders never change Shopify.">
+      <Card title="Shopify inventory" description="Square is the source of truth for stock. Administrators can push Square's counts to Shopify by hand from Inventory Sync → Square inventory; products are matched by SKU. Nothing is sent to Shopify automatically, and hair orders never change Shopify.">
         <StatusLine state={integ.shopify.connected ? 'ok' : 'off'}>
           {integ.shopify.mode === 'demo' ? 'Demo Mode — a simulated Shopify store' : integ.shopify.connected ? `Shopify connected ✓${integ.shopify.store ? ` · ${integ.shopify.store}` : ''}` : 'Shopify not connected — the push to Shopify is unavailable until it is'}
         </StatusLine>

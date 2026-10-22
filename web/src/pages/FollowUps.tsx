@@ -1,5 +1,10 @@
 import { useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { SectionPicker } from '../components/layout/subNav';
+import { useStoreNames } from '../lib/storeNames';
+import { pageBusiness, useWorkspace } from '../lib/workspace';
+import { HairTasks } from './HairCrm';
+import { dayKey } from '../lib/format';
 import { CheckCircle2, Plus } from 'lucide-react';
 import { TASK_TYPE_LABELS, type Priority, type TaskDTO } from '@addendum/shared';
 import { useMe, useStaff, useTasks } from '../api/hooks';
@@ -7,6 +12,7 @@ import { Button, EmptyState, ErrorNote, PageHeader, PageLoading, Segmented, cx }
 import { TaskCard, PRIORITY_DOT } from '../components/domain/TaskCard';
 import { useActions } from '../components/domain/ActionsProvider';
 import { RebookingScheduleList } from '../components/domain/Rebooking';
+import { Tc } from '../lib/titleCase';
 
 const GROUPS: { p: Priority; label: string }[] = [
   { p: 'high', label: 'High priority' },
@@ -25,6 +31,8 @@ export function FollowUpsPage() {
   const { data: me } = useMe();
   const { data: staff } = useStaff();
   const { newFollowUp } = useActions();
+  const names = useStoreNames();
+  const ws = useWorkspace();
   const canSeeAll = me?.permissions.includes('*') || me?.permissions.includes('tasks:read_all');
   const { data: tasks, isLoading, error, refetch } = useTasks({
     kind: 'follow_up', type: type || undefined, staffId: staffId || undefined,
@@ -45,23 +53,39 @@ export function FollowUpsPage() {
   }, [tasks, focus]);
   const typesPresent = [...new Set((tasks ?? []).map((t) => t.type))];
 
+  // Addendum Salon or Addendum Hair: the page's own choice (?for=), else the workspace. Hair follow-ups are its client
+  // tasks waiting on a reply (only with Addendum Hair access); everything else here is the salon's.
+  const seesHair = !!me?.permissions.includes('hair:manage');
+  const business = seesHair ? pageBusiness(params, 'for', ws.current?.id ?? 'salon') : 'salon';
+  const picker = seesHair && (
+    <Segmented className="mb-4" value={business} onChange={(b) => { const p = new URLSearchParams(params); p.set('for', b); setParams(p, { replace: true }); }}
+      options={[{ value: 'salon', label: ws.names.salon.name }, { value: 'hair', label: ws.names.hair.name }]} />
+  );
+  if (business === 'hair') {
+    const since = (() => { const d = new Date(); d.setMonth(d.getMonth() - 6); return dayKey(d); })();
+    return (
+      <div>
+        {picker}
+        <SectionPicker path="/follow-ups" names={names} can={(p) => !!me?.permissions.includes(p)} className="mb-4" />
+        {due === 'done'
+          ? <HairTasks status="done" since={since} title={`Completed follow-ups · ${ws.names.hair.name}`} />
+          : <HairTasks status="waiting" title={`Follow-ups · ${ws.names.hair.name}`} />}
+      </div>
+    );
+  }
+
   return (
     <div>
+      {picker}
       <PageHeader
-        title="Today's Follow-Ups"
+        title={view === 'schedule' ? 'Rebooking schedule' : due === 'overdue' ? 'Overdue follow-ups' : due === 'upcoming' ? 'Upcoming follow-ups' : due === 'done' ? 'Completed follow-ups' : 'Today’s follow-ups'}
         subtitle={tasks ? `${tasks.length} ${due === 'done' ? 'completed' : 'to do'}${type ? ` · ${TASK_TYPE_LABELS[type as keyof typeof TASK_TYPE_LABELS]}` : ''}` : undefined}
         actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => newFollowUp()}>Follow-up</Button>}
       />
-      {(me?.permissions.includes('clients:read') || me?.permissions.includes('clients:read_assigned')) && (
-        <Segmented className="mb-4" value={view} onChange={(v) => set('view', v === 'queue' ? '' : v)} options={[
-          { value: 'queue', label: 'Follow-ups' }, { value: 'schedule', label: 'Rebooking schedule' },
-        ]} />
-      )}
+      {/* Due today / Overdue / Upcoming / Completed / Rebooking schedule are in the side menu; on phones, a dropdown. */}
+      <SectionPicker path="/follow-ups" names={names} can={(p) => !!me?.permissions.includes(p)} className="mb-4" />
       {view === 'schedule' ? <RebookingScheduleList /> : <>
       <div className="mb-5 flex flex-wrap items-center gap-3">
-        <Segmented value={due} onChange={(v) => set('due', v === 'today' ? '' : v)} options={[
-          { value: 'today', label: 'Due today' }, { value: 'overdue', label: 'Overdue' }, { value: 'upcoming', label: 'Upcoming' }, { value: 'done', label: 'Completed' },
-        ]} />
         <select className="field h-9 w-auto py-1 text-sm" value={type} onChange={(e) => set('type', e.target.value)} aria-label="Type">
           <option value="">All types</option>
           {Object.entries(TASK_TYPE_LABELS).filter(([k]) => k !== 'internal').map(([k, v]) => <option key={k} value={k}>{v}{typesPresent.includes(k as any) ? '' : ''}</option>)}
@@ -91,10 +115,10 @@ export function FollowUpsPage() {
           if (!group.length) return null;
           return (
             <section key={p} className="mb-8">
-              <h2 className="mb-3 flex items-center gap-2 text-[15px] font-medium text-ink">
+              <h2 className="mb-3 flex items-center gap-2 text-[15px] font-medium text-ink"><Tc>
                 <span className={cx('h-2.5 w-2.5 rounded-full', PRIORITY_DOT[p])} />{label}
                 <span className="num text-stone">{group.length}</span>
-              </h2>
+              </Tc></h2>
               <div className="space-y-3">{group.map((t) => <div key={t.id} className={cx(t.id === focus && 'rounded-xl2 ring-2 ring-plum/40')}><TaskCard task={t} /></div>)}</div>
             </section>
           );

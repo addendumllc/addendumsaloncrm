@@ -18,9 +18,27 @@
     --paper: 250 250 248; --mist: 242 241 238; --line: 231 228 223; --line-strong: 214 210 203; --sidebar: 244 244 241;
     --font-display: "Cormorant Garamond", Georgia, serif;
     --font-body: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    /* Surfaces, text and status colours (custom text colour and dark mode change these). */
+    --surface: 255 255 255; --ink: 29 28 26; --ink-soft: 58 56 53; --stone: 117 113 107; --stone-light: 162 158 151; --heading: 29 28 26;
+    --sage: 85 117 99; --sage-tint: 234 241 236; --rose: 168 84 78; --rose-tint: 247 233 231; --amber: 168 122 47; --amber-tint: 246 238 221;
+    color-scheme: light;
   }
-  html { -webkit-text-size-adjust: 100%; }
-  body { @apply bg-paper text-ink font-sans antialiased; font-size: 15px; line-height: 1.5; }
+  /* The sidebar's own text tones, worked out for its colour (Settings → Appearance), so the menu is always readable. */
+  .bg-sidebar { --ink: var(--side-ink, 29 28 26); --ink-soft: var(--side-ink-soft, 58 56 53); --stone: var(--side-stone, 117 113 107); --stone-light: var(--side-stone-light, 162 158 151); --line: var(--side-line, 231 228 223); }
+  /* The highlighted (card-coloured) item and anything opening from the menu keep the page's text tones. */
+  /* Cards, panels, fields and dialogs: their own text tones, worked out for the card colour (a dark page can have light
+     cards, and the other way round). Also the highlighted menu item. */
+  :is(.bg-white, .panel, [role="dialog"], .field) { --ink: var(--card-ink, 29 28 26); --ink-soft: var(--card-ink-soft, 58 56 53); --stone: var(--card-stone, 117 113 107); --stone-light: var(--card-stone-light, 162 158 151); --heading: var(--card-ink, 29 28 26); --mist: var(--card-mist, 242 241 238); }
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  /* Long words, names and emails wrap instead of widening the page; the page itself never scrolls sideways. */
+  body { @apply bg-paper text-ink font-sans antialiased; font-size: 15px; line-height: var(--body-leading, 1.5); font-weight: var(--body-weight, 400); overflow-wrap: break-word; overflow-x: clip; }
+  /* iPhone zooms the page into any text box under 16px (and leaves it zoomed and shifted), so on phones every
+     input stays at 16px whatever size a screen asks for. */
+  @media (max-width: 639px) {
+    input, select, textarea { font-size: 16px !important; }
+  }
+  /* Text size (this device): page content and dialogs scale together. */
+  .app-content { zoom: calc(var(--content-zoom, 1) * var(--area-scale, 1)); }
   :focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; border-radius: 6px; }
   button { -webkit-tap-highlight-color: transparent; }
   @media (prefers-reduced-motion: reduce) {
@@ -32,7 +50,7 @@
   .field { @apply w-full rounded-lg border border-line-strong bg-white px-3 py-2 text-base sm:text-[15px] text-ink placeholder:text-stone-light transition-colors focus:border-plum focus:outline-none focus:ring-2 focus:ring-plum/15; }
   .label { @apply mb-1 block text-[13px] font-medium text-ink-soft; }
   .panel { @apply rounded-xl2 border border-line bg-white; }
-  .h-display { @apply font-display font-medium tracking-[-0.01em] text-ink; }
+  .h-display { @apply font-display font-medium tracking-[-0.01em]; color: rgb(var(--heading)); }
   .num { font-variant-numeric: tabular-nums; }
 }
 
@@ -43,3 +61,53 @@
 .animate-rise { animation: rise 0.45s cubic-bezier(.2,.7,.2,1) both; }
 @keyframes slide-in { from { transform: translateX(16px); opacity: 0; } to { transform: none; opacity: 1; } }
 .animate-slide-in { animation: slide-in 0.22s ease-out both; }
+
+/*
+ * Phones: wide tables (analytics, the payroll timesheet) scroll sideways. A soft shadow at the edge that still has
+ * columns shows there's more, so nothing looks cut off; it fades once you've scrolled to that end.
+ */
+@media (max-width: 639px) {
+  .overflow-x-auto:has(> table) {
+    background-image:
+      linear-gradient(to right, rgb(var(--surface)), rgb(var(--surface))),
+      linear-gradient(to right, rgb(var(--surface)), rgb(var(--surface))),
+      linear-gradient(to right, rgb(0 0 0 / 0.16), rgb(0 0 0 / 0)),
+      linear-gradient(to left, rgb(0 0 0 / 0.16), rgb(0 0 0 / 0));
+    background-position: left center, right center, left center, right center;
+    background-repeat: no-repeat;
+    background-size: 24px 100%, 24px 100%, 14px 100%, 14px 100%;
+    background-attachment: local, local, scroll, scroll;
+  }
+}
+
+/* Accent colour (each person's own, Settings → Appearance & Display). It fills buttons, toggles and the active menu
+   marker as chosen; text on it is black or white, whichever reads; accent-coloured text uses a readable shade. */
+.bg-sidebar nav a.bg-white { box-shadow: inset 3px 0 0 rgb(var(--accent2, var(--accent))); }
+:root :is(.bg-plum, .bg-plum-dark).text-white, :root :is(.bg-plum, .bg-plum-dark) .text-white { color: rgb(var(--on-accent, 255 255 255)); }
+:root .text-plum, :root .hover\:text-plum:hover { color: rgb(var(--accent-ink, var(--accent))); }
+
+/* Button size (the theme's, or each person's): one size for every button. Standard is the built-in sizes. */
+[data-buttons="compact"] .btn-md { height: 2.25rem; padding-left: 0.75rem; padding-right: 0.75rem; font-size: 13px; }
+[data-buttons="compact"] .btn-sm { height: 1.75rem; padding-left: 0.5rem; padding-right: 0.5rem; font-size: 12px; }
+[data-buttons="large"] .btn-md { height: 3rem; padding-left: 1.25rem; padding-right: 1.25rem; font-size: 16px; }
+[data-buttons="large"] .btn-sm { height: 2.5rem; padding-left: 0.875rem; padding-right: 0.875rem; font-size: 14px; }
+/* Small text and labels (the theme's "small text" size). */
+:is(.label, .text-xs, .text-\[11px\], .text-\[12px\], .text-\[13px\]) { zoom: var(--size-small, 1); }
+
+/* Text links use the links font (Settings → Appearance → Fonts); card-like links keep the text's own font. */
+:is(a.text-plum, a.underline, a[class*="hover:underline"]) { font-family: var(--font-link, var(--font-body)); }
+
+/* Square corners (Settings → Appearance): badges and pill buttons go square too; avatars, dots and toggles stay round. */
+[data-corners="square"] .badge { border-radius: 2px; }
+
+/* Looks by area (Settings → Appearance): headings in capitals, highlight badges in the area's colours (e.g. addendumhair.com's lime). */
+[data-heading-case="uppercase"] :is(.h-display, .font-display) { text-transform: uppercase; }
+/* Type details per business look (Settings → Look): heading weight and letter spacing. */
+:is(.h-display, .font-display) { font-weight: var(--heading-weight, 500); letter-spacing: var(--heading-tracking, -0.01em); }
+[data-badges="custom"] .badge-plum { background-color: rgb(var(--badge-bg)); color: rgb(var(--badge-text)); }
+[data-badge-case="uppercase"] .badge { text-transform: uppercase; letter-spacing: 0.04em; font-size: 11px; }
+
+/* A size for each kind of text (Settings → Appearance → Looks): headings, buttons and tabs, and the menu. */
+:is(.h-display, .font-display) { zoom: var(--size-heading, 1); }
+:is(.btn-sm, .btn-md, [role="tablist"]) { zoom: var(--size-button, 1); }
+.font-nav { zoom: var(--size-nav, 1); }

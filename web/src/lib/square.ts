@@ -4,10 +4,11 @@
  * directly, so the calendar is the closest reliable page. The CRM itself never creates bookings — Square stays the
  * source of truth and the new appointment syncs back automatically.
  */
-export function squareCalendarUrl(environment?: string) {
-  return environment === 'sandbox'
-    ? 'https://app.squareupsandbox.com/dashboard/appointments/calendar'
-    : 'https://app.squareup.com/dashboard/appointments/calendar';
+export const SQUARE_CALENDAR_URL = 'https://app.squareup.com/dashboard/appointments/calendar';
+
+/** Always the salon's real Square Appointments calendar. */
+export function squareCalendarUrl(_environment?: string) {
+  return SQUARE_CALENDAR_URL;
 }
 
 /** Opens Square in a new tab and copies the client's name so it can be pasted into Square's client search. */

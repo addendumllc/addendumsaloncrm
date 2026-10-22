@@ -8,6 +8,7 @@ import { Button, cx, useToast } from '../components/ui';
 import { StatusLine } from './settings/shared';
 import { HighLevelSettings, SmsSettings, SquareSettings } from './settings/IntegrationTabs';
 import { BusinessSettings, RulesSettings } from './settings/RulesTabs';
+import { Tc } from '../lib/titleCase';
 
 const STEPS = [
   { title: 'Your salon', blurb: 'The basics used in texts and review requests.' },
@@ -57,7 +58,7 @@ export function OnboardingPage() {
           ))}
         </ol>
         <p className="mt-6 text-[13px] font-medium text-stone">Step {step + 1} of {STEPS.length}{optional ? ' · optional' : ''}</p>
-        <h1 className="h-display mt-1 text-[38px] leading-tight sm:text-[46px]">{STEPS[step].title}</h1>
+        <h1 className="h-display mt-1 text-[38px] leading-tight sm:text-[46px]"><Tc>{STEPS[step].title}</Tc></h1>
         <p className="mt-1 text-[15px] text-stone">{STEPS[step].blurb}</p>
 
         {step === 0 && integ?.demoMode && (
@@ -85,7 +86,7 @@ export function OnboardingPage() {
         </div>
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 border-t border-line bg-white/95 backdrop-blur">
+      <div className="fixed inset-x-0 bottom-0 border-t border-line bg-white backdrop-blur">
         <div className="mx-auto flex max-w-2xl items-center justify-between gap-2 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6">
           <Button variant="ghost" icon={<ArrowLeft className="h-4 w-4" />} onClick={() => setStep((s) => s - 1)} disabled={step === 0}>Back</Button>
           {last ? (

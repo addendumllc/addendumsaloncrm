@@ -107,6 +107,20 @@ describe('Dashboard widgets follow permissions (on the server)', () => {
     expect((await desk.get('/api/analytics')).status).toBe(403);
   });
 
+  it('“Today’s Priorities” can be turned off for one person: the heading and its three counts go, the rest stays', async () => {
+    const desk = await as('frontdesk@addendumsalon.com');
+    const before = (await desk.get('/api/dashboard')).body;
+    expect(before.widgets.priorities).toBe(true);
+    expect(before.summary.followUpsDue).not.toBeNull();
+    await admin.put(`/api/admin/users/${deskId}/access`, { overrides: { 'dashboard:priorities': false } });
+    const after = (await desk.get('/api/dashboard')).body;
+    expect(after.widgets.priorities).toBe(false);
+    expect([after.summary.followUpsDue, after.summary.overdueFollowUps, after.summary.readyToRebook]).toEqual([null, null, null]);
+    expect(after.summary.appointmentsToday).not.toBeNull();
+    expect(after.widgets.followups).toBe(true);
+    await admin.put(`/api/admin/users/${deskId}/access`, { overrides: { 'dashboard:priorities': null } });
+  });
+
   it('built-in role templates get the new permissions by default', async () => {
     const roles = (await admin.get('/api/admin/roles')).body.roles;
     const of = (r: string) => roles.find((x: any) => x.role === r).permissions;
@@ -115,5 +129,56 @@ describe('Dashboard widgets follow permissions (on the server)', () => {
     expect(of('receptionist')).not.toContain('dashboard:team_commission');
     expect(of('stylist')).toContain('announcements:read');
     expect(of('stylist')).not.toContain('announcements:publish');
+  });
+});
+
+describe('My Tasks on the dashboard', () => {
+  it('internal tasks report who added them, so personal and assigned tasks can be shown first', async () => {
+    const me = (await admin.get('/api/auth/me')).body.user;
+    const due = new Date(Date.now() + 3600_000).toISOString();
+    const own = await admin.post('/api/tasks', { kind: 'task', type: 'internal', title: 'Order more foils', dueAt: due, assignedStaffId: null });
+    const sent = await admin.post('/api/tasks', { kind: 'task', type: 'internal', title: 'Restock the front desk', dueAt: due, assignedStaffId: deskId });
+    expect([own.status, sent.status]).toEqual([201, 201]);
+    const list = (await admin.get('/api/tasks?status=open&kind=task')).body.tasks as any[];
+    expect(list.find((t) => t.id === own.body.id)).toMatchObject({ createdById: me.id, assignedStaffId: null });
+    const desk = await as('frontdesk@addendumsalon.com');
+    const theirs = (await desk.get('/api/tasks?status=open&kind=task')).body.tasks as any[];
+    expect(theirs.find((t) => t.id === sent.body.id)).toMatchObject({ assignedStaffId: deskId, createdById: me.id });
+  });
+});
+
+describe('Deleting tasks and messages', () => {
+  it('only with the delete permission; deleted automatic follow-ups are not created again; finished ones can be cleared', async () => {
+    const due = new Date(Date.now() + 3600_000).toISOString();
+    const t = (await admin.post('/api/tasks', { kind: 'task', type: 'internal', title: 'Test task', dueAt: due })).body.id;
+    const desk = await as('frontdesk@addendumsalon.com');
+    expect((await desk.del(`/api/tasks/${t}`)).status).toBe(403);
+    expect((await admin.del(`/api/tasks/${t}`)).status).toBe(200);
+    expect(await db().one('SELECT 1 FROM tasks WHERE id = $1', [t])).toBeNull();
+
+    // An automatic follow-up (with a rule key) stays deleted.
+    const { createTask } = await import('../src/domain/tasks.js');
+    const auto = await createTask({ type: 'follow_up', title: 'Auto', dueAt: new Date(), dedupeKey: 'test:auto:1' } as any);
+    await admin.del(`/api/tasks/${auto}`);
+    expect(await createTask({ type: 'follow_up', title: 'Auto', dueAt: new Date(), dedupeKey: 'test:auto:1' } as any)).toBeNull();
+
+    // Clear finished: completed ones go, open ones stay.
+    const open = (await admin.post('/api/tasks', { kind: 'task', type: 'internal', title: 'Still open', dueAt: due })).body.id;
+    const done = (await admin.post('/api/tasks', { kind: 'task', type: 'internal', title: 'Done', dueAt: due })).body.id;
+    await admin.post(`/api/tasks/${done}/complete`, {});
+    const r = await admin.del('/api/tasks/finished?kind=task');
+    expect(r.body.removed).toBeGreaterThanOrEqual(1);
+    expect(await db().one('SELECT 1 FROM tasks WHERE id = $1', [done])).toBeNull();
+    expect(await db().one('SELECT 1 FROM tasks WHERE id = $1', [open])).not.toBeNull();
+
+    // Messages: one message, then the whole conversation.
+    const conv = await db().one<any>("INSERT INTO conversations(phone) VALUES ('+15550001234') RETURNING id");
+    const m1 = await db().one<any>("INSERT INTO messages(conversation_id, direction, body, status) VALUES ($1,'inbound','hello','received') RETURNING id", [conv.id]);
+    await db().query("INSERT INTO messages(conversation_id, direction, body, status) VALUES ($1,'inbound','second','received')", [conv.id]);
+    expect((await desk.del(`/api/messages/${m1.id}`)).status).toBe(403);
+    expect((await admin.del(`/api/messages/${m1.id}`)).status).toBe(200);
+    expect((await db().one<any>('SELECT count(*)::int n FROM messages WHERE conversation_id = $1', [conv.id])).n).toBe(1);
+    expect((await admin.del(`/api/messages/conversations/${conv.id}`)).status).toBe(200);
+    expect(await db().one('SELECT 1 FROM conversations WHERE id = $1', [conv.id])).toBeNull();
   });
 });

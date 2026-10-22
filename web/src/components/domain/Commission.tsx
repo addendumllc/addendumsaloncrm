@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { CommissionEntryDTO, CommissionSummaryDTO } from '@addendum/shared';
+import { payPeriodFor, type CommissionEntryDTO, type CommissionStatusDTO, type CommissionSummaryDTO, type PaySchedule } from '@addendum/shared';
 import { ChevronDown, ChevronRight, Info, Receipt } from 'lucide-react';
 import { api } from '../../api/client';
 import { addDaysKey, dayKey, labelOfKey, weekdayOfKey } from '../../lib/format';
@@ -11,16 +11,18 @@ import { Badge, EmptyState, Spinner, cx } from '../ui';
 export const usd = (cents: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(cents / 100);
 
-export type Preset = 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'custom';
+export type Preset = 'this_pay_period' | 'last_pay_period' | 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'custom';
 export const PRESETS: { value: Preset; label: string }[] = [
+  { value: 'this_pay_period', label: 'This pay period' }, { value: 'last_pay_period', label: 'Last pay period' },
   { value: 'today', label: 'Today' }, { value: 'yesterday', label: 'Yesterday' }, { value: 'this_week', label: 'This week' },
   { value: 'last_week', label: 'Last week' }, { value: 'this_month', label: 'This month' }, { value: 'last_month', label: 'Last month' },
   { value: 'custom', label: 'Custom' },
 ];
 
-/** Date ranges in the salon's time zone. Weeks run Monday–Sunday. */
-export function presetRange(p: Preset, custom: { from: string; to: string }): { from: string; to: string } {
+/** Date ranges in the salon's time zone. Weeks run Monday–Sunday; pay periods follow the salon's pay schedule. */
+export function presetRange(p: Preset, custom: { from: string; to: string }, schedule?: PaySchedule): { from: string; to: string; payDate?: string } {
   const today = dayKey(new Date());
+  if ((p === 'this_pay_period' || p === 'last_pay_period') && schedule) return payPeriodFor(today, schedule, p === 'last_pay_period' ? -1 : 0);
   const monday = addDaysKey(today, -((weekdayOfKey(today) + 6) % 7));
   const firstOfMonth = `${today.slice(0, 7)}-01`;
   switch (p) {
@@ -30,24 +32,29 @@ export function presetRange(p: Preset, custom: { from: string; to: string }): { 
     case 'last_week': return { from: addDaysKey(monday, -7), to: addDaysKey(monday, -1) };
     case 'this_month': { const next = addDaysKey(`${today.slice(0, 7)}-28`, 4); return { from: firstOfMonth, to: addDaysKey(`${next.slice(0, 7)}-01`, -1) }; }
     case 'last_month': { const end = addDaysKey(firstOfMonth, -1); return { from: `${end.slice(0, 7)}-01`, to: end }; }
+    case 'this_pay_period': case 'last_pay_period': return { from: monday, to: addDaysKey(monday, 6) }; // until the schedule loads
     default: return custom;
   }
 }
 
-export function useDateRange(initial: Preset = 'this_week') {
+export function useDateRange(initial: Preset = 'this_pay_period', opts: { payPeriods?: boolean } = {}) {
+  const payPeriods = opts.payPeriods ?? true;
   const [preset, setPreset] = useState<Preset>(initial);
   const [custom, setCustom] = useState(() => presetRange('this_month', { from: '', to: '' }));
-  const range = useMemo(() => presetRange(preset, custom), [preset, custom]);
-  return { preset, setPreset, custom, setCustom, range };
+  // Same query as the pages' status (cached): it carries the salon's pay schedule.
+  const { data: status } = useQuery({ queryKey: ['commission-status'], queryFn: () => api.get<{ status: CommissionStatusDTO }>('/commission/status').then((r) => r.status) });
+  const schedule = status?.paySchedule;
+  const range = useMemo(() => presetRange(preset, custom, schedule), [preset, custom, schedule]);
+  return { preset, setPreset, custom, setCustom, range, payPeriods };
 }
 
-export function DateRangeBar({ preset, setPreset, custom, setCustom, range }: ReturnType<typeof useDateRange>) {
+export function DateRangeBar({ preset, setPreset, custom, setCustom, range, payPeriods }: ReturnType<typeof useDateRange>) {
   const fmt = (k: string) => labelOfKey(k, { month: 'short', day: 'numeric', year: 'numeric' });
   return (
     <div className="mb-5">
       <div className="scrollbar-none -mx-4 flex gap-1.5 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:px-0">
-        {PRESETS.map((p) => (
-          <button key={p.value} onClick={() => setPreset(p.value)} className={cx('shrink-0 rounded-full px-3 py-1.5 text-[13px] font-medium', preset === p.value ? 'bg-ink text-white' : 'bg-mist text-ink-soft hover:bg-line')}>{p.label}</button>
+        {PRESETS.filter((p) => payPeriods || !p.value.endsWith('pay_period')).map((p) => (
+          <button key={p.value} onClick={() => setPreset(p.value)} className={cx('shrink-0 rounded-full px-3 py-1.5 text-[13px] font-medium', preset === p.value ? 'bg-plum text-white' : 'bg-mist text-ink-soft hover:bg-line')}>{p.label}</button>
         ))}
       </div>
       {preset === 'custom' ? (
@@ -57,13 +64,14 @@ export function DateRangeBar({ preset, setPreset, custom, setCustom, range }: Re
           <input type="date" className="field h-9 w-auto" value={custom.to} min={custom.from} onChange={(e) => setCustom({ ...custom, to: e.target.value })} aria-label="To" />
         </div>
       ) : (
-        <p className="mt-2 text-[13px] text-stone">{range.from === range.to ? fmt(range.from) : `${fmt(range.from)} – ${fmt(range.to)}`}</p>
+        <p className="mt-2 text-[13px] text-stone">{range.from === range.to ? fmt(range.from) : `${fmt(range.from)} – ${fmt(range.to)}`}{range.payDate ? ` · paid ${fmt(range.payDate)}` : ''}</p>
       )}
     </div>
   );
 }
 
-export function SummaryCards({ s }: { s: CommissionSummaryDTO }) {
+/** `personal` (My Commission) leaves out the refunds and adjustments tiles. */
+export function SummaryCards({ s, personal }: { s: CommissionSummaryDTO; personal?: boolean }) {
   const Stat = ({ label, value, sub, strong, tone }: { label: string; value: string; sub?: string; strong?: boolean; tone?: 'rose' }) => (
     <div className={cx('rounded-xl2 border border-line bg-white px-4 py-3', strong && 'border-ink/20 bg-mist/40')}>
       <p className="text-[12px] font-medium uppercase tracking-wide text-stone">{label}</p>
@@ -74,11 +82,12 @@ export function SummaryCards({ s }: { s: CommissionSummaryDTO }) {
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       <div className="col-span-2"><Stat strong label="Total commission" value={usd(s.totalCommissionCents)} sub={`${usd(s.finalizedCents)} finalized · ${usd(s.estimatedCents)} estimated`} /></div>
-      <Stat label="Services" value={usd(s.serviceCommissionCents)} sub={`on ${usd(s.serviceSalesCents)} sales`} />
-      <Stat label="Retail" value={usd(s.retailCommissionCents)} sub={`on ${usd(s.retailSalesCents)} sales`} />
+      {/* Services and retail items are paid on different plans: each is shown after its own refunds. */}
+      <Stat label="Services commission" value={usd(s.serviceCommissionCents + s.serviceRefundsCents)} sub={`on ${usd(s.serviceSalesCents)} service sales${s.serviceRefundsCents ? ` · after ${usd(-s.serviceRefundsCents)} refunded` : ''}`} />
+      <Stat label="Retail items commission" value={usd(s.retailCommissionCents + s.retailRefundsCents)} sub={`on ${usd(s.retailSalesCents)} retail sales${s.retailRefundsCents ? ` · after ${usd(-s.retailRefundsCents)} refunded` : ''}`} />
       <Stat label="Tips (separate)" value={usd(s.tipsCents)} sub="Not part of commission" />
-      <Stat label="Refunds" value={usd(s.refundsCents)} sub="Commission taken back" tone={s.refundsCents < 0 ? 'rose' : undefined} />
-      <Stat label="Adjustments" value={usd(s.adjustmentsCents)} />
+      {!personal && <Stat label="Refunds" value={usd(s.refundsCents)} sub="Taken back (already in the amounts above)" tone={s.refundsCents < 0 ? 'rose' : undefined} />}
+      {!personal && <Stat label="Adjustments" value={usd(s.adjustmentsCents)} />}
       <Stat label="Total sales" value={usd(s.totalSalesCents)} sub="After discounts and refunds" />
     </div>
   );
@@ -138,7 +147,7 @@ function EntryRow({ e, showStaff }: { e: CommissionEntryDTO; showStaff?: boolean
         <span className="col-span-2 flex flex-wrap justify-end gap-1 sm:col-span-1">
           {e.kind !== 'sale' && <Badge tone={e.kind === 'refund' ? 'rose' : 'neutral'}>{KIND_LABEL[e.kind]}</Badge>}
           <Badge tone={e.status === 'finalized' ? 'sage' : 'amber'}>{e.status === 'finalized' ? 'Finalized' : 'Estimated'}</Badge>
-          {e.needsReview && <Badge tone="rose">Review</Badge>}
+          {e.onHold ? <Badge tone="amber">On hold</Badge> : e.needsReview && <Badge tone="rose">Review</Badge>}
         </span>
       </button>
       {open && <EntryDetail e={e} />}

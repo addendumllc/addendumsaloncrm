@@ -1,6 +1,6 @@
 import { IntegrationError } from '../../lib/errors.js';
 import { getKV, setKV } from '../../repos/settings.js';
-import type { HighLevelService, HLContactInput, HLTaskInput } from './HighLevelService.js';
+import type { HighLevelService, HLContact, HLContactInput, HLTaskInput } from './HighLevelService.js';
 
 /**
  * DEMO MODE: a simulated HighLevel sub-account (contacts, tasks, users) stored in the database.
@@ -8,7 +8,7 @@ import type { HighLevelService, HLContactInput, HLTaskInput } from './HighLevelS
  */
 export interface DemoHLState {
   outage: boolean;
-  contacts: { id: string; name: string; phone: string | null; email: string | null }[];
+  contacts: { id: string; name: string; phone: string | null; email: string | null; company?: string | null; tags?: string[] }[];
   tasks: { id: string; contactId: string; title: string; body: string; dueDate: string; assignedTo: string | null; completed: boolean }[];
   users: { id: string; name: string; email: string }[];
 }
@@ -19,6 +19,13 @@ export async function loadDemoHL(): Promise<DemoHLState> {
   return (await getKV<DemoHLState>(KEY)) ?? { outage: false, contacts: [], tasks: [], users: [] };
 }
 export const saveDemoHL = (s: DemoHLState) => setKV(KEY, s);
+
+const DEMO_HAIR_CONTACTS: HLContact[] = [
+  { id: 'hlc_hair_bella', name: 'Bella Moreno', email: 'bella@bellasalon.test', phone: '+14155550111', company: 'Bella Salon', tags: ['Addendum Hair', 'wholesale'] },
+  { id: 'hlc_hair_jade', name: 'Jade Kim', email: 'jade@jadehairstudio.test', phone: '+14155550122', company: 'Jade Hair Studio', tags: ['addendum hair'] },
+  { id: 'hlc_hair_rosa', name: 'Rosa Diaz', email: 'rosa.extensions@example.test', phone: null, company: null, tags: ['Addendum Hair', 'extensions'] },
+  { id: 'hlc_salon_only', name: 'Sam Patel', email: 'sam@example.test', phone: '+14155550133', company: null, tags: ['salon client'] },
+];
 
 const rid = (p: string) => `${p}${Math.random().toString(36).slice(2, 12)}`;
 
@@ -69,6 +76,17 @@ export class MockHighLevelService implements HighLevelService {
   }
   async listUsers() {
     return (await this.state()).users.map((u) => ({ ...u }));
+  }
+  /** The demo account's contacts plus a few Addendum Hair buyers (tagged "Addendum Hair"), two per page. */
+  async listContacts(after?: { startAfterId: string; startAfter: number } | null) {
+    const s = await this.state();
+    const all: HLContact[] = [
+      ...DEMO_HAIR_CONTACTS,
+      ...s.contacts.map((c) => ({ id: c.id, name: c.name, email: c.email, phone: c.phone, company: c.company ?? null, tags: c.tags ?? [] })),
+    ];
+    const start = after ? after.startAfter : 0;
+    const page = all.slice(start, start + 2);
+    return { contacts: page, next: start + 2 < all.length ? { startAfterId: page[page.length - 1].id, startAfter: start + 2 } : null };
   }
   async testConnection() {
     await this.state();

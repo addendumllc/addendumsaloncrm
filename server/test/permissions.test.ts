@@ -193,7 +193,8 @@ describe('No self-promotion, no going around the rules', () => {
   it('there is always someone left who can manage permissions', async () => {
     // Simulates an all-powerful actor trying to remove the last account that can manage permissions.
     const admins = await db().query<any>(`SELECT s.id FROM staff s WHERE s.active AND s.password_hash IS NOT NULL AND (s.role = 'admin'
-      OR EXISTS (SELECT 1 FROM staff_permission_overrides o WHERE o.staff_id = s.id AND o.permission = 'users:permissions' AND o.granted))`);
+      OR EXISTS (SELECT 1 FROM staff_permission_overrides o WHERE o.staff_id = s.id AND o.permission = 'users:permissions' AND o.granted))
+      ORDER BY s.email = 'owner@addendumsalon.com' DESC, s.id`); // the owner (this file's admin) stays first, whatever the row order
     const fake = { id: deskId, name: 'x', email: 'x', role: 'admin' as const, permissions: ROLE_DEFAULT_PERMISSIONS.admin };
     for (const a of admins.slice(1).filter((x: any) => x.id !== deskId)) await changeAccess(fake, a.id, { overrides: { 'users:permissions': false } });
     const last = admins.find((x: any) => x.id !== deskId);

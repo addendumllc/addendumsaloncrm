@@ -2,36 +2,39 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { createPortal } from 'react-dom';
 import { Check, Loader2, X, AlertCircle } from 'lucide-react';
 import { initials } from '../../lib/format';
+import { Tc, tc, titleCase } from '../../lib/titleCase';
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
 
 // ---------- Button ----------
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'quiet';
 const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-ink text-white hover:bg-ink-soft disabled:bg-stone-light',
-  secondary: 'bg-white text-ink border border-line-strong hover:border-ink/40 hover:bg-mist/60',
-  ghost: 'text-ink-soft hover:bg-mist',
+  // The person's accent (their own User Color, or the salon's): every button follows it.
+  primary: 'bg-plum text-white hover:bg-plum-dark disabled:bg-stone-light',
+  secondary: 'bg-white text-plum border border-plum/30 hover:border-plum/60 hover:bg-plum-tint',
+  ghost: 'text-plum hover:bg-plum-tint',
   quiet: 'text-plum hover:bg-plum-tint',
   danger: 'bg-rose text-white hover:bg-rose/90',
 };
 export function Button({
   variant = 'secondary', size = 'md', loading, icon, children, className, ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: 'sm' | 'md'; loading?: boolean; icon?: ReactNode }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: 'sm' | 'md' | 'icon'; loading?: boolean; icon?: ReactNode }) {
   return (
     <button
       type="button"
       {...rest}
       disabled={rest.disabled || loading}
       className={cx(
-        'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
-        // Taller on phones so they're easy to tap; compact on larger screens.
-        size === 'sm' ? 'h-9 px-3 text-[13px] sm:h-8 sm:px-2.5' : 'h-11 px-4 text-[15px] sm:h-10 sm:px-3.5 sm:text-sm',
+        'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-[var(--radius-button,0px)] font-button font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+        // Taller on phones so they're easy to tap; compact on larger screens. "Button size" (Display) adjusts btn-sm/btn-md.
+        // One sizing system everywhere (both businesses): the theme changes colours, fonts and corners, never these.
+        size === 'sm' ? 'btn-sm h-9 px-3 text-[13px] sm:h-8 sm:px-2.5' : size === 'icon' ? 'btn-md h-11 w-11 sm:h-10 sm:w-10' : 'btn-md h-11 px-4 text-[15px] sm:h-10 sm:px-3.5 sm:text-sm',
         VARIANTS[variant],
         className,
       )}
     >
       {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : icon}
-      {children}
+      {tc(children)}
     </button>
   );
 }
@@ -47,7 +50,7 @@ const TONES: Record<Tone, string> = {
   ink: 'bg-ink text-white',
 };
 export function Badge({ tone = 'neutral', children, className }: { tone?: Tone; children: ReactNode; className?: string }) {
-  return <span className={cx('inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium', TONES[tone], className)}>{children}</span>;
+  return <span className={cx(`badge badge-${tone} inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium`, TONES[tone], className)}>{children}</span>;
 }
 
 export function Spinner({ className }: { className?: string }) {
@@ -76,7 +79,7 @@ export function EmptyState({ icon, title, children, action }: { icon?: ReactNode
   return (
     <div className="flex flex-col items-center px-6 py-14 text-center">
       {icon && <div className="mb-3 text-stone-light">{icon}</div>}
-      <p className="h-display text-2xl">{title}</p>
+      <p className="h-display text-2xl"><Tc>{title}</Tc></p>
       {children && <p className="mt-1 max-w-sm text-sm text-stone">{children}</p>}
       {action && <div className="mt-4">{action}</div>}
     </div>
@@ -100,7 +103,7 @@ export function Avatar({ name, color, size = 'md' }: { name: string; color?: str
 export function Field({ label, hint, children, className }: { label: string; hint?: ReactNode; children: ReactNode; className?: string }) {
   return (
     <label className={cx('block', className)}>
-      <span className="label">{label}</span>
+      <span className="label">{titleCase(label)}</span>
       {children}
       {hint && <span className="mt-1 block text-xs text-stone">{hint}</span>}
     </label>
@@ -111,7 +114,7 @@ export function Toggle({ checked, onChange, label, description, disabled }: { ch
   return (
     <div className="flex items-start justify-between gap-4 py-3">
       <div>
-        <p className="text-sm font-medium text-ink">{label}</p>
+        <p className="text-sm font-medium text-ink">{titleCase(label)}</p>
         {description && <p className="mt-0.5 text-[13px] text-stone">{description}</p>}
       </div>
       <button
@@ -131,16 +134,16 @@ export function Toggle({ checked, onChange, label, description, disabled }: { ch
 
 export function Segmented<T extends string>({ value, onChange, options, className }: { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode }[]; className?: string }) {
   return (
-    <div className={cx('inline-flex rounded-lg bg-mist p-0.5', className)} role="tablist">
+    <div className={cx('inline-flex rounded-lg bg-mist p-0.5 font-button', className)} role="tablist">
       {options.map((o) => (
         <button
           key={o.value}
           role="tab"
           aria-selected={value === o.value}
           onClick={() => onChange(o.value)}
-          className={cx('rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors', value === o.value ? 'bg-white text-ink shadow-sm' : 'text-stone hover:text-ink')}
+          className={cx('whitespace-nowrap rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors', value === o.value ? 'bg-white text-plum shadow-sm' : 'text-stone hover:text-plum')}
         >
-          {o.label}
+          {tc(o.label)}
         </button>
       ))}
     </div>
@@ -165,7 +168,7 @@ export function Modal({ open, onClose, title, children, footer, wide, side }: {
   }, [open, onClose]);
   if (!open) return null;
   return createPortal(
-    <div className={cx('fixed inset-0 z-50 flex bg-ink/30 backdrop-blur-[2px]', side ? 'justify-end' : 'items-end justify-center sm:items-center sm:p-6')} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className={cx('fixed inset-0 z-50 flex bg-black/35 backdrop-blur-[2px]', side ? 'justify-end' : 'items-end justify-center sm:items-center sm:p-6')} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div
         ref={ref}
         role="dialog"
@@ -176,12 +179,12 @@ export function Modal({ open, onClose, title, children, footer, wide, side }: {
         )}
       >
         <div className="flex items-center justify-between gap-4 border-b border-line px-5 py-4">
-          <h2 className="h-display text-[22px] leading-tight">{title}</h2>
+          <h2 className="h-display text-[22px] leading-tight"><Tc>{title}</Tc></h2>
           <button onClick={onClose} className="rounded-lg p-1.5 text-stone hover:bg-mist hover:text-ink" aria-label="Close">
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        <div className="app-content flex-1 overflow-y-auto px-5 py-4">{children}</div>
         {footer && <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">{footer}</div>}
       </div>
     </div>,
@@ -207,8 +210,10 @@ export function Menu({ trigger, items, align = 'right' }: { trigger: (open: () =
   return (
     <div className="relative" ref={ref}>
       {trigger(() => setOpen((o) => !o))}
+      {open && <div className="fixed inset-0 z-[55] bg-ink/30 sm:hidden" onClick={() => setOpen(false)} aria-hidden="true" />}
       {open && (
-        <div className={cx('absolute z-40 mt-1 min-w-[200px] rounded-xl border border-line bg-white py-1 shadow-pop animate-rise', align === 'right' ? 'right-0' : 'left-0')} role="menu">
+        // Phones: a sheet along the bottom of the screen (bigger tap targets, never off the edge); elsewhere a dropdown.
+        <div className={cx('absolute z-40 mt-1 min-w-[200px] rounded-xl border border-line bg-white py-1 shadow-pop animate-rise max-sm:max-h-[70vh] max-sm:overflow-y-auto max-sm:py-2', align === 'right' ? 'right-0' : 'left-0', 'max-sm:fixed max-sm:inset-x-2 max-sm:bottom-[calc(env(safe-area-inset-bottom)+0.5rem)] max-sm:top-auto max-sm:left-2 max-sm:right-2 max-sm:mt-0 max-sm:mb-0 max-sm:w-auto max-sm:z-[60]')} role="menu">
           {items.filter((i) => !i.hidden).map((i, idx) => (
             <button
               key={idx}
@@ -217,10 +222,10 @@ export function Menu({ trigger, items, align = 'right' }: { trigger: (open: () =
                 setOpen(false);
                 i.onClick();
               }}
-              className={cx('flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-mist', i.danger ? 'text-rose' : 'text-ink')}
+              className={cx('flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-mist max-sm:py-3 max-sm:text-[15px]', i.danger ? 'text-rose' : 'text-ink')}
             >
               {i.icon && <span className="text-stone">{i.icon}</span>}
-              {i.label}
+              {tc(i.label)}
             </button>
           ))}
         </div>
@@ -259,8 +264,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
 export function SectionTitle({ children, action, className }: { children: ReactNode; action?: ReactNode; className?: string }) {
   return (
-    <div className={cx('mb-3 flex items-end justify-between gap-3', className)}>
-      <h2 className="h-display text-[22px] leading-none">{children}</h2>
+    <div className={cx('mb-3 flex min-h-9 flex-wrap items-end justify-between gap-x-3 gap-y-2', className)}>
+      <h2 className="h-display min-w-0 text-[22px] leading-tight"><Tc>{children}</Tc></h2>
       {action}
     </div>
   );
@@ -269,8 +274,8 @@ export function SectionTitle({ children, action, className }: { children: ReactN
 export function PageHeader({ title, subtitle, actions }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
     <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <h1 className="h-display text-[34px] leading-[1.05] sm:text-[40px]">{title}</h1>
+      <div className="min-w-0">
+        <h1 className="h-display text-[34px] leading-[1.05] sm:text-[40px]"><Tc>{title}</Tc></h1>
         {subtitle && <p className="mt-1.5 text-[15px] text-stone">{subtitle}</p>}
       </div>
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}

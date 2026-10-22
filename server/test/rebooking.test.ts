@@ -24,7 +24,7 @@ const emmaTasks = (status = "('due','snoozed')") =>
   db().query<any>(`SELECT * FROM tasks WHERE client_id = $1 AND service_id = $2 AND type = 'rebook' AND status IN ${status}`, [emma, moveUp]);
 
 describe('Schedule calculation', () => {
-  const x = { tz: TZ, today: '2026-10-12', minVisits: 3, graceDays: 7, globalEnabled: true };
+  const x = { tz: TZ, today: '2026-10-12', minVisits: 3, graceDays: 7, stopAfterDays: 365, globalEnabled: true };
   const rule = { serviceId: 's', serviceName: 'Extension Move-Up', minDays: 42, maxDays: 56, targetDays: 49, remindBeforeDays: 7, autoFollowUp: true, updatedAt: null };
   const base = { serviceId: 's', serviceName: 'Extension Move-Up', visitDates: ['2026-07-01', '2026-08-20'], nextBookedDate: null, otherBookingDate: null, rule, override: null };
 
@@ -61,6 +61,15 @@ describe('Schedule calculation', () => {
     const hist = computeSchedule({ ...base, rule: null, visitDates: ['2026-05-01', '2026-06-12', '2026-07-24'] }, x);
     expect(hist).toMatchObject({ intervalSource: 'history', intervalDays: 42, nextDate: '2026-09-04', reminderDate: '2026-09-11', status: 'overdue' });
     expect(computeSchedule({ ...base, rule: null, visitDates: ['2026-07-24'] }, x).status).toBe('no_interval');
+  });
+
+  it('stops following up a year after the last visit (unless a preferred date is set, or the limit is 0)', () => {
+    const old = { ...base, visitDates: ['2025-08-01', '2025-09-20'] };
+    expect(computeSchedule(old, x).status).toBe('lapsed');
+    expect(computeSchedule({ ...base, visitDates: ['2025-10-13'] }, x).status).toBe('overdue'); // exactly 364 days
+    expect(computeSchedule(old, { ...x, stopAfterDays: 0 }).status).toBe('overdue');
+    const o = { serviceId: 's', intervalDays: null, preferredNextDate: '2026-10-20', lastVisitDate: null, remindBeforeDays: null, followUpsEnabled: null, note: null, updatedAt: null };
+    expect(computeSchedule({ ...old, override: o }, x).status).toBe('upcoming');
   });
 });
 
@@ -111,6 +120,24 @@ describe('Rebooking by service and client', () => {
     const s = await emmaSchedule();
     expect(s.override).toBeNull();
     expect(s.intervalSource).toBe('service');
+  });
+
+  it('“No follow-up needed” on a service (an add-on): still listed for the client, never followed up; a client can opt back in', async () => {
+    const before = (await emmaTasks()).length;
+    const r = await api.put(`/api/rebooking/services/${moveUp}/not-needed`, { notNeeded: true });
+    expect(r.status).toBe(200);
+    expect(r.body.services.find((x: any) => x.serviceId === moveUp).notNeeded).toBe(true);
+    expect((await emmaTasks()).length).toBe(0);
+    if (before) expect((await emmaTasks("('cancelled')")).some((t: any) => /No follow-up needed/.test(t.notes))).toBe(true);
+    const s = await emmaSchedule();
+    expect(s).toBeTruthy(); // still shows on her profile
+    expect([s.status, s.followUpsEnabled]).toEqual(['not_needed', false]);
+    // This client's own setting can still turn follow-ups on.
+    await api.put(`/api/rebooking/clients/${emma}/services/${moveUp}`, { followUpsEnabled: true });
+    expect((await emmaSchedule()).status).not.toBe('not_needed');
+    await api.del(`/api/rebooking/clients/${emma}/services/${moveUp}`);
+    await api.put(`/api/rebooking/services/${moveUp}/not-needed`, { notNeeded: false });
+    expect((await emmaSchedule()).status).not.toBe('not_needed');
   });
 
   it('a new appointment closes the follow-up and recalculates the next date', async () => {

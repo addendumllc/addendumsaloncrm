@@ -4,28 +4,27 @@ import { useQuery } from '@tanstack/react-query';
 import { INVENTORY_STATUS_LABELS, type InventoryItemDTO, type InventoryRequestDTO, type InventoryStatus } from '@addendum/shared';
 import { AlertCircle, ArrowLeftRight, CheckCircle2, Clock, Mail, Minus, Package, PackageCheck, Plus, RotateCw, Search, Send, ShoppingBag, Trash2, Truck, X } from 'lucide-react';
 import { api, ApiError } from '../api/client';
-import { useCanDo, useInventory, useInventorySuggestions, useIntegrations, useMe, useRefreshAll, useSettings, useStaff } from '../api/hooks';
-import { dateShort, dateTime, dayKey, relative } from '../lib/format';
+import { useCanDo, useInventory, useInventorySuggestions, useIntegrations, useMe, useRefreshAll, useStaff } from '../api/hooks';
+import { addDaysKey, dateShort, dateTime, dayKey, relative } from '../lib/format';
 import { SquareInventoryView } from './SquareInventory';
+import { useWorkspace } from '../lib/workspace';
 import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, Segmented, cx, useToast } from '../components/ui';
+import { Tc } from '../lib/titleCase';
 
 /**
  * Order Hair: Addendum Hair order requests. Stylists list what they need (Size, Color, Collection, QTY,
  * Needed By); the app emails it to the ordering contact (Settings → Order Hair, default
- * gaby@addendumhair.com) and tracks it. The Square inventory tab searches Square's stock (the source of truth);
- * administrators can push those counts to Shopify from there.
+ * Addendum Hair's address) and tracks it. Staff see only “Addendum Hair”, never the address.
+ * Square's stock (with the push to Shopify) is under Inventory Sync → Square inventory.
  */
 export function InventoryPage() {
   const [params, setParams] = useSearchParams();
-  const view = params.get('view') === 'stock' ? 'stock' : 'orders';
   const status = params.get('status') ?? 'open';
   const scope = params.get('scope') ?? 'all';
   const openId = params.get('open');
   const canDo = useCanDo();
   const { data, isLoading, error, refetch } = useInventory({ status: status === 'everything' ? undefined : status, scope }, canDo('inventory:order') || canDo('inventory:read_all'));
-  const { data: settings } = useSettings();
   const [composing, setComposing] = useState(params.get('new') === '1');
-  const to = settings?.settings.inventory?.orderEmail ?? 'gaby@addendumhair.com';
   // "New → Order hair" from the top bar works even when already on this page.
   useEffect(() => {
     if (params.get('new') === '1') setComposing(true);
@@ -36,22 +35,21 @@ export function InventoryPage() {
     setParams(p, { replace: true });
   };
 
+  const ws = useWorkspace();
   return (
     <div className="animate-rise">
+      {/* Order Hair wears Addendum Hair's look, but it's the salon ordering: say so. */}
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-stone">{ws.names.salon.name} · ordering from {ws.names.hair.name}</p>
       <PageHeader
         title="Order Hair"
-        subtitle={<>Order from Addendum Hair — sent to <span className="text-ink">{to}</span></>}
+        subtitle={`Hair, tools and accessories from ${ws.names.hair.name}, sent from the salon`}
         actions={<>
-          {canDo('inventory:sync') && <Link to="/inventory-sync" className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-line-strong bg-white px-3 text-sm font-medium hover:bg-mist/60"><ArrowLeftRight className="h-4 w-4" />Inventory Sync</Link>}
+          {canDo('inventory:sync') && <Link to="/inventory-sync" className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-line-strong bg-white px-3 text-sm font-medium hover:bg-mist/60"><ArrowLeftRight className="h-4 w-4" />Inventory</Link>}
           {canDo('inventory:order') && <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setComposing(true)}>New hair order</Button>}
         </>}
       />
-      {canDo('inventory:view') && (canDo('inventory:order') || canDo('inventory:read_all')) && (
-        <div className="mb-4">
-          <Segmented value={view} onChange={(v) => set('view', v === 'stock' ? 'stock' : null)} options={[{ value: 'orders', label: 'Hair orders' }, { value: 'stock', label: 'Square inventory' }]} />
-        </div>
-      )}
-      {view === 'stock' || !(canDo('inventory:order') || canDo('inventory:read_all')) ? <SquareInventoryView /> : (
+      {/* Square inventory lives under Inventory Sync; people who can only view stock (no ordering, no sync) still see it here. */}
+      {!(canDo('inventory:order') || canDo('inventory:read_all')) ? <SquareInventoryView /> : (
       <>
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <Segmented value={status} onChange={(v) => set('status', v === 'open' ? null : v)} options={[
@@ -75,7 +73,7 @@ export function InventoryPage() {
       </>
       )}
 
-      {composing && <ComposeRequest onClose={() => { setComposing(false); set('new', null); }} to={to} />}
+      {composing && <ComposeRequest onClose={() => { setComposing(false); set('new', null); }} />}
       {openId && <RequestDetail id={openId} onClose={() => set('open', null)} canManage={!!data?.canManage} seesAll={!!data?.seesAll} />}
     </div>
   );
@@ -89,7 +87,7 @@ const neededLabel = (d: string | null) => (d ? dateShort(`${d}T12:00:00Z`) : '�
 
 function EmailLine({ r }: { r: InventoryRequestDTO }) {
   const e = r.email;
-  if (e.status === 'sent') return <span className="inline-flex items-center gap-1 text-sage"><CheckCircle2 className="h-3.5 w-3.5" />Emailed to {e.to}{e.sentAt ? ` · ${relative(e.sentAt)}` : ''}</span>;
+  if (e.status === 'sent') return <span className="inline-flex items-center gap-1 text-sage"><CheckCircle2 className="h-3.5 w-3.5" />Sent to Addendum Hair{e.sentAt ? ` · ${relative(e.sentAt)}` : ''}</span>;
   if (e.status === 'not_configured') return <span className="inline-flex items-center gap-1 text-amber"><AlertCircle className="h-3.5 w-3.5" />Saved — email isn't set up yet, so it hasn't been sent</span>;
   if (e.status === 'failed') return <span className="inline-flex items-center gap-1 text-rose"><AlertCircle className="h-3.5 w-3.5" />Email not sent yet — retrying automatically</span>;
   return <span className="inline-flex items-center gap-1 text-stone"><Mail className="h-3.5 w-3.5" />Sending…</span>;
@@ -117,7 +115,7 @@ function useActions(r: InventoryRequestDTO) {
     resend: () => run('resend', async () => {
       const res = await api.post<{ request: InventoryRequestDTO }>(`/inventory/requests/${r.id}/resend`);
       if (res.request.email.status !== 'sent') throw new Error(res.request.email.error ?? 'The email could not be sent.');
-    }, `Emailed to ${r.email.to}`),
+    }, 'Sent to Addendum Hair'),
   };
 }
 
@@ -171,6 +169,7 @@ function RequestCard({ r, canManage, onOpen }: { r: InventoryRequestDTO; canMana
       <button onClick={onOpen} className="block w-full text-left">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-display text-[22px] leading-none text-ink">#{r.number} · {r.forStaffName ?? 'Stylist'}</span>
+          {r.customerName && <span className="text-[13px] text-ink-soft">for {r.customerName}</span>}
           <Badge tone={STATUS_TONE[r.status]}><Icon className="h-3 w-3" />{INVENTORY_STATUS_LABELS[r.status]}</Badge>
           <InventoryBadge r={r} />
         </div>
@@ -218,10 +217,10 @@ function Stepper({ value, max, onChange, label }: { value: number; max: number; 
 
 /**
  * New hair order: an order request, not just an email. Needed By is required; hair is picked from Shopify inventory
- * (by SKU or name, or from the list) with quantities up to what's in stock. On Submit the server checks stock, records
+ * (by SKU or name, or from the list) with quantities up to what's in stock — staff see only In Stock / Out of Stock, never counts. On Submit the server checks stock, records
  * the order, takes the items out of Shopify, then emails Addendum Hair — success is only shown once all that worked.
  */
-function ComposeRequest({ onClose, to }: { onClose: () => void; to: string }) {
+function ComposeRequest({ onClose }: { onClose: () => void }) {
   const { data: me } = useMe();
   const canDo = useCanDo();
   // Only receptionists and admins can order for someone else; stylists always order for themselves.
@@ -234,6 +233,7 @@ function ComposeRequest({ onClose, to }: { onClose: () => void; to: string }) {
   const toast = useToast();
   const [forStaffId, setForStaffId] = useState<string>('');
   const [neededBy, setNeededBy] = useState('');
+  const [customer, setCustomer] = useState('');
   const [lines, setLines] = useState<Line[]>([]);
   const [note, setNote] = useState('');
   const [sending, setSending] = useState(false);
@@ -256,15 +256,16 @@ function ComposeRequest({ onClose, to }: { onClose: () => void; to: string }) {
   const quick = useMemo(() => (sugg?.collections ?? []).slice(0, 8), [sugg]);
   const added = new Map(lines.flatMap((l) => (l.kind === 'inventory' ? [[l.option.sku, l.quantity] as const] : [])));
   const missingDate = !neededBy;
-  const pastDate = !!neededBy && neededBy < today;
+  // Never the same day: hair can't be turned around that fast (the server checks too).
+  const tomorrow = addDaysKey(today, 1);
 
   const send = async () => {
-    if (missingDate || pastDate) { setError(missingDate ? 'Choose the Needed By date.' : 'The Needed By date can’t be in the past.'); return; }
+    if (missingDate) { setError('Choose the Needed By date.'); return; }
     setSending(true);
     setError(null);
     try {
       const r = await api.post<{ request: InventoryRequestDTO; duplicate: boolean }>('/inventory/requests', {
-        submissionId, forStaffId: who || undefined, neededBy, note: note.trim() || null,
+        submissionId, forStaffId: who || undefined, neededBy, customerName: customer.trim() || null, note: note.trim() || null,
         items: filled.map((l) => (l.kind === 'inventory'
           ? { sku: l.option.sku, quantity: l.quantity }
           : { collection: l.collection, size: l.size || null, color: l.color || null, quantity: l.quantity })),
@@ -272,7 +273,7 @@ function ComposeRequest({ onClose, to }: { onClose: () => void; to: string }) {
       const o = r.request;
       const stockNote = o.inventoryStatus === 'reserved' ? ' Inventory reserved in Shopify.' : '';
       const e = o.email;
-      if (e.status === 'sent') toast(`Order #${o.number} recorded.${stockNote} Emailed to ${[e.to, ...e.cc.filter((c) => c.endsWith('@addendumhair.com'))].join(' and ')}.`);
+      if (e.status === 'sent') toast(`Order #${o.number} recorded.${stockNote} Sent to Addendum Hair.`);
       else toast(`Order #${o.number} recorded.${stockNote} ${e.status === 'not_configured' ? 'Email isn’t set up yet, so it will be sent once it is.' : 'The email will be retried automatically.'}`);
       refresh();
       void shopify.refetch();
@@ -288,7 +289,7 @@ function ComposeRequest({ onClose, to }: { onClose: () => void; to: string }) {
 
   return (
     <Modal
-      open side onClose={onClose} title="New hair order"
+      open side onClose={onClose} title="New Hair Order Request"
       footer={
         <>
           <span className="mr-auto text-[13px] text-stone">{filled.length ? `${plural(filled.length, 'item')} · ${plural(units, 'unit')}` : 'Add hair to order'}</span>
@@ -297,20 +298,29 @@ function ComposeRequest({ onClose, to }: { onClose: () => void; to: string }) {
         </>
       }
     >
-      <p className="mb-4 flex items-start gap-2 rounded-lg bg-mist px-3 py-2 text-[13px] text-ink-soft"><Mail className="mt-0.5 h-4 w-4 shrink-0 text-stone" /><span>Emailed to <b className="break-all font-medium text-ink">{to}</b> and info@addendumhair.com{integ?.demoMode ? ' · Demo Mode, not actually sent' : ''}</span></p>
+      <p className="mb-4 flex items-start gap-2 rounded-lg bg-mist px-3 py-2 text-[13px] text-ink-soft"><Mail className="mt-0.5 h-4 w-4 shrink-0 text-stone" /><span>Sent to <b className="font-medium text-ink">Addendum Hair</b>{integ?.demoMode ? ' · Demo Mode, not actually sent' : ''}</span></p>
 
-      {forOthers && (
-        <Field label="For stylist">
+      {/* Filled in with whoever is signed in; receptionists and admins can change it to order for someone else. */}
+      <Field label="For stylist">
+        {forOthers ? (
           <select className="field" value={who} onChange={(e) => setForStaffId(e.target.value)}>
-            {staff?.filter((s) => s.active).map((s) => <option key={s.id} value={s.id}>{s.name}{s.id === me?.id ? ' (me)' : ''}</option>)}
+            {/* The signed-in person always comes first (and shows even before the team list loads). */}
+            {me && <option value={me.id}>{me.name} (me)</option>}
+            {staff?.filter((s) => s.active && s.id !== me?.id).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
-        </Field>
-      )}
-
-      <Field label="Needed By (required)" className="mt-4">
-        <input type="date" className={cx('field h-11 sm:max-w-[220px]', (pastDate || (error && missingDate)) && 'border-rose')} min={today} value={neededBy} onChange={(e) => { setNeededBy(e.target.value); setError(null); }} required aria-required="true" />
+        ) : (
+          <input className="field" value={me?.name ?? ''} readOnly aria-readonly="true" />
+        )}
       </Field>
-      {pastDate && <p className="mt-1 text-[13px] text-rose">The Needed By date can’t be in the past.</p>}
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <Field label="Needed By (required)">
+          <input type="date" className={cx('field h-11', error && missingDate && 'border-rose')} min={tomorrow} value={neededBy} onChange={(e) => { setNeededBy(e.target.value >= tomorrow ? e.target.value : ''); setError(null); }} required aria-required="true" />
+        </Field>
+        <Field label="Client (optional)">
+          <input className="field h-11" value={customer} maxLength={120} onChange={(e) => setCustomer(e.target.value)} placeholder="Client name" autoComplete="off" />
+        </Field>
+      </div>
 
       <HairPicker shopify={shopify.data} loading={shopify.isLoading} onPick={pick} added={added} />
 
@@ -324,14 +334,14 @@ function ComposeRequest({ onClose, to }: { onClose: () => void; to: string }) {
                 <div>
                   <p className="text-[15px] font-medium text-ink">{l.option.product}</p>
                   <p className="text-[13px] text-ink-soft">{[l.option.size && `Length ${l.option.size}`, l.option.color && `Color ${l.option.color}`].filter(Boolean).join(' · ') || l.option.variant}</p>
-                  <p className="text-[12px] text-stone">SKU <span className="font-mono">{l.option.sku}</span> · {l.option.available} in stock · taken out of Shopify inventory on submit</p>
+                  <p className="text-[12px] text-stone">SKU <span className="font-mono">{l.option.sku}</span> · In Stock</p>
                 </div>
               ) : (
                 <div className="grid gap-2 sm:grid-cols-[0.8fr_1.2fr_1.6fr]">
                   <label className="block"><span className="mb-1 block text-xs text-stone">Size</span><input className="field" value={l.size} onChange={(e) => update(l.key, { size: e.target.value })} placeholder='20"' aria-label={`Item ${idx + 1} size`} maxLength={80} /></label>
                   <label className="block"><span className="mb-1 block text-xs text-stone">Color</span><input className="field" value={l.color} onChange={(e) => update(l.key, { color: e.target.value })} placeholder="#60 Platinum" aria-label={`Item ${idx + 1} color`} maxLength={120} /></label>
                   <label className="block"><span className="mb-1 block text-xs text-stone">Collection</span><input className="field" value={l.collection} onChange={(e) => update(l.key, { collection: e.target.value })} placeholder="Hand-Tied Weft" aria-label={`Item ${idx + 1} collection`} maxLength={160} /></label>
-                  <p className="text-[12px] text-stone sm:col-span-3">Typed by hand: emailed to Addendum Hair, not taken out of inventory.</p>
+                  <p className="text-[12px] text-stone sm:col-span-3">Typed by hand: emailed to Addendum Hair.</p>
                 </div>
               )}
               <div className="mt-2 flex items-end gap-3">
@@ -367,16 +377,13 @@ function HairPicker({ shopify, loading, onPick, added }: { shopify?: { connected
   if (shopify && !shopify.connected) return <p className="mt-4 rounded-lg bg-amber-tint px-3 py-2 text-[13px] text-amber">Shopify isn’t connected, so hair can’t be taken from inventory. You can still add items by hand below.</p>;
   return (
     <div className="sticky top-0 z-10 -mx-5 mt-4 border-b border-line bg-white px-5 pb-3 pt-1">
-      <span className="label">Hair item — search Shopify inventory</span>
+      <span className="label">Hair Item — Search Shopify Inventory</span>
       <label className="relative block">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone" />
         <input className="field h-11 pl-9 pr-9" type="search" inputMode="search" value={text} onChange={(e) => setText(e.target.value)} placeholder="SKU, name, length or colour" aria-label="Search Shopify hair inventory" />
         {text && <button type="button" onClick={() => setText('')} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-stone hover:bg-mist hover:text-ink" aria-label="Clear search"><X className="h-4 w-4" /></button>}
       </label>
-      <select className="field mt-2 h-11" value="" onChange={(e) => { const o = products.find((p) => p.sku === e.target.value); if (o) onPick(o); }} aria-label="Or choose from the list" disabled={!products.length}>
-        <option value="">{loading ? 'Loading inventory…' : 'Or choose from the list…'}</option>
-        {products.map((p) => <option key={p.sku} value={p.sku} disabled={p.available <= 0}>{p.label} · {p.sku} · {p.available > 0 ? `${p.available} in stock` : 'out of stock'}</option>)}
-      </select>
+      {!text && <HairBrowser products={products} loading={loading} onPick={onPick} added={added} />}
       {shopify?.error && <p className="mt-2 text-[13px] text-rose">{shopify.error}</p>}
       {text && (
         <ul className="mt-2 max-h-64 divide-y divide-line overflow-y-auto rounded-lg border border-line">
@@ -391,7 +398,7 @@ function HairPicker({ shopify, loading, onPick, added }: { shopify?: { connected
                     <span className="block truncate text-[14px] font-medium text-ink">{p.product}</span>
                     <span className="block truncate text-[13px] text-ink-soft">{[p.variant, `SKU ${p.sku}`].filter(Boolean).join(' · ')}</span>
                   </span>
-                  <span className={cx('shrink-0 text-[12px]', out ? 'text-rose' : 'text-stone')}>{out ? 'Out of stock' : `${p.available} in stock`}</span>
+                  <span className={cx('shrink-0 text-[12px]', out ? 'text-rose' : 'text-stone')}>{out ? 'Out of Stock' : 'In Stock'}</span>
                   <span className={cx('inline-flex h-8 shrink-0 items-center gap-1 rounded-lg px-2 text-[13px] font-medium', n ? 'bg-plum-tint text-plum' : 'border border-line-strong text-ink-soft')}>
                     <Plus className="h-3.5 w-3.5" />{n ? `Added ×${n}` : 'Add'}
                   </span>
@@ -401,6 +408,57 @@ function HairPicker({ shopify, loading, onPick, added }: { shopify?: { connected
           })}
         </ul>
       )}
+    </div>
+  );
+}
+
+/**
+ * "High Ball - Classic Weft - 18 inch - 20g" → colour "High Ball", type "Classic Weft", details "18 inch · 20g".
+ * "Product – 20\" / #60" (one level of options) is grouped by product. Single items (tools, beads) are listed under
+ * Tools & accessories. "Default Title" is dropped.
+ */
+const TOOLS = 'Tools & accessories';
+function parseHair(label: string) {
+  const parts = label.split(/\s+[-–]\s+/).map((x) => x.trim()).filter((x) => x && x.toLowerCase() !== 'default title');
+  if (parts.length >= 3) return { group: parts[0], type: parts[1], details: parts.slice(2).join(' · ') };
+  // "Signature Hand-Tied Weft – 20" / #60 Platinum": the product, then its options.
+  if (parts.length === 2) return { group: parts[0], type: '', details: parts[1].split(/\s+\/\s+/).join(' · ') };
+  return { group: TOOLS, type: '', details: parts[0] ?? label };
+}
+
+/**
+ * Two short dropdowns instead of one long one: first a colour or a collection (Classic Weft, K-Tips…), then the length
+ * and weight within it, as named in Shopify. Choosing one adds it; out of stock is listed but can't be chosen.
+ */
+function HairBrowser({ products, loading, onPick, added }: { products: ShopifyOption[]; loading: boolean; onPick: (o: ShopifyOption) => void; added: Map<string, number> }) {
+  const [pick, setPick] = useState('');
+  const items = useMemo(() => products.map((p) => ({ p, ...parseHair(p.label) })), [products]);
+  const sort = (a: string, b: string) => (a === TOOLS ? 1 : b === TOOLS ? -1 : a.localeCompare(b));
+  const colours = useMemo(() => [...new Set(items.map((i) => i.group))].sort(sort), [items]);
+  const collections = useMemo(() => [...new Set(items.map((i) => i.type).filter(Boolean))].sort(sort), [items]);
+  // "c:High Ball" (a colour) or "t:K-Tips" (a collection).
+  const [kind, name] = [pick.slice(0, 1), pick.slice(2)];
+  const options = !pick ? [] : items
+    .filter((i) => (kind === 'c' ? i.group === name : i.type === name))
+    // The rest of the Shopify name, as it is: the collection and length for a colour, or the colour and length for a collection.
+    .map((i) => ({ p: i.p, text: (kind === 'c' ? [i.type, i.details] : [i.group, i.details]).filter(Boolean).join(' - ') }))
+    .sort((x, y) => x.text.localeCompare(y.text, undefined, { numeric: true }));
+  return (
+    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+      <select className="field h-11" value={pick} onChange={(e) => setPick(e.target.value)} disabled={!products.length} aria-label="Colour or collection">
+        <option value="">{loading ? 'Loading inventory…' : 'Colour or collection…'}</option>
+        <optgroup label="Colours">{colours.map((c) => <option key={c} value={`c:${c}`}>{c}</option>)}</optgroup>
+        {collections.length > 0 && <optgroup label="Collections">{collections.map((t) => <option key={t} value={`t:${t}`}>{t}</option>)}</optgroup>}
+      </select>
+      <select className="field h-11" value="" disabled={!pick} aria-label="Length"
+        onChange={(e) => { const o = products.find((p) => p.sku === e.target.value); if (o) onPick(o); }}>
+        <option value="">{pick ? `Choose from ${name}…` : 'Then the length…'}</option>
+        {options.map(({ p, text }) => {
+          const n = added.get(p.sku) ?? 0;
+          const out = p.available <= 0;
+          return <option key={p.sku} value={p.sku} disabled={out || n >= p.available}>{text}{out ? ' — Out of stock' : n ? ` — added ×${n}` : ''}</option>;
+        })}
+      </select>
     </div>
   );
 }
@@ -445,7 +503,7 @@ function DetailBody({ r, canManage, seesAll }: { r: InventoryRequestDTO; canMana
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone={STATUS_TONE[r.status]}><Icon className="h-3 w-3" />{INVENTORY_STATUS_LABELS[r.status]}</Badge>
         </div>
-        <p className="mt-2 text-sm text-ink-soft">For <b className="font-medium text-ink">{r.forStaffName ?? 'stylist'}</b>{r.requestedByName && r.requestedByName !== r.forStaffName ? ` · submitted by ${r.requestedByName}` : ''} · {dateTime(r.createdAt)}</p>
+        <p className="mt-2 text-sm text-ink-soft">For <b className="font-medium text-ink">{r.forStaffName ?? 'stylist'}</b>{r.customerName ? <> · client <b className="font-medium text-ink">{r.customerName}</b></> : null}{r.requestedByName && r.requestedByName !== r.forStaffName ? ` · submitted by ${r.requestedByName}` : ''} · {dateTime(r.createdAt)}</p>
         {r.statusChangedAt && r.status !== 'submitted' && <p className="text-sm text-stone">{INVENTORY_STATUS_LABELS[r.status]} {relative(r.statusChangedAt)}</p>}
         <div className="mt-3 flex flex-wrap gap-2">
           {canManage && r.status === 'submitted' && <Button size="sm" variant="primary" icon={<Truck className="h-4 w-4" />} loading={a.busy === 'ordered'} disabled={!!a.busy} onClick={() => a.status('ordered', 'Marked ordered')}>Mark ordered</Button>}
@@ -455,7 +513,7 @@ function DetailBody({ r, canManage, seesAll }: { r: InventoryRequestDTO; canMana
       </div>
 
       <section>
-        <h3 className="mb-2 font-display text-xl">Items</h3>
+        <h3 className="mb-2 font-display text-xl"><Tc>Items</Tc></h3>
         <ItemsGrid
           r={r}
           items={r.items}
@@ -472,12 +530,12 @@ function DetailBody({ r, canManage, seesAll }: { r: InventoryRequestDTO; canMana
       </section>
 
       <section>
-        <h3 className="mb-2 font-display text-xl">Email</h3>
+        <h3 className="mb-2 font-display text-xl"><Tc>Email</Tc></h3>
         <p className="text-[13px]"><EmailLine r={r} /></p>
         {r.email.error && r.email.status !== 'sent' && <p className="mt-1 text-[13px] text-stone">{r.email.error}</p>}
         {r.email.text && (
           <div className={cx('mt-3 rounded-xl border border-line bg-white p-3')}>
-            <p className="text-[13px] text-stone">To: {r.email.to}</p>
+            <p className="text-[13px] text-stone">To: Addendum Hair</p>
             {r.email.cc.length > 0 && <p className="text-[13px] text-stone">Cc: {r.email.cc.join(', ')}</p>}
             <p className="text-[13px] font-medium text-ink">{r.email.subject}</p>
             <pre className="mt-2 whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-ink-soft">{r.email.text}</pre>

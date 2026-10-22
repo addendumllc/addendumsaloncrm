@@ -70,7 +70,7 @@ export class RuleBasedAIService implements AIService {
         body = `${hi} Thank you for coming in${c.staffName ? ` to see ${c.staffName}` : ''}. How are you loving your hair? If anything feels off, just reply here and we'll take care of you.`;
         break;
       case 'rebooking':
-        body = `${hi} It's been a little while since your last visit${c.lastVisitText ? ` (${c.lastVisitText})` : ''} — you're right on time for your next ${svc ? svc.toLowerCase() : 'appointment'}. Would you like us to find you a spot${c.staffName ? ` with ${c.staffName}` : ''}?${book}`;
+        body = `${hi} It's been a little while since your last visit — you're due for your next ${svc ? svc.toLowerCase() : 'appointment'}. Would you like us to find you a spot?${book}`;
         break;
       case 'no_show':
         body = `${hi} We missed you at your appointment${c.appointmentText ? ` on ${c.appointmentText}` : ''} — we hope everything is okay. Reply here and we'll help you find a new time that works.`;

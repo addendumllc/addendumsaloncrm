@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
-  AppSettings, AppointmentDTO, ClientSummaryDTO, ConversationDTO, CurrentUser, DashboardSummary, IntegrationStatusDTO,
+  PersonalLook, AppSettings, AppointmentDTO, ClientSummaryDTO, ConversationDTO, CurrentUser, DashboardSummary, IntegrationStatusDTO,
   InventoryRequestDTO, LeadDTO, MessageDTO, RebookingInsight, RecommendedAction, StaffDTO, TaskDTO,
 } from '@addendum/shared';
 import { api, qs } from './client';
@@ -26,12 +26,15 @@ export interface ProjectionTotals { from: string; to: string; revenueCents: numb
 /** Dashboard widgets the server allowed for this person (each needs its widget permission and the data permission). */
 export interface DashboardWidgets {
   schedule: boolean; followups: boolean; clients: boolean; analytics: boolean;
+  /** The "Today's Priorities" heading (its follow-up counts arrive as null in the summary when it's off). */
+  priorities: boolean;
   announcements: { unread: number; latest: { id: string; title: string; important: boolean; pinned: boolean; publishedAt: string | null; authorName: string | null; read: boolean }[] } | null;
   orders: { scope: 'everyone' | 'mine'; open: number; next: { id: string; number: number; status: string; neededBy: string | null; forName: string | null; units: number }[] } | null;
-  myCommission: { from: string; to: string; totalCents: number } | null;
+  /** totalCents is null until they confirm their password (pay stays private on shared screens). */
+  myCommission: { from: string; to: string; totalCents: number | null } | null;
   /** Admins/Owners by default ("revenue:projections" + the widget). Projections, not collected sales. */
   projections: { week: ProjectionTotals; month: ProjectionTotals; future: ProjectionTotals } | null;
-  teamCommission: { from: string; to: string; totalCents: number } | null;
+  teamCommission: { from: string; to: string; totalCents: number | null } | null;
 }
 
 export function useIntegrations(enabled = true) {
@@ -48,6 +51,11 @@ export function useSettings() {
   return useQuery({ queryKey: ['settings'], queryFn: () => api.get<{ settings: AppSettings; limited?: boolean }>('/settings'), staleTime: 30_000 });
 }
 
+/** This person's own look (accent, light/dark) over the salon's. */
+export function useLook() {
+  return useQuery({ queryKey: ['look'], queryFn: () => api.get<{ look: PersonalLook }>('/look').then((r) => r.look), staleTime: Infinity });
+}
+
 export function useStaff(enabled = true) {
   return useQuery({ queryKey: ['staff'], queryFn: () => api.get<{ staff: StaffDTO[] }>('/staff').then((r) => r.staff), staleTime: 60_000, enabled });
 }
@@ -60,8 +68,8 @@ export function useServices() {
   return useQuery({ queryKey: ['services'], queryFn: () => api.get<{ services: { id: string; name: string }[] }>('/services').then((r) => r.services), staleTime: 300_000 });
 }
 
-export function useTasks(params: Record<string, string | undefined>, enabled = true) {
-  return useQuery({ queryKey: ['tasks', params], queryFn: () => api.get<{ tasks: TaskDTO[] }>(`/tasks${qs(params)}`).then((r) => r.tasks), enabled });
+export function useTasks(params: Record<string, string | undefined>, enabled = true, refetchInterval?: number) {
+  return useQuery({ queryKey: ['tasks', params], queryFn: () => api.get<{ tasks: TaskDTO[] }>(`/tasks${qs(params)}`).then((r) => r.tasks), enabled, refetchInterval });
 }
 
 export function useAppointments(params: Record<string, string | undefined>, enabled = true) {
@@ -73,7 +81,7 @@ export function useClients(params: Record<string, string | undefined>) {
 }
 
 export interface ClientProfile {
-  client: ClientSummaryDTO & { firstName: string; lastName: string; birthday: string | null; preferredStaffId: string | null; leadSource: string | null; highlevelContactId: string | null; smsOptedOut: boolean; createdAt: string };
+  client: ClientSummaryDTO & { firstName: string; lastName: string; birthday: string | null; preferredStaffId: string | null; preferredStaffAuto: boolean; leadSource: string | null; preferences: string | null; allergies: string | null; highlevelContactId: string | null; smsOptedOut: boolean; createdAt: string };
   services: string[];
   appointments: AppointmentDTO[];
   tasks: TaskDTO[];

@@ -2,10 +2,13 @@ import { config } from '../config.js';
 import { squareService } from '../integrations/registry.js';
 import { getIntegration } from '../repos/integrations.js';
 import { processHighLevelQueue } from './highlevelPush.js';
+import { maybeAutoPullHairClients } from './hairHighLevel.js';
 import { retryInventoryEmails } from './inventory.js';
 import { maybeAutoSyncCommission } from './commission.js';
 import { maybeAutoSync } from './inventorySync.js';
 import { runRules } from './rulesEngine.js';
+import { maybePurgeOldInternalTasks } from './tasks.js';
+import { checkPreorders } from './preorderAlerts.js';
 import { syncSquareInventory } from './squareInventory.js';
 import { runSquareSync } from './squareSync.js';
 
@@ -27,6 +30,9 @@ export function startScheduler() {
     await guard('commission-sync', () => maybeAutoSyncCommission()); // only when commission is on and the interval has passed
     if (tick % 5 === 0) {
       await guard('rules', () => runRules());
+      await guard('hair-highlevel', () => maybeAutoPullHairClients()); // hourly, only when turned on
+      await guard('task-retention', () => maybePurgeOldInternalTasks()); // daily: finished internal tasks past the chosen months
+      await guard('preorders', () => checkPreorders()); // new online pre-orders → bell for inventory managers
     }
     if (tick % Math.max(1, config().SQUARE_SYNC_INTERVAL_MINUTES) === 0) {
       await guard('square-sync', async () => {

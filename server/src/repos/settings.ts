@@ -1,4 +1,4 @@
-import { DEFAULT_APPEARANCE, type AppSettings } from '@addendum/shared';
+import { DEFAULT_APPEARANCE, DEFAULT_LOGIN, DEFAULT_WORKSPACES, type AppSettings } from '@addendum/shared';
 import { db } from '../db/index.js';
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -8,7 +8,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
     phone: '',
     website: 'https://addendumsalon.square.site',
     bookingUrl: 'https://addendumsalon.square.site/s/appointments',
-    reviewUrl: '',
+    // Google: opens the "write a review" box for Addendum Salon.
+    reviewUrl: 'https://www.google.com/search?q=Addendum+Salon+12853+El+Camino+Real+San+Diego+CA#lrd=0x80dc0ecd7fb6aaab:0x3e215c50708febbd,3,,,,',
     timezone: 'America/Los_Angeles',
     hours: 'Tue–Sat 9:00 AM – 7:00 PM',
   },
@@ -24,6 +25,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     reviewDelayHours: 3,
     rebookingEnabled: true,
     rebookingGraceDays: 7,
+    rebookingStopAfterDays: 365,
     rebookingMinVisits: 3,
     rebookingNoHistoryOnly: false,
     unreadMessageMinutes: 30,
@@ -46,7 +48,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   commission: {
     enabled: false, autoSync: true, syncIntervalMinutes: 60, syncStartDate: null,
     basis: 'after_discounts', refunds: 'reverse', zeroPriced: 'no_commission', multiProvider: 'split_evenly',
-    productAttribution: 'appointment_provider', tips: 'separate', tipAttribution: 'service_share',
+    productAttribution: 'appointment_provider',
+    unrecordedCheckout: { clientStylist: true, onTheClock: true, fallbackStaffId: null, hold: true },
+    defaultServiceBps: 4000, defaultRetailBps: 1000, tips: 'separate', tipAttribution: 'service_share',
+    disclaimer: 'Commission shown here is an estimate based on Square sales. Your final pay is confirmed with payroll and may differ.',
+    payrollTaxes: { socialSecurityBps: 620, medicareBps: 145, futaBps: 60, sutaBps: 0, sdiBps: 130, stateIncomeBps: 400, workAddress: '12853 El Camino Real Ste 104, San Diego, CA 92130' },
+    // Every 2 weeks, Saturday–Friday (e.g. Sep 26 – Oct 9, 2026), paid the following Friday (Oct 16).
+    paySchedule: { frequency: 'biweekly', anchorStart: '2026-09-26', payDayOffsetDays: 7 },
   },
   replies: {
     // Starter set — the salon edits, adds and removes these in Settings → Saved replies.
@@ -100,8 +108,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   inventory: { orderEmail: 'gaby@addendumhair.com', ccRequester: true, catalog: [], orderFromName: 'Addendum Hair Order Form', orderFromAddress: '', sendAsSubmitter: true, senderDomains: [] },
   appearance: { ...DEFAULT_APPEARANCE },
   accounts: { allowAccessRequests: true },
+  workspaces: DEFAULT_WORKSPACES,
+  login: DEFAULT_LOGIN,
   access: { allowAnywhere: false, networks: [], restrictMobile: false },
   onboardingComplete: false,
+  sharedSettings: { rules: false, rebooking: false, reminders: false, replies: false },
 };
 
 function deepMerge<T>(base: T, patch: any): T {
@@ -126,6 +137,9 @@ export async function getSettings(): Promise<AppSettings> {
 export async function updateSettings(patch: Partial<AppSettings> | Record<string, any>): Promise<AppSettings> {
   const current = await getSettings();
   const next = deepMerge(current, patch);
+  // A role's default menu is replaced as a whole (so tabs moved back or names removed don't linger).
+  const md = (patch as any)?.workspaces?.menuDefaults;
+  if (md && next.workspaces) next.workspaces.menuDefaults = { ...(current.workspaces?.menuDefaults ?? {}), ...md };
   await db().query(
     `INSERT INTO settings(key, value, updated_at) VALUES ('app', $1::jsonb, now())
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,

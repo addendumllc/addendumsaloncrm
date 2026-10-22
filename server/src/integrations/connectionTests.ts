@@ -75,6 +75,7 @@ async function run(p: CredentialProvider): Promise<TestResult> {
       const { scopes } = await sq.tokenScopes();
       if (scopes) {
         const lacking = SQUARE_REQUIRED_SCOPES.filter((s) => !scopes.includes(s));
+        if (!scopes.includes('ITEMS_WRITE')) warnings.push('Optional: ITEMS_WRITE lets Inventory Sync set a Square product’s SKU to match Shopify. Without it, change SKUs in Square yourself.');
         if (lacking.length) warnings.push(`This token is missing: ${lacking.join(', ')}.${lacking.includes('INVENTORY_WRITE') ? ' Shopify → Square stock updates need INVENTORY_WRITE.' : ''}${lacking.some((x) => x === 'ORDERS_READ' || x === 'PAYMENTS_READ') ? ' My Commission needs ORDERS_READ and PAYMENTS_READ.' : ''}`);
       }
       const locations = await sq.listLocations();
@@ -83,17 +84,19 @@ async function run(p: CredentialProvider): Promise<TestResult> {
       if (!want && locations.length > 1) warnings.push(`Square has ${locations.length} locations: set the Inventory location ID to choose which one syncs with Shopify (${locations.map((l) => `${l.name}: ${l.id}`).join('; ')}).`);
       return { ok: true, message: `Connected to Square${name ? ` · ${name}` : ''} (${c.SQUARE_ENVIRONMENT}).`, warnings };
     }
-    case 'shopify': {
-      const domain = c.SHOPIFY_STORE_DOMAIN!.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-      const shop = new ShopifyApiService(domain);
+    case 'shopify':
+    case 'shopify2': {
+      const domain = (p === 'shopify' ? c.SHOPIFY_STORE_DOMAIN : c.SHOPIFY2_STORE_DOMAIN)!.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+      const shop = new ShopifyApiService(domain, p === 'shopify' ? 'SHOPIFY' : 'SHOPIFY2');
       const r = await shop.testConnection();
       const scopes = await shop.accessScopes();
       // write_inventory implies read access in Shopify, so either satisfies the read scope.
       const has = (s: string) => scopes.includes(s) || (s.startsWith('read_') && scopes.includes(s.replace('read_', 'write_')));
       const lacking = SHOPIFY_SCOPES.filter((s) => !has(s));
       if (lacking.length) warnings.push(`The Shopify app is missing these permissions, needed for inventory sync: ${lacking.join(', ')}.`);
+      if (!scopes.includes('write_products')) warnings.push('Optional: write_products lets Inventory → Pricing change prices in this store. Without it, prices are changed in Shopify.');
       // Least privilege: point out access the CRM never uses, so it can be removed from the Shopify app.
-      const needed = new Set([...SHOPIFY_SCOPES, ...SHOPIFY_SCOPES.map((s) => s.replace('read_', 'write_'))]);
+      const needed = new Set([...SHOPIFY_SCOPES, ...SHOPIFY_SCOPES.map((s) => s.replace('read_', 'write_')), 'write_products', 'read_customers']);
       const extra = scopes.filter((s) => !needed.has(s));
       if (extra.length) warnings.push(`The app also has permissions the CRM doesn’t use (${extra.join(', ')}); you can remove them in Shopify.`);
       return { ok: true, message: `Connected to ${r.shopName} (${domain})${r.locationName ? ` · inventory location: ${r.locationName}` : ''}. Permissions granted: ${scopes.join(', ') || 'none'}.`, warnings };
@@ -102,6 +105,11 @@ async function run(p: CredentialProvider): Promise<TestResult> {
       const hl = new HighLevelApiService(c.HIGHLEVEL_PRIVATE_TOKEN!, c.HIGHLEVEL_LOCATION_ID!);
       const r = await hl.testConnection();
       return { ok: true, message: `Connected to HighLevel${r.locationName ? ` · ${r.locationName}` : ''}.`, warnings };
+    }
+    case 'highlevel_hair': {
+      const hl = new HighLevelApiService(c.HIGHLEVEL_HAIR_PRIVATE_TOKEN!, c.HIGHLEVEL_HAIR_LOCATION_ID!);
+      const r = await hl.testConnection();
+      return { ok: true, message: `Connected to Addendum Hair’s HighLevel${r.locationName ? ` · ${r.locationName}` : ''}.`, warnings };
     }
     case 'email': {
       const t = nodemailer.createTransport({

@@ -5,7 +5,7 @@ import { assertClientVisible, clientScope } from '../auth/scope.js';
 import { requireAnyPermission, requirePermission } from '../auth/session.js';
 import { db } from '../db/index.js';
 import { badRequest, notFound } from '../lib/errors.js';
-import {
+import { setServiceNotNeeded,
   clientSchedules,
   computeSchedules,
   deleteClientOverride,
@@ -54,6 +54,16 @@ rebookingRouter.put('/services/:serviceId', requirePermission('rebooking:default
   if (problem) throw badRequest(problem);
   await saveServiceRule(req.params.serviceId, b, req.user!.id);
   await logAction(req, 'rebooking.service_default', 'service', req.params.serviceId, b);
+  const followUps = await syncRebookingTasks();
+  res.json({ services: await listServiceRules(), followUps });
+}));
+
+/** "No follow-up needed" for a service (add-ons): it still shows on clients, but never creates follow-ups. */
+rebookingRouter.put('/services/:serviceId/not-needed', requirePermission('rebooking:defaults'), ah(async (req, res) => {
+  await assertService(req.params.serviceId);
+  const { notNeeded } = parse(z.object({ notNeeded: z.boolean() }), req.body);
+  await setServiceNotNeeded(req.params.serviceId, notNeeded);
+  await logAction(req, 'rebooking.service_not_needed', 'service', req.params.serviceId, { notNeeded });
   const followUps = await syncRebookingTasks();
   res.json({ services: await listServiceRules(), followUps });
 }));
@@ -110,7 +120,7 @@ rebookingRouter.delete('/clients/:clientId/services/:serviceId', requirePermissi
 // ---------- Everyone's upcoming recommended dates (Follow-Ups → Rebooking schedule) ----------
 rebookingRouter.get('/schedule', requireAnyPermission('clients:read', 'clients:read_assigned'), ah(async (req, res) => {
   const q = parse(z.object({
-    status: z.enum(['overdue', 'due_soon', 'upcoming', 'booked', 'off', 'attention', 'all']).default('attention'),
+    status: z.enum(['overdue', 'due_soon', 'upcoming', 'booked', 'off', 'not_needed', 'attention', 'all']).default('attention'),
     days: z.coerce.number().int().min(1).max(365).default(30),
     serviceId: z.string().uuid().optional(),
   }), req.query);

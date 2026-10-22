@@ -3,7 +3,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { createSession, destroySession, requireAuth } from '../auth/session.js';
-import { markReauthenticated, REAUTH_MINUTES } from '../auth/reauth.js';
+import { extendPayUnlock, lockPay, markReauthenticated, PAY_SESSION_HOURS, payUnlockState, REAUTH_MINUTES } from '../auth/reauth.js';
 import { db } from '../db/index.js';
 import { sha256 } from '../lib/crypto.js';
 import { checkPasswordToken, createPasswordLink, emailPasswordLink, requestAccess, usePasswordToken } from '../domain/users.js';
@@ -21,8 +21,9 @@ const loginLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 10, skipSuccessfu
 
 /** Public, non-sensitive: lets the sign-in screen show demo hints only in Demo Mode. */
 authRouter.get('/config', ah(async (_req, res) => {
-  const { appearance, accounts } = await getSettings();
-  res.json({ demoMode: isDemo(), accent: appearance.accent, appearance, allowAccessRequests: accounts.allowAccessRequests });
+  const { appearance, accounts, login, workspaces } = await getSettings();
+  // The sign-in screen: umbrella-branded (headline, photo, the businesses' names). The workspace's own look applies once signed in.
+  res.json({ demoMode: isDemo(), accent: appearance.accent, appearance, allowAccessRequests: accounts.allowAccessRequests, login, businesses: workspaces?.businesses });
 }));
 
 authRouter.post('/login', loginLimiter, ah(async (req, res) => {
@@ -103,15 +104,32 @@ authRouter.post('/logout', ah(async (req, res) => {
 authRouter.get('/me', requireAuth, (req, res) => res.json({ user: req.user }));
 
 /** Re-enter your password before sensitive changes (integration credentials). Covers the next few minutes. */
+/** Has this device confirmed the password in the last few minutes? (Pay pages are locked until it has.) */
+authRouter.get('/reauth-status', requireAuth, ah(async (req, res) => {
+  const st = await payUnlockState(req);
+  res.json({ unlocked: st.unlocked, minutes: REAUTH_MINUTES, until: st.until, canKeepUnlocked: req.user!.role === 'admin', sessionHours: PAY_SESSION_HOURS });
+}));
+
+/** Lock pay again on this device now. */
+authRouter.post('/lock-pay', requireAuth, ah(async (req, res) => {
+  await lockPay(req);
+  await logAction(req, 'auth.pay_locked', 'staff', req.user!.id);
+  res.json({ ok: true });
+}));
+
 authRouter.post('/confirm-password', requireAuth, loginLimiter, ah(async (req, res) => {
-  const { password } = parse(z.object({ password: z.string().min(1).max(200) }), req.body);
+  // keepPayUnlocked: Admins can keep pay open on this device for a working session.
+  const { password, keepPayUnlocked } = parse(z.object({ password: z.string().min(1).max(200), keepPayUnlocked: z.boolean().optional() }), req.body);
   const row = await db().one<{ password_hash: string | null }>('SELECT password_hash FROM staff WHERE id = $1', [req.user!.id]);
-  if (!row?.password_hash || !(await bcrypt.compare(password, row.password_hash))) {
+  // Their password — or, for people who sign in with a code, that code (same lock-out rules as code sign-in).
+  const ok = (!!row?.password_hash && (await bcrypt.compare(password, row.password_hash))) || (await checkCode(req.user!.id, password)).ok;
+  if (!ok) {
     await logAction(req, 'auth.reauth_failed', 'staff', req.user!.id);
     return res.status(400).json({ error: { code: 'invalid_password', message: 'That password isn’t right.' } });
   }
   await markReauthenticated(req);
-  await logAction(req, 'auth.reauth', 'staff', req.user!.id);
+  if (keepPayUnlocked && req.user!.role === 'admin') await extendPayUnlock(req);
+  await logAction(req, 'auth.reauth', 'staff', req.user!.id, keepPayUnlocked && req.user!.role === 'admin' ? { payUnlockedHours: PAY_SESSION_HOURS } : undefined);
   res.json({ ok: true, minutes: REAUTH_MINUTES });
 }));
 

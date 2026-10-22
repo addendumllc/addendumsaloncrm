@@ -5,6 +5,7 @@ import { CheckCircle2, CircleDashed, AlertTriangle } from 'lucide-react';
 import { api } from '../../api/client';
 import { useMe, useSettings } from '../../api/hooks';
 import { Button, cx, useToast } from '../../components/ui';
+import { Tc, titleCase } from '../../lib/titleCase';
 
 /** Local draft of one settings section with dirty tracking and a Save action. */
 export function useSection<K extends keyof AppSettings>(key: K) {
@@ -49,11 +50,13 @@ export function Card({ title, description, children, footer, className }: { titl
   return (
     <section className={cx('panel', className)}>
       <div className="border-b border-line px-5 py-4">
-        <h2 className="h-display text-[22px] leading-tight">{title}</h2>
+        <h2 className="h-display text-[22px] leading-tight"><Tc>{title}</Tc></h2>
         {description && <p className="mt-1 text-[13px] text-stone">{description}</p>}
       </div>
       <div className="px-5 py-4">{children}</div>
-      {footer && <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>}
+      {/* Pinned to the bottom of the screen while the section is in view, so Save is always in reach on long lists
+          (e.g. many saved replies). Phones: above the bottom tab bar. */}
+      {footer && <div className="sticky bottom-[calc(3.6rem+env(safe-area-inset-bottom))] z-10 flex flex-wrap items-center justify-end gap-2 rounded-b-xl2 border-t border-line bg-white px-5 py-3 backdrop-blur lg:bottom-0">{footer}</div>}
     </section>
   );
 }
@@ -72,7 +75,7 @@ export function SaveBar({ dirty, saving, onSave, onReset, disabled }: { dirty: b
 export function NumberField({ label, value, onChange, unit, min = 0, max = 9999, hint, disabled }: { label: string; value: number; onChange: (n: number) => void; unit: string; min?: number; max?: number; hint?: ReactNode; disabled?: boolean }) {
   return (
     <label className="block">
-      <span className="label">{label}</span>
+      <span className="label">{titleCase(label)}</span>
       <span className="flex items-center gap-2">
         <input
           type="number" inputMode="numeric" min={min} max={max} disabled={disabled}
@@ -101,7 +104,7 @@ export function CopyValue({ label, value }: { label: string; value: string }) {
   const toast = useToast();
   return (
     <div className="mt-3">
-      <span className="label">{label}</span>
+      <span className="label">{titleCase(label)}</span>
       <div className="flex gap-2">
         <code className="flex-1 truncate rounded-lg border border-line bg-mist/60 px-3 py-2 text-[13px] text-ink-soft">{value}</code>
         <Button size="sm" className="h-auto" onClick={() => navigator.clipboard?.writeText(value).then(() => toast('Copied'), () => toast('Copy failed — select the text instead', 'error'))}>Copy</Button>
