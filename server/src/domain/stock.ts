@@ -1166,7 +1166,11 @@ export async function notifyNewPreorders(notify: (staffIds: string[], title: str
 }
 
 // ---------------- Pricing (Inventory → Pricing) ----------------
-export interface PriceListing { variantId: string; productId: string; inventoryItemId: string; label: string; priceCents: number | null }
+export interface PriceListing {
+  variantId: string; productId: string; inventoryItemId: string; label: string; priceCents: number | null;
+  /** The retail store's Pro-pricing listing (see isProListing); its other listing is the direct-to-consumer one. */
+  pro?: boolean;
+}
 export interface PriceRow {
   key: string; label: string; sku: string | null; costCents: number | null;
   /** The salon's price in Square (null when it isn't sold in the salon). */
@@ -1195,13 +1199,18 @@ export async function priceList(): Promise<{ rows: PriceRow[]; stores: { square:
   const [p1, p2] = await Promise.all([read('shopify'), read('shopify2')]);
   const listing = (m: Map<string, PriceListing>, id: string | null, label?: string): PriceListing[] => {
     const p = id ? m.get(id) : undefined;
-    return p ? [{ variantId: p.variantId, productId: p.productId, inventoryItemId: p.inventoryItemId, label: label ?? p.label, priceCents: p.priceCents }] : [];
+    return p ? [{ variantId: p.variantId, productId: p.productId, inventoryItemId: p.inventoryItemId, label: label ?? p.label, priceCents: p.priceCents, pro: isProListing(p) }] : [];
+  };
+  // As in proPricePlan: a listing only tagged pro isn't the Pro one when another listing of that SKU is named Pro.
+  const proOnly = (list: PriceListing[]) => {
+    const named = list.filter((l) => /\bpro\b/i.test(`${(p2.get(l.inventoryItemId) as { productTitle?: string } | undefined)?.productTitle ?? ''} ${l.label}`));
+    return named.length ? list.map((l) => ({ ...l, pro: named.includes(l) })) : list;
   };
   const rows: PriceRow[] = L.rows.filter((r) => r.status !== 'not_tracked').map((r) => ({
     key: r.key, label: r.label, sku: r.sku, costCents: r.costCents,
     square: r.squareVariationId ? { variationId: r.squareVariationId, priceCents: r.priceCents } : null,
     shopify: listing(p1, r.shopifyInventoryItemId),
-    shopify2: r.store2.flatMap((e) => listing(p2, e.inventoryItemId, e.label)),
+    shopify2: proOnly(r.store2.flatMap((e) => listing(p2, e.inventoryItemId, e.label))),
   }));
   return { rows, stores: { square: storeNames().square, shopify: shopifyNameOf('shopify'), shopify2: shopifyService2() ? shopifyNameOf('shopify2') : null }, errors };
 }

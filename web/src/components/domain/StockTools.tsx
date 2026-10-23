@@ -56,18 +56,29 @@ function Qty({ q, cls }: { q: number | null; cls?: string }) {
 }
 
 /** Stock per store. When every store agrees it's one number; otherwise each store is labelled and the mismatch is red. */
+/**
+ * The second store's listings of one product: its retail (direct-to-consumer) listing is "AH" and its Pro-pricing
+ * listing "AH-Pro" (from "Pro" in the listing's name); numbered only when that can't be told apart.
+ */
+function store2Names(p: StockProductDTO, store2: string | null) {
+  const base = (store2 ?? 'Store 2').replace(/\s+shopify$/i, '');
+  const isPro = p.store2.map((e) => /\bpro\b/i.test(e.label));
+  const clear = p.store2.length === 2 && isPro.filter(Boolean).length === 1;
+  return p.store2.map((_e, n) => (p.store2.length < 2 ? (store2 ?? 'Store 2') : clear ? (isPro[n] ? `${base}-Pro` : base) : `${store2 ?? 'Store 2'} #${n + 1}`));
+}
+
 function StockCell({ p, store2 }: { p: StockProductDTO; store2: string | null }) {
   const N = useStoreNames();
   const parts = [
     p.squareVariationId && { name: N.square, qty: p.squareQty },
     p.shopifyInventoryItemId && { name: N.shopify, qty: p.shopifyQty },
-    ...p.store2.map((e, n) => ({ name: `${store2 ?? 'Store 2'}${p.store2.length > 1 ? ` #${n + 1}` : ''}`, qty: e.qty })),
+    ...p.store2.map((e, n) => ({ name: store2Names(p, store2)[n], qty: e.qty })),
   ].filter(Boolean) as { name: string; qty: number | null }[];
   // Separate stock: the salon floor and online are different counts on purpose — shown side by side, not as a mismatch.
   if (p.kind === 'separate') {
     return (
       <span className="flex flex-wrap gap-1">
-        {[[N.square, p.squareQty], [store2 && p.store2.length ? N.shopify : 'Online', p.shopifyQty], ...p.store2.map((e, i) => [`${store2}${p.store2.length > 1 ? ` #${i + 1}` : ''}`, e.qty])].filter(([, q]) => q != null).map(([n, q]) => (
+        {[[N.square, p.squareQty], [store2 && p.store2.length ? N.shopify : 'Online', p.shopifyQty], ...p.store2.map((e, i) => [store2Names(p, store2)[i], e.qty])].filter(([, q]) => q != null).map(([n, q]) => (
           <span key={n as string} className="inline-flex items-baseline gap-1 rounded-md bg-mist px-1.5 py-0.5 text-[11px] text-ink-soft">{n}<Qty q={q as number} cls="text-[12px] text-ink" /></span>
         ))}
       </span>

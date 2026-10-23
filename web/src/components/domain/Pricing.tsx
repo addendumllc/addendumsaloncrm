@@ -4,7 +4,7 @@ import { AlertTriangle, Search } from 'lucide-react';
 import { api } from '../../api/client';
 import { Button, EmptyState, ErrorNote, Field, Modal, PageLoading, cx, useToast } from '../ui';
 
-interface Listing { variantId: string; productId: string; inventoryItemId: string; label: string; priceCents: number | null }
+interface Listing { variantId: string; productId: string; inventoryItemId: string; label: string; priceCents: number | null; pro?: boolean }
 interface Row { key: string; label: string; sku: string | null; costCents: number | null; square: { variationId: string; priceCents: number | null } | null; shopify: Listing[]; shopify2: Listing[] }
 interface PriceData { rows: Row[]; stores: { square: string; shopify: string; shopify2: string | null }; errors: string[] }
 type Col = 'square' | 'shopify' | 'shopify2';
@@ -117,7 +117,10 @@ export function PricingView() {
           const p = priceOf(r, col, l);
           const val = drafts[r.key]?.[col]?.[l.variantId];
           // A store can list one SKU twice (e.g. stylist and salon prices): show which listing.
-          const tag = r[col].length > 1 ? (l.label.match(/\(([^)]+)\)\s*$/)?.[1] ?? l.label.split(/\s+[-–/]\s+/).pop()) : null;
+          // The retail store's two listings of a product: "AH" (direct to consumer) and "AH-Pro" (Pro pricing).
+          const base = (data.stores.shopify2 ?? 'Store 2').replace(/\s+shopify$/i, '');
+          const proSplit = col === 'shopify2' && r[col].length === 2 && r[col].filter((x) => x.pro).length === 1;
+          const tag = proSplit ? (l.pro ? `${base}-Pro` : base) : r[col].length > 1 ? (l.label.match(/\(([^)]+)\)\s*$/)?.[1] ?? l.label.split(/\s+[-–/]\s+/).pop()) : null;
           return <PriceInput key={l.variantId} tag={tag} value={val ?? dollars(l.priceCents)} changed={val !== undefined && toCents(val) !== l.priceCents} onChange={(v) => set(r.key, { [col]: { [l.variantId]: v } })} margin={margin(p, cost)} label={`${r.label} — ${col === 'shopify' ? data.stores.shopify : data.stores.shopify2} price${tag ? ` (${tag})` : ''}`} />;
         })}
       </div>
