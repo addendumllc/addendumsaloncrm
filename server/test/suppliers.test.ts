@@ -183,5 +183,42 @@ describe('Suppliers', () => {
     expect(after.some((i: any) => i.key === key)).toBe(false);
     expect(after.length).toBe(before.length - 1);
   });
+
+  it('shipping days add to the lead time, the default MOQ fills in, and amounts round to practical numbers then full cases', async () => {
+    const { practicalQty } = await import('../src/domain/stock.js');
+    expect([2, 7, 23, 101, 512].map(practicalQty)).toEqual([2, 10, 25, 110, 550]);
+    await api.post('/api/inventory-sync/stock/suppliers', { name: 'Ship Co', leadTimeDays: 10, shippingDays: 5, defaultMoq: 40 });
+    expect((await api.get('/api/inventory-sync/stock/suppliers')).body.suppliers[0]).toMatchObject({ shippingDays: 5, defaultMoq: 40 });
+    const key = (await api.get('/api/inventory-sync/stock/products')).body.products.find((p: any) => p.squareVariationId).key;
+    await api.put('/api/inventory-sync/stock/products/settings', { rows: [{ key, supplier: 'Ship Co', leadTimeDays: null, caseSize: 12 }] });
+    forgetStockCache();
+    const i = (await api.post('/api/inventory-sync/stock/sales/refresh')).body.items.find((x: any) => x.key === key);
+    expect(i).toMatchObject({ leadTimeDays: 15, shippingDays: 5, moq: 40 });
+    if (i.suggestedQty) { expect(i.suggestedQty).toBeGreaterThanOrEqual(40); expect(i.suggestedQty % 12).toBe(0); }
+    // Windows are adjustable; Watch can't be shorter than Reorder soon.
+    const base = (await api.get('/api/inventory-sync/stock/forecast')).body.settings;
+    expect((await api.put('/api/inventory-sync/stock/forecast/settings', { ...base, soonDays: 20, watchDays: 10 })).status).toBe(400);
+    expect((await api.put('/api/inventory-sync/stock/forecast/settings', { ...base, soonDays: 10, watchDays: 30 })).body.settings).toMatchObject({ soonDays: 10, watchDays: 30 });
+  });
+
+  it('alerts once when a selling product runs out or is at risk of running out', async () => {
+    const { notifyStockAlerts } = await import('../src/domain/stock.js');
+    const { setKV } = await import('../src/repos/settings.js');
+    await setKV('stock.alerts.seen', null as any);
+    const sent: string[] = [];
+    const send = async (_ids: string[], title: string) => { sent.push(title); };
+    await api.post('/api/inventory-sync/stock/sales/refresh');
+    expect(await notifyStockAlerts(send, async () => ['x'])).toBe(0); // first run remembers
+    // A long lead time puts every selling product at risk.
+    await api.post('/api/inventory-sync/stock/suppliers', { name: 'Slow Co', leadTimeDays: 700 });
+    const products = (await api.get('/api/inventory-sync/stock/products')).body.products;
+    await api.put('/api/inventory-sync/stock/products/settings', { rows: products.map((p: any) => ({ key: p.key, supplier: 'Slow Co', leadTimeDays: 700 })) });
+    forgetStockCache();
+    const n = await notifyStockAlerts(send, async () => ['x']);
+    expect(n).toBeGreaterThan(0);
+    expect(sent[0]).toMatch(/at risk of running out|out of stock/);
+    forgetStockCache();
+    expect(await notifyStockAlerts(send, async () => ['x'])).toBe(0); // not again
+  });
 });
 

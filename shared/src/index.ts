@@ -2211,6 +2211,10 @@ export interface StockForecastDTO {
   collections: string[];
   /** Its supplier's lead time isn't tracked (Suppliers): timed on safety stock alone, and left out of Analytics → Forecast. */
   leadUntracked: boolean;
+  /** The supplier's shipping days (included in leadTimeDays). */
+  shippingDays: number;
+  /** Stock-out risk: at this rate it runs out before an order placed today would arrive. */
+  stockoutRisk: boolean;
   stock: number;
   /** On open purchase orders (ordered or shipped), not yet received. */
   incoming: number;
@@ -2243,7 +2247,8 @@ export interface StockForecastDTO {
   /** Pre-orders: units customers ordered online that aren't in stock yet (Shopify below zero). */
   preorders: number;
 }
-export interface StockForecastSettings { leadTimeDays: number; safetyDays: number; coverageDays: number; slowToUseDays: number }
+/** `soonDays` / `watchDays`: Reorder soon and Watch windows — days until the order-by date, worked out from how fast each product sells. */
+export interface StockForecastSettings { leadTimeDays: number; safetyDays: number; coverageDays: number; slowToUseDays: number; soonDays: number; watchDays: number }
 export interface StockForecastResponse {
   items: StockForecastDTO[];
   settings: StockForecastSettings;
@@ -2315,10 +2320,14 @@ export interface SupplierDTO {
   leadTimeDays: number | null;
   /** Lead time not tracked: reorder timing leaves it out for this supplier's products, and orders get no expected date. */
   leadUntracked: boolean;
+  /** Days in transit, added to the lead time for its products. */
+  shippingDays: number | null;
+  /** Minimum order for its products that don't have their own. */
+  defaultMoq: number | null;
   /** Used for products and orders that don't name a supplier. */
   isDefault: boolean;
 }
-export interface SupplierInput { name: string; companyName?: string | null; email?: string | null; phone?: string | null; website?: string | null; notes?: string | null; leadTimeDays?: number | null; leadUntracked?: boolean }
+export interface SupplierInput { name: string; companyName?: string | null; email?: string | null; phone?: string | null; website?: string | null; notes?: string | null; leadTimeDays?: number | null; leadUntracked?: boolean; shippingDays?: number | null; defaultMoq?: number | null }
 /** Which products to give a supplier: chosen products, or every product in a store. */
 export type SupplierAssign = { supplier: string; keys: string[] } | { supplier: string; store: 'square' | 'shopify' | 'shopify2' | 'all'; onlyWithout: boolean };
 

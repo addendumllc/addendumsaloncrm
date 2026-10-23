@@ -117,7 +117,7 @@ export function InventorySyncPage() {
       {view === 'products' && <div className="mb-3 flex flex-wrap justify-end gap-2"><AddLengthButton /><AddToSquareButton /></div>}
       {view === 'products' && <ProductsView setup />}
       {view === 'stock' && <StockView />}
-      {view === 'reorder' && <ReorderView key={reorderStore} store={reorderStore} onOrders={() => setView('orders')} />}
+      {view === 'reorder' && <ReorderView key={reorderStore} store={reorderStore} initialFilter={params.get('show') === 'alerts' ? 'alerts' : 'reorder'} onOrders={() => setView('orders')} />}
       {view === 'orders' && (forHair ? <PurchaseOrdersView key="shopify" store="shopify" /> : <PurchaseOrdersView key="salon" store="salon" />)}
       {view === 'suppliers' && <SuppliersView />}
       {view === 'sync' && <>

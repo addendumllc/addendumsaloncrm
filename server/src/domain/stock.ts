@@ -378,7 +378,14 @@ export async function stockHistory(f: { key?: string; kind?: string; q?: string;
 // ---------------- Sales and forecasts ----------------
 const SALES_KEY = 'stock.shopify-sales';
 const FORECAST_KEY = 'stock.forecast-settings';
-export const DEFAULT_FORECAST: StockForecastSettings = { leadTimeDays: 30, safetyDays: 14, coverageDays: 60, slowToUseDays: 120 };
+export const DEFAULT_FORECAST: StockForecastSettings = { leadTimeDays: 30, safetyDays: 14, coverageDays: 60, slowToUseDays: 120, soonDays: 7, watchDays: 21 };
+
+/** A practical order amount: small amounts stay as they are; then up to the next 5 (7 → 10, 23 → 25), 10 from 100, 50 from 500. */
+export function practicalQty(n: number) {
+  if (n <= 3) return Math.max(0, Math.ceil(n));
+  const step = n >= 500 ? 50 : n >= 100 ? 10 : 5;
+  return Math.ceil(n / step) * step;
+}
 
 export async function forecastSettings(): Promise<StockForecastSettings> {
   return { ...DEFAULT_FORECAST, ...((await getKV<StockForecastSettings>(FORECAST_KEY)) ?? {}) };
@@ -488,8 +495,10 @@ export async function stockForecast(): Promise<StockForecastResponse> {
     return Math.max(0, n);
   };
   const items: StockForecastDTO[] = [];
-  // Suppliers whose lead time isn't tracked (products without a supplier follow the default one).
-  const untracked = new Set((await db().query<{ name: string }>('SELECT name FROM suppliers WHERE lead_untracked')).map((x) => x.name));
+  // Each product's supplier (products without one follow the default): lead time tracked or not, usual lead time,
+  // shipping days and default minimum order.
+  const supRows = new Map((await db().query<any>('SELECT * FROM suppliers')).map((x) => [x.name as string, x]));
+  const untracked = new Set([...supRows.values()].filter((x) => x.lead_untracked).map((x) => x.name as string));
   const fallback = await defaultSupplier();
   for (const r of L.rows) {
     if (r.status === 'not_tracked') continue;
@@ -503,8 +512,11 @@ export async function stockForecast(): Promise<StockForecastResponse> {
     const first = firstSale(m);
     const since = first ? Math.max(7, Math.min(90, Math.round((Date.parse(today) - Date.parse(first)) / 86400_000) + 1)) : 90;
     const rate = 0.2 * (u7 / 7) + 0.5 * (u30 / 30) + 0.3 * (u90 / since);
+    const sup = supRows.get(r.supplier ?? fallback ?? '');
     const noLead = untracked.has(r.supplier ?? fallback ?? '');
-    const lead = noLead ? 0 : r.leadTimeDays ?? settings.leadTimeDays;
+    const shipping = noLead ? 0 : sup?.shipping_days ?? 0;
+    const lead = noLead ? 0 : (r.leadTimeDays ?? sup?.lead_time_days ?? settings.leadTimeDays) + shipping;
+    const moq = r.moq ?? sup?.default_moq ?? null;
     const safety = r.safetyDays ?? settings.safetyDays;
     const why: string[] = [];
     let status: StockForecastDTO['status'];
@@ -521,15 +533,18 @@ export async function stockForecast(): Promise<StockForecastResponse> {
       const cover = rate * (lead + safety);
       const daysUntil = Math.floor((stock + inc - cover) / rate);
       orderBy = addDays(today, daysUntil);
-      status = stock <= 0 ? 'out' : daysUntil <= 0 ? 'order_now' : daysUntil <= 7 ? 'soon' : daysUntil <= 21 ? 'watch' : 'healthy';
+      status = stock <= 0 ? 'out' : daysUntil <= 0 ? 'order_now' : daysUntil <= settings.soonDays ? 'soon' : daysUntil <= settings.watchDays ? 'watch' : 'healthy';
       why.push(`Selling about ${rate.toFixed(2)} a day (${u7} in 7 days, ${u30} in 30, ${u90} in 90).`);
       why.push(`${stock} in stock${inc ? ` + ${inc} on order` : ''} lasts about ${Math.round(daysOfStock!)} days.`);
+      if (shipping) why.push(`Lead time includes ${shipping} days of shipping.`);
       why.push(noLead ? `Lead time not tracked for ${r.supplier ?? fallback} · ${safety} days of safety stock = order when it’s down to ${Math.ceil(cover)}.` : `Lead time ${lead} days + ${safety} days of safety stock = order when it’s down to ${Math.ceil(cover)}.`);
       if (status !== 'healthy' && status !== 'watch') {
         const need = rate * (lead + settings.coverageDays + safety) - (stock + inc);
         suggested = Math.max(0, Math.ceil(need));
         why.push(`Order enough for ${settings.coverageDays} days after it arrives, plus safety stock: ${suggested}.`);
-        if (r.moq && suggested < r.moq) { suggested = r.moq; why.push(`Raised to the minimum order (${r.moq}).`); }
+        const practical = practicalQty(suggested);
+        if (practical !== suggested) { why.push(`Rounded up to ${practical}.`); suggested = practical; }
+        if (moq && suggested < moq) { suggested = moq; why.push(`Raised to the minimum order (${moq}${r.moq == null ? `, ${r.supplier ?? fallback}’s default` : ''}).`); }
         if (r.caseSize && suggested % r.caseSize) { suggested = Math.ceil(suggested / r.caseSize) * r.caseSize; why.push(`Rounded up to full cases of ${r.caseSize}.`); }
       }
     }
@@ -545,13 +560,16 @@ export async function stockForecast(): Promise<StockForecastResponse> {
       why.push(`${preorders} pre-order${preorders === 1 ? '' : 's'} in Shopify (customers waiting)${inc ? `, ${Math.min(inc, preorders)} covered by what's on order` : ''}.`);
     }
     // MOQ timing: the minimum order's cost, when it lands if ordered today, and how long it lasts at this rate.
-    const moqLastsDays = r.moq && rate > 0 ? Math.round(r.moq / rate) : null;
-    if (moqLastsDays != null && moqLastsDays > settings.slowToUseDays) why.push(`Slow to use: the minimum order of ${r.moq} lasts about ${moqLastsDays} days.`);
+    const moqLastsDays = moq && rate > 0 ? Math.round(moq / rate) : null;
+    if (moqLastsDays != null && moqLastsDays > settings.slowToUseDays) why.push(`Slow to use: the minimum order of ${moq} lasts about ${moqLastsDays} days.`);
+    // Runs out before an order placed today would arrive (what's on order counts as stock).
+    const stockoutRisk = r.status !== 'discontinued' && rate > 0 && stock > 0 && daysOfStock != null && daysOfStock < lead;
+    if (stockoutRisk) why.push(`Stock-out risk: about ${Math.round(daysOfStock!)} days of stock, but an order takes ${lead} days to arrive.`);
     items.push({
       key: r.key, label: r.label, sku: r.sku, supplier: r.supplier, collections: r.collections ?? [], stock, incoming: inc, ratePerDay: Math.round(rate * 100) / 100, units7: u7, units30: u30, units90: u90,
-      leadTimeDays: lead, leadUntracked: noLead, safetyDays: safety, daysOfStock: daysOfStock == null ? null : Math.round(daysOfStock), orderBy, status, suggestedQty: suggested,
-      moq: r.moq, caseSize: r.caseSize, costCents: r.costCents,
-      moqCostCents: r.moq && r.costCents != null ? r.moq * r.costCents : null, moqArrivesOn: r.moq ? addDays(today, lead) : null, moqLastsDays,
+      leadTimeDays: lead, leadUntracked: noLead, shippingDays: shipping, stockoutRisk, safetyDays: safety, daysOfStock: daysOfStock == null ? null : Math.round(daysOfStock), orderBy, status, suggestedQty: suggested,
+      moq, caseSize: r.caseSize, costCents: r.costCents,
+      moqCostCents: moq && r.costCents != null ? moq * r.costCents : null, moqArrivesOn: moq ? addDays(today, lead) : null, moqLastsDays,
       slowToUse: moqLastsDays != null && moqLastsDays > settings.slowToUseDays, why, preorders,
       // Inventory → To order: which stores sell it, and the day it runs out at this rate (not counting what's on order).
       stores: { salon: !!r.squareVariationId, online: !!r.shopifyInventoryItemId || r.store2.length > 0 },
@@ -995,7 +1013,7 @@ export async function listSuppliers(): Promise<SupplierDTO[]> {
       name, products: p?.n ?? 0, statedLeadDays: p?.lead != null ? Math.round(p.lead) : s?.lead_time_days ?? null, actualLeadDays: o?.actual != null ? Math.round(o.actual) : null,
       receivedOrders: o?.received ?? 0, openOrders: o?.open ?? 0, spentCents: Number(o?.spent ?? 0),
       companyName: s?.company_name ?? null, email: s?.email ?? null, phone: s?.phone ?? null, website: s?.website ?? null, notes: s?.notes ?? null,
-      leadTimeDays: s?.lead_time_days ?? null, leadUntracked: !!s?.lead_untracked, isDefault: !!s?.is_default,
+      leadTimeDays: s?.lead_time_days ?? null, leadUntracked: !!s?.lead_untracked, shippingDays: s?.shipping_days ?? null, defaultMoq: s?.default_moq ?? null, isDefault: !!s?.is_default,
     };
   });
 }
@@ -1013,14 +1031,15 @@ export async function saveSupplier(input: SupplierInput, previous: string | null
   else if (!previous && await db().one('SELECT 1 FROM suppliers WHERE lower(name) = lower($1)', [name])) throw badRequest(`${name} is already a supplier.`);
   if (!details) {
     await db().query(
-      `INSERT INTO suppliers(name, lead_time_days, lead_untracked) VALUES ($1,$2,$3) ON CONFLICT (name) DO UPDATE SET lead_time_days = $2, lead_untracked = $3, updated_at = now()`,
-      [name, input.leadTimeDays ?? null, !!input.leadUntracked]);
+      `INSERT INTO suppliers(name, lead_time_days, lead_untracked, shipping_days, default_moq) VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (name) DO UPDATE SET lead_time_days = $2, lead_untracked = $3, shipping_days = $4, default_moq = $5, updated_at = now()`,
+      [name, input.leadTimeDays ?? null, !!input.leadUntracked, input.shippingDays ?? null, input.defaultMoq ?? null]);
     return;
   }
   await db().query(
-    `INSERT INTO suppliers(name, company_name, email, phone, website, notes, lead_time_days, lead_untracked) VALUES ($1,$7,$2,$3,$4,$5,$6,$8)
-     ON CONFLICT (name) DO UPDATE SET company_name = $7, email = $2, phone = $3, website = $4, notes = $5, lead_time_days = $6, lead_untracked = $8, updated_at = now()`,
-    [name, clean(input.email), clean(input.phone), clean(input.website), clean(input.notes), input.leadTimeDays ?? null, clean(input.companyName), !!input.leadUntracked]);
+    `INSERT INTO suppliers(name, company_name, email, phone, website, notes, lead_time_days, lead_untracked, shipping_days, default_moq) VALUES ($1,$7,$2,$3,$4,$5,$6,$8,$9,$10)
+     ON CONFLICT (name) DO UPDATE SET company_name = $7, email = $2, phone = $3, website = $4, notes = $5, lead_time_days = $6, lead_untracked = $8, shipping_days = $9, default_moq = $10, updated_at = now()`,
+    [name, clean(input.email), clean(input.phone), clean(input.website), clean(input.notes), input.leadTimeDays ?? null, clean(input.companyName), !!input.leadUntracked, input.shippingDays ?? null, input.defaultMoq ?? null]);
   forgetStockCache();
 }
 
@@ -1188,6 +1207,30 @@ export async function notifyNewPreorders(notify: (staffIds: string[], title: str
   const body = grew.slice(0, 5).map((i) => `${i.label}: ${i.waiting} waiting${i.toOrder ? `, ${i.toOrder} still to order` : ` (on order${i.due ? `, due ${i.due}` : ''})`}`).join('\n');
   await notify(ids, title, body);
   return grew.length;
+}
+
+/**
+ * Bell notification when a product that sells runs out, or is at risk of running out before a new order could arrive.
+ * Each product is announced once per state (out, or at risk) until it's back in stock.
+ */
+export async function notifyStockAlerts(notify: (staffIds: string[], title: string, body: string) => Promise<void>, recipients: () => Promise<string[]>) {
+  const f = await stockForecast();
+  const state = (i: StockForecastDTO) => (i.status === 'discontinued' ? null : i.stock <= 0 && i.ratePerDay > 0 ? 'out' : i.stockoutRisk ? 'risk' : null);
+  const now: Record<string, 'out' | 'risk'> = {};
+  for (const i of f.items) { const s = state(i); if (s) now[i.key] = s; }
+  const before = (await getKV<Record<string, string>>('stock.alerts.seen')) ?? null;
+  await setKV('stock.alerts.seen', now);
+  if (!before) return 0; // first run: just remember
+  const fresh = f.items.filter((i) => now[i.key] && before[i.key] !== now[i.key]);
+  if (!fresh.length) return 0;
+  const ids = await recipients();
+  if (!ids.length) return 0;
+  const out = fresh.filter((i) => now[i.key] === 'out');
+  const risk = fresh.filter((i) => now[i.key] === 'risk');
+  const title = [out.length && `${out.length} out of stock`, risk.length && `${risk.length} at risk of running out`].filter(Boolean).join(' · ');
+  const body = [...out.map((i) => `Out of stock: ${i.label}`), ...risk.map((i) => `At risk: ${i.label} — about ${i.daysOfStock} days left, ${i.leadTimeDays} days to arrive`)].slice(0, 6).join('\n');
+  await notify(ids, title, body);
+  return fresh.length;
 }
 
 // ---------------- Pricing (Inventory → Pricing) ----------------

@@ -214,7 +214,8 @@ inventorySyncRouter.put('/stock/prices', ah(async (req, res) => {
 }));
 inventorySyncRouter.get('/stock/forecast', ah(async (_req, res) => res.json(await stockForecast())));
 inventorySyncRouter.put('/stock/forecast/settings', ah(async (req, res) => {
-  const b = parse(z.object({ leadTimeDays: z.number().int().min(0).max(730), safetyDays: z.number().int().min(0).max(365), coverageDays: z.number().int().min(7).max(365), slowToUseDays: z.number().int().min(7).max(730).default(120) }), req.body);
+  const b = parse(z.object({ leadTimeDays: z.number().int().min(0).max(730), safetyDays: z.number().int().min(0).max(365), coverageDays: z.number().int().min(7).max(365), slowToUseDays: z.number().int().min(7).max(730).default(120),
+    soonDays: z.number().int().min(0).max(180).default(7), watchDays: z.number().int().min(0).max(365).default(21) }).refine((x) => x.watchDays >= x.soonDays, 'the Watch window must be at least the Reorder soon window'), req.body);
   await setForecastSettings(b);
   res.json({ settings: await forecastSettings() });
 }));
@@ -300,7 +301,7 @@ const supplierBody = z.object({
   email: z.string().trim().max(200).nullable().optional(),
   phone: z.string().trim().max(60).nullable().optional(), website: z.string().trim().max(300).nullable().optional(),
   notes: z.string().trim().max(2000).nullable().optional(), leadTimeDays: z.number().int().min(0).max(730).nullable().optional(),
-  leadUntracked: z.boolean().optional(),
+  leadUntracked: z.boolean().optional(), shippingDays: z.number().int().min(0).max(365).nullable().optional(), defaultMoq: z.number().int().min(1).max(100_000).nullable().optional(),
 });
 inventorySyncRouter.post('/stock/suppliers', ah(async (req, res) => {
   const b = parse(supplierBody, req.body);

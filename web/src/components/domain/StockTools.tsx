@@ -4,7 +4,7 @@ import {
   STOCK_REASONS, productSearchText, productSearchWords, type PurchaseOrderDTO, type StockApplyResultDTO, type SupplierDTO, type StockChangeInput, type StockForecastDTO, type StockForecastResponse,
   type StockProductDTO, type StockProductStatus, type StockTxnDTO,
 } from '@addendum/shared';
-import { ArrowLeftRight, ChevronDown, ChevronRight, Download, FileUp, ListPlus, PackageCheck, Plus, Replace, Search, Trash2, Pencil } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, ChevronDown, ChevronRight, Download, FileUp, ListPlus, PackageCheck, Plus, Replace, Search, Trash2, Pencil } from 'lucide-react';
 import { api } from '../../api/client';
 import { useCanDo } from '../../api/hooks';
 import { downloadCsv, parseCsv } from '../../lib/csv';
@@ -824,12 +824,12 @@ const F_STATUS: Record<StockForecastDTO['status'], { label: string; tone: 'rose'
 };
 
 /** `store`: all products, or only those the salon (Square) or Addendum Hair (online) sells. */
-export function ReorderView({ onOrders, store = 'all' }: { onOrders: () => void; store?: 'all' | 'salon' | 'hair' }) {
+export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder' }: { onOrders: () => void; store?: 'all' | 'salon' | 'hair'; initialFilter?: 'reorder' | 'alerts' | 'all' }) {
   const toast = useToast();
   const fallbackSupplier = useDefaultSupplier();
   const refresh = useRefresh();
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['stock-forecast'], queryFn: () => api.get<StockForecastResponse>('/inventory-sync/stock/forecast') });
-  const [filter, setFilter] = useState<'reorder' | 'all'>('reorder');
+  const [filter, setFilter] = useState<'reorder' | 'alerts' | 'all'>(initialFilter);
   const [qty, setQty] = useState<Record<string, string>>({});
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<string | null>(null);
@@ -842,7 +842,11 @@ export function ReorderView({ onOrders, store = 'all' }: { onOrders: () => void;
   if (isLoading) return <PageLoading />;
   if (error || !data) return <ErrorNote error={error} onRetry={refetch} />;
   const inStore = data.items.filter((i) => store === 'all' || (store === 'salon' ? i.stores.salon : i.stores.online));
-  const items = inStore.filter((i) => filter === 'all' || ['out', 'order_now', 'soon'].includes(i.status));
+  // Alerts: selling products that are out of stock, or will run out before a new order could arrive.
+  const isOut = (i: StockForecastDTO) => i.status !== 'discontinued' && i.stock <= 0 && i.ratePerDay > 0;
+  const outN = inStore.filter(isOut).length;
+  const riskN = inStore.filter((i) => i.stockoutRisk).length;
+  const items = inStore.filter((i) => filter === 'all' || (filter === 'alerts' ? isOut(i) || i.stockoutRisk : ['out', 'order_now', 'soon'].includes(i.status)));
   const counts = { out: 0, order_now: 0, soon: 0, watch: 0 } as Record<string, number>;
   for (const i of inStore) counts[i.status] = (counts[i.status] ?? 0) + 1;
   // A product in several collections is shown under its most specific one (the one with the fewest products).
@@ -889,6 +893,13 @@ export function ReorderView({ onOrders, store = 'all' }: { onOrders: () => void;
   const d = defaults ?? data.settings;
   return (
     <div>
+      {(outN > 0 || riskN > 0) && (
+        <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl2 border border-rose/30 bg-rose/10 px-4 py-3 text-[14px] text-ink">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-rose" />
+          <span>{[outN && <><b className="font-medium">{outN} selling product{outN === 1 ? '' : 's'}</b> out of stock</>, riskN && <><b className="font-medium">{riskN}</b> at risk of running out before a new order arrives</>].filter(Boolean).map((x, k) => <span key={k}>{k ? ' · ' : ''}{x}</span>)}</span>
+          {filter !== 'alerts' && <button type="button" className="ml-auto text-[13px] font-medium text-plum hover:underline" onClick={() => setFilter('alerts')}>Show them</button>}
+        </div>
+      )}
       <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         {([['Out of stock', counts.out, 'text-rose'], ['Order now', counts.order_now, 'text-rose'], ['Reorder soon', counts.soon, 'text-amber'], ['Watch', counts.watch, '']] as const).map(([l, n, c]) => (
           <div key={l} className="rounded-xl2 border border-line bg-white px-3 py-2"><p className="text-[12px] text-stone">{l}</p><p className={cx('num font-display text-[24px] leading-tight', n > 0 && c)}>{n}</p></div>
@@ -901,7 +912,7 @@ export function ReorderView({ onOrders, store = 'all' }: { onOrders: () => void;
         <button type="button" className="ml-2 text-plum underline" onClick={refreshSales} disabled={busy}>Update sales now</button>
       </p>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Segmented value={filter} onChange={setFilter} options={[{ value: 'reorder', label: 'To reorder' }, { value: 'all', label: 'All products' }]} />
+        <Segmented value={filter} onChange={setFilter} options={[{ value: 'reorder', label: 'To reorder' }, { value: 'alerts', label: `Alerts${outN + riskN ? ` (${outN + riskN})` : ''}` }, { value: 'all', label: 'All products' }]} />
         <label className="flex items-center gap-2 text-[13px] text-ink-soft">View by
           <select className="field h-9 w-auto py-1 text-sm" value={by} onChange={(e) => setBy(e.target.value as typeof by)} aria-label="View by">
             <option value="product">Product</option><option value="collection">Collection</option><option value="supplier">Supplier</option>
@@ -911,7 +922,8 @@ export function ReorderView({ onOrders, store = 'all' }: { onOrders: () => void;
           Defaults: lead <input className="field num w-16" value={d.leadTimeDays} onChange={(e) => setDefaults({ ...d, leadTimeDays: Number(e.target.value) || 0 })} /> days ·
           safety <input className="field num w-16" value={d.safetyDays} onChange={(e) => setDefaults({ ...d, safetyDays: Number(e.target.value) || 0 })} /> days ·
           cover <input className="field num w-16" value={d.coverageDays} onChange={(e) => setDefaults({ ...d, coverageDays: Number(e.target.value) || 0 })} /> days ·
-          slow to use after <input className="field num w-16" value={d.slowToUseDays} onChange={(e) => setDefaults({ ...d, slowToUseDays: Number(e.target.value) || 0 })} /> days
+          slow to use after <input className="field num w-16" value={d.slowToUseDays} onChange={(e) => setDefaults({ ...d, slowToUseDays: Number(e.target.value) || 0 })} /> days ·
+          <span title="Days until the order-by date, from how fast each product sells">reorder soon within <input className="field num w-16" value={d.soonDays} onChange={(e) => setDefaults({ ...d, soonDays: Number(e.target.value) || 0 })} /> days · watch within <input className="field num w-16" value={d.watchDays} onChange={(e) => setDefaults({ ...d, watchDays: Number(e.target.value) || 0 })} /> days</span>
           <label className="flex items-center gap-1.5"><input type="checkbox" checked={showMoq} onChange={(e) => { setShowMoq(e.target.checked); try { localStorage.setItem('reorder-moq', e.target.checked ? '1' : '0'); } catch { /* private window */ } }} />Show MOQ timing</label>
           {defaults && <Button size="sm" variant="primary" onClick={saveDefaults}>Save</Button>}
         </span>
@@ -934,7 +946,7 @@ export function ReorderView({ onOrders, store = 'all' }: { onOrders: () => void;
                 <p className="text-[15px] font-medium leading-snug text-ink">{i.label}</p>
                 <p className="text-[12px] text-stone"><span className="font-mono">{i.sku}</span>{(i.supplier ?? fallbackSupplier) ? ` · ${i.supplier ?? fallbackSupplier}` : ''}</p>
               </div>
-              <Badge tone={F_STATUS[i.status].tone}>{F_STATUS[i.status].label}</Badge>
+              <span className="flex flex-col items-end gap-1"><Badge tone={F_STATUS[i.status].tone}>{F_STATUS[i.status].label}</Badge>{i.stockoutRisk && <Badge tone="rose">Stock-out risk</Badge>}</span>
             </div>
             <dl className="mt-2 grid grid-cols-3 gap-x-3 gap-y-1 text-[13px]">
               <div><dt className="text-[11px] text-stone">In stock</dt><dd className="num">{i.stock}{i.incoming ? <span className="text-stone"> +{i.incoming}</span> : ''}</dd></div>
@@ -964,7 +976,7 @@ export function ReorderView({ onOrders, store = 'all' }: { onOrders: () => void;
                 <tr>
                   <td className="px-3 py-1.5"><input type="checkbox" checked={picked.has(i.key)} onChange={() => toggle(i.key)} aria-label={`Select ${i.label}`} /></td>
                   <td className="px-2 py-1.5"><button type="button" className="flex items-start gap-1 text-left text-ink" onClick={() => setOpen(open === i.key ? null : i.key)}>{open === i.key ? <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0" />}<span>{i.label}<span className="block text-[11px] text-stone">{i.sku}</span></span></button></td>
-                  <td className="px-2 py-1.5"><Badge tone={F_STATUS[i.status].tone}>{F_STATUS[i.status].label}</Badge></td>
+                  <td className="px-2 py-1.5"><Badge tone={F_STATUS[i.status].tone}>{F_STATUS[i.status].label}</Badge>{i.stockoutRisk && <span className="mt-1 block"><Badge tone="rose">Stock-out risk</Badge></span>}</td>
                   <td className="num px-2 py-1.5 text-right">{i.stock}</td>
                   <td className="num px-2 py-1.5 text-right">{i.incoming || ''}</td>
                   <td className="num px-2 py-1.5 text-right">{i.ratePerDay ? i.ratePerDay.toFixed(2) : '—'}</td>
@@ -984,9 +996,9 @@ export function ReorderView({ onOrders, store = 'all' }: { onOrders: () => void;
             </Fragment>)}
           </tbody>
         </table>
-        {!items.length && <EmptyState title={filter === 'reorder' ? 'Nothing needs reordering right now' : 'No products'} />}
+        {!items.length && <EmptyState title={filter === 'reorder' ? 'Nothing needs reordering right now' : filter === 'alerts' ? 'No stock alerts' : 'No products'} />}
       </div>
-      <p className="mt-2 text-[12px] text-stone">The sales rate blends the last 7 days (20%), 30 days (50%) and 90 days (30%). Open purchase orders count as stock. Set each product’s supplier, cost, lead time, MOQ and case size on Products.</p>
+      <p className="mt-2 text-[12px] text-stone">The sales rate blends the last 7 days (20%), 30 days (50%) and 90 days (30%). Ordered and shipped purchase orders count as incoming stock. Suggested amounts round up to practical numbers (7 → 10, 23 → 25), then to the minimum order and full cases. Lead time includes the supplier’s shipping days. Set each product’s supplier, cost, lead time, MOQ and case size on Products.</p>
     </div>
   );
 }
@@ -1438,7 +1450,8 @@ export function SuppliersView() {
                 </div>
                 <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[13px]">
                   <span><b className="num font-medium text-ink">{s.products}</b> <span className="text-stone">product{s.products === 1 ? '' : 's'}</span></span>
-                  <span className="text-stone">Lead time <b className="num font-medium text-ink">{s.leadUntracked ? 'Not tracked' : s.statedLeadDays != null ? `${s.statedLeadDays} days` : '—'}</b></span>
+                  <span className="text-stone">Lead time <b className="num font-medium text-ink">{s.leadUntracked ? 'Not tracked' : s.statedLeadDays != null ? `${s.statedLeadDays} days` : '—'}</b>{!s.leadUntracked && s.shippingDays ? <> + <b className="num font-medium text-ink">{s.shippingDays}</b> shipping</> : null}</span>
+                  {s.defaultMoq != null && <span className="text-stone">Default MOQ <b className="num font-medium text-ink">{s.defaultMoq}</b></span>}
                   {!s.leadUntracked && <span className={late ? 'text-rose' : 'text-stone'}>Actual <b className="num font-medium">{s.actualLeadDays != null ? `${s.actualLeadDays} days` : '—'}</b>{late && ` (${s.actualLeadDays! - s.statedLeadDays!} days late on average)`}</span>}
                   <span className="text-stone">Orders <b className="num font-medium text-ink">{s.receivedOrders}</b> received · <b className="num font-medium text-ink">{s.openOrders}</b> open</span>
                   {s.spentCents > 0 && <span className="text-stone">Spent <b className="num font-medium text-ink">${(s.spentCents / 100).toFixed(2)}</b></span>}
@@ -1459,13 +1472,14 @@ export function SuppliersView() {
 function SupplierModal({ supplier, onClose, onSaved }: { supplier: SupplierDTO | null; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const details = useCanDo()('suppliers:details');
-  const [d, setD] = useState({ name: supplier?.name ?? '', company: supplier?.companyName ?? '', email: supplier?.email ?? '', phone: supplier?.phone ?? '', website: supplier?.website ?? '', notes: supplier?.notes ?? '', lead: supplier?.leadTimeDays != null ? String(supplier.leadTimeDays) : '' });
+  const [d, setD] = useState({ name: supplier?.name ?? '', company: supplier?.companyName ?? '', email: supplier?.email ?? '', phone: supplier?.phone ?? '', website: supplier?.website ?? '', notes: supplier?.notes ?? '', lead: supplier?.leadTimeDays != null ? String(supplier.leadTimeDays) : '', shipping: supplier?.shippingDays != null ? String(supplier.shippingDays) : '', moq: supplier?.defaultMoq != null ? String(supplier.defaultMoq) : '' });
   const [untracked, setUntracked] = useState(!!supplier?.leadUntracked);
   const [saving, setSaving] = useState(false);
   const save = async () => {
     setSaving(true);
     try {
-      const body = { name: d.name, ...(details ? { companyName: d.company || null } : {}), email: d.email || null, phone: d.phone || null, website: d.website || null, notes: d.notes || null, leadTimeDays: d.lead.trim() === '' ? null : Math.round(Number(d.lead)), leadUntracked: untracked };
+      const body = { name: d.name, ...(details ? { companyName: d.company || null } : {}), email: d.email || null, phone: d.phone || null, website: d.website || null, notes: d.notes || null, leadTimeDays: d.lead.trim() === '' ? null : Math.round(Number(d.lead)), leadUntracked: untracked,
+        shippingDays: d.shipping.trim() === '' ? null : Math.round(Number(d.shipping)), defaultMoq: d.moq.trim() === '' ? null : Math.max(1, Math.round(Number(d.moq))) };
       if (supplier) await api.put('/inventory-sync/stock/suppliers/details', { ...body, previous: supplier.name });
       else await api.post('/inventory-sync/stock/suppliers', body);
       toast(supplier ? 'Saved' : `${d.name.trim()} added — now give it products`);
@@ -1490,6 +1504,8 @@ function SupplierModal({ supplier, onClose, onSaved }: { supplier: SupplierDTO |
           <Field label="Website"><input className="field" {...f('website')} /></Field>
         </>}
         <Field label="Usual lead time (days)" hint={untracked ? 'Not tracked for this supplier.' : 'Given to its products that don’t have their own.'}><input className="field num" inputMode="numeric" disabled={untracked} {...f('lead')} /></Field>
+        <Field label="Shipping (days)" hint={untracked ? 'Not tracked for this supplier.' : 'Days in transit, added to the lead time.'}><input className="field num" inputMode="numeric" disabled={untracked} {...f('shipping')} /></Field>
+        <Field label="Default MOQ" hint="Minimum order for its products that don’t have their own."><input className="field num" inputMode="numeric" {...f('moq')} /></Field>
         <div className="sm:col-span-2"><Toggle checked={untracked} onChange={setUntracked} label="Lead time not tracked"
           description="For suppliers you buy from as needed: To order times reorders on safety stock alone (no lead time), and its orders get no expected date." /></div>
         {details && <Field label="Notes" className="sm:col-span-2"><textarea className="field min-h-[72px]" {...f('notes')} /></Field>}
