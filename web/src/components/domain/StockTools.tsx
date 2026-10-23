@@ -8,7 +8,7 @@ import { AlertTriangle, ArrowLeftRight, Settings2, ChevronDown, ChevronRight, Do
 import { api } from '../../api/client';
 import { useCanDo } from '../../api/hooks';
 import { downloadCsv, parseCsv } from '../../lib/csv';
-import { dateShort, dateTime, labelOfKey, relative } from '../../lib/format';
+import { dateShort, dateTime, dayKey, labelOfKey, relative } from '../../lib/format';
 import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, Segmented, Toggle, cx, useToast } from '../ui';
 import { useStoreNames } from '../../lib/storeNames';
 import { ProductThumb } from './ProductThumb';
@@ -893,6 +893,16 @@ function SuggestedOrders({ store, onClose, onMade }: { store: 'all' | 'salon' | 
   );
 }
 
+/** "Skipped until …" with Undo (To order → All products). */
+function SkippedBadge({ until, onUndo }: { until: string; onUndo: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[11px] text-stone">
+      <Badge>{until === '9999-12-31' ? 'Skipped' : `Skipped to ${labelOfKey(until, { month: 'short', day: 'numeric' })}`}</Badge>
+      <button type="button" className="text-plum hover:underline" onClick={onUndo}>Undo</button>
+    </span>
+  );
+}
+
 /** A number of days with its label and an explanation (Forecast settings). */
 function DaysField({ label, hint, value, onChange, unit = 'days' }: { label: string; hint?: string; value: number; onChange: (v: number) => void; unit?: string }) {
   return (
@@ -922,12 +932,14 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
   const setBy = (v: typeof by) => { setByState(v); try { localStorage.setItem('reorder-by', v); } catch { /* private window */ } };
   if (isLoading) return <PageLoading />;
   if (error || !data) return <ErrorNote error={error} onRetry={refetch} />;
-  const inStore = data.items.filter((i) => store === 'all' || (store === 'salon' ? i.stores.salon : i.stores.online));
+  const inStoreAll = data.items.filter((i) => store === 'all' || (store === 'salon' ? i.stores.salon : i.stores.online));
+  // Skipped products (not going to order) only show under All products.
+  const inStore = inStoreAll.filter((i) => !i.skippedUntil);
   // Alerts: selling products that are out of stock, or will run out before a new order could arrive.
   const isOut = (i: StockForecastDTO) => i.status !== 'discontinued' && i.stock <= 0 && i.ratePerDay > 0;
   const outN = inStore.filter(isOut).length;
   const riskN = inStore.filter((i) => i.stockoutRisk).length;
-  const items = inStore.filter((i) => filter === 'all' || (filter === 'alerts' ? isOut(i) || i.stockoutRisk : ['out', 'order_now', 'soon'].includes(i.status)));
+  const items = (filter === 'all' ? inStoreAll : inStore).filter((i) => filter === 'all' || (filter === 'alerts' ? isOut(i) || i.stockoutRisk : ['out', 'order_now', 'soon'].includes(i.status)));
   const counts = { out: 0, order_now: 0, soon: 0, watch: 0 } as Record<string, number>;
   for (const i of inStore) counts[i.status] = (counts[i.status] ?? 0) + 1;
   // A product in several collections is shown under its most specific one (the one with the fewest products).
@@ -957,6 +969,21 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
       setPicked(new Set());
       refresh();
       onOrders();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  // Skip: not going to order these — out of suggestions and alerts until the date (or until turned back on).
+  const skip = async (keys: string[], days: number | null | 'off') => {
+    const until = days === 'off' ? null : days == null ? '9999-12-31' : (() => { const d = new Date(); d.setDate(d.getDate() + days); return dayKey(d); })();
+    setBusy(true);
+    try {
+      await api.put('/inventory-sync/stock/products/skip', { keys, until });
+      toast(until ? `${keys.length} product${keys.length === 1 ? '' : 's'} skipped${until === '9999-12-31' ? ' until turned back on' : ` until ${labelOfKey(until, { month: 'short', day: 'numeric' })}`}` : 'Back in suggestions');
+      setPicked(new Set());
+      refetch();
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
@@ -1041,7 +1068,11 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
       {picked.size > 0 && (
         <div className="sticky top-0 z-10 mb-3 flex items-center gap-2 rounded-xl2 border border-line bg-white px-4 py-2 text-[13px] shadow-sm">
           <span className="text-ink">{picked.size} selected</span>
-          <Button size="sm" variant="primary" icon={<Plus className="h-4 w-4" />} loading={busy} onClick={createPOs} className="ml-auto">Create purchase orders</Button>
+          <select className="field ml-auto h-9 w-auto py-1 text-sm" value="" disabled={busy} aria-label="Skip selected"
+            onChange={(e) => { const v = e.target.value; if (v) void skip([...picked], v === 'forever' ? null : Number(v)); }}>
+            <option value="">Skip (not ordering)…</option><option value="14">for 2 weeks</option><option value="30">for 30 days</option><option value="90">for 90 days</option><option value="forever">until I turn it back on</option>
+          </select>
+          <Button size="sm" variant="primary" icon={<Plus className="h-4 w-4" />} loading={busy} onClick={createPOs}>Create purchase orders</Button>
         </div>
       )}
       {/* Phones: a card per product — status, stock, when to order, and the amount to order. */}
@@ -1056,7 +1087,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
                 <p className="text-[15px] font-medium leading-snug text-ink">{i.label}</p>
                 <p className="text-[12px] text-stone"><span className="font-mono">{i.sku}</span>{(i.supplier ?? fallbackSupplier) ? ` · ${i.supplier ?? fallbackSupplier}` : ''}</p>
               </div>
-              <span className="flex flex-col items-end gap-1"><Badge tone={F_STATUS[i.status].tone}>{F_STATUS[i.status].label}</Badge>{i.stockoutRisk && <Badge tone="rose">Stock-out risk</Badge>}</span>
+              <span className="flex flex-col items-end gap-1"><Badge tone={F_STATUS[i.status].tone}>{F_STATUS[i.status].label}</Badge>{i.stockoutRisk && <Badge tone="rose">Stock-out risk</Badge>}{i.skippedUntil && <SkippedBadge until={i.skippedUntil} onUndo={() => skip([i.key], 'off')} />}</span>
             </div>
             <dl className="mt-2 grid grid-cols-3 gap-x-3 gap-y-1 text-[13px]">
               <div><dt className="text-[11px] text-stone">In stock</dt><dd className="num">{i.stock}{i.incoming ? <span className="text-stone"> +{i.incoming}</span> : ''}</dd></div>
@@ -1086,7 +1117,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
                 <tr>
                   <td className="px-3 py-1.5"><input type="checkbox" checked={picked.has(i.key)} onChange={() => toggle(i.key)} aria-label={`Select ${i.label}`} /></td>
                   <td className="px-2 py-1.5"><button type="button" className="flex items-start gap-1 text-left text-ink" onClick={() => setOpen(open === i.key ? null : i.key)}>{open === i.key ? <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0" />}<span>{i.label}<span className="block text-[11px] text-stone">{i.sku}</span></span></button></td>
-                  <td className="px-2 py-1.5"><Badge tone={F_STATUS[i.status].tone}>{F_STATUS[i.status].label}</Badge>{i.stockoutRisk && <span className="mt-1 block"><Badge tone="rose">Stock-out risk</Badge></span>}</td>
+                  <td className="px-2 py-1.5"><Badge tone={F_STATUS[i.status].tone}>{F_STATUS[i.status].label}</Badge>{i.stockoutRisk && <span className="mt-1 block"><Badge tone="rose">Stock-out risk</Badge></span>}{i.skippedUntil && <span className="mt-1 block"><SkippedBadge until={i.skippedUntil} onUndo={() => skip([i.key], 'off')} /></span>}</td>
                   <td className="num px-2 py-1.5 text-right">{i.stock}</td>
                   <td className="num px-2 py-1.5 text-right">{i.incoming || ''}</td>
                   <td className="num px-2 py-1.5 text-right">{i.ratePerDay ? i.ratePerDay.toFixed(2) : '—'}</td>

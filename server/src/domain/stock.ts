@@ -515,6 +515,8 @@ export async function stockForecast(): Promise<StockForecastResponse> {
   const supRows = new Map((await db().query<any>('SELECT * FROM suppliers')).map((x) => [x.name as string, x]));
   const untracked = new Set([...supRows.values()].filter((x) => x.lead_untracked).map((x) => x.name as string));
   const fallback = await defaultSupplier();
+  // Skipped products (To order → Skip): not suggested or alerted until the date passes.
+  const skips = new Map((await db().query<any>(`SELECT product_key, to_char(skip_until, 'YYYY-MM-DD') AS u FROM stock_products WHERE skip_until >= $1::date`, [today])).map((x) => [x.product_key as string, x.u as string]));
   const goneWords = settings.discontinuedCollections.map((w) => w.trim()).filter(Boolean);
   const discontinuedWord = (r: (typeof L.rows)[number]) => goneWords.find((w) => {
     const re = new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
@@ -611,11 +613,13 @@ export async function stockForecast(): Promise<StockForecastResponse> {
     const moqLastsDays = moq && rate > 0 ? Math.round(moq / rate) : null;
     if (moqLastsDays != null && moqLastsDays > settings.slowToUseDays) why.push(`Slow to use: the minimum order of ${moq} lasts about ${moqLastsDays} days.`);
     // Runs out before an order placed today would arrive (what's on order counts as stock).
-    const stockoutRisk = !discontinued && rate > 0 && stock > 0 && daysOfStock != null && daysOfStock < lead;
+    const skippedUntil = skips.get(r.key) ?? null;
+    if (skippedUntil) { suggested = 0; why.push(skippedUntil === '9999-12-31' ? 'Skipped — not being ordered (until turned back on).' : `Skipped — not being ordered until ${skippedUntil}.`); }
+    const stockoutRisk = !discontinued && !skippedUntil && rate > 0 && stock > 0 && daysOfStock != null && daysOfStock < lead;
     if (stockoutRisk) why.push(`Stock-out risk: about ${Math.round(daysOfStock!)} days of stock, but an order takes ${lead} days to arrive.`);
     items.push({
       key: r.key, label: r.label, sku: r.sku, supplier: r.supplier ?? all.find((x) => x.supplier)?.supplier ?? null, collections: [...new Set(all.flatMap((x) => x.collections ?? []))], stock, incoming: inc, ratePerDay: Math.round(rate * 100) / 100, units7: u7, units30: u30, units90: u90,
-      leadTimeDays: lead, leadUntracked: noLead, shippingDays: shipping, stockoutRisk, safetyDays: safety, daysOfStock: daysOfStock == null ? null : Math.round(daysOfStock), orderBy, status, suggestedQty: suggested,
+      leadTimeDays: lead, leadUntracked: noLead, shippingDays: shipping, stockoutRisk, skippedUntil, safetyDays: safety, daysOfStock: daysOfStock == null ? null : Math.round(daysOfStock), orderBy, status, suggestedQty: suggested,
       moq, caseSize: r.caseSize, costCents: r.costCents,
       moqCostCents: moq && r.costCents != null ? moq * r.costCents : null, moqArrivesOn: moq ? addDays(today, lead) : null, moqLastsDays,
       slowToUse: moqLastsDays != null && moqLastsDays > settings.slowToUseDays, why, preorders,
@@ -808,7 +812,7 @@ export async function suggestedOrderPlan(store: 'salon' | 'shopify' | 'all'): Pr
   const f = await stockForecast();
   const fallback = await defaultSupplier();
   const inStore = (i: StockForecastDTO) => store === 'all' || (store === 'salon' ? i.stores.salon : i.stores.online);
-  const need = f.items.filter((i) => i.suggestedQty > 0 && ['out', 'order_now', 'soon'].includes(i.status) && inStore(i));
+  const need = f.items.filter((i) => i.suggestedQty > 0 && !i.skippedUntil && ['out', 'order_now', 'soon'].includes(i.status) && inStore(i));
   const coll = collectionOfEach(f.items.filter(inStore));
   const groups = new Map<string, StockForecastDTO[]>();
   for (const i of need) groups.set(coll(i), [...(groups.get(coll(i)) ?? []), i]);
@@ -1100,7 +1104,7 @@ export async function analyticsForecast() {
   const f = await stockForecast();
   const bucket = (i: StockForecastDTO) => (i.status === 'out' ? (i.ratePerDay > 0 ? 'order_now' : null) : (['order_now', 'soon', 'watch', 'healthy'] as const).find((s) => s === i.status) ?? null);
   return {
-    items: f.items.filter((i) => !i.leadUntracked).flatMap((i) => {
+    items: f.items.filter((i) => !i.leadUntracked && !i.skippedUntil).flatMap((i) => {
       const b = bucket(i);
       return b ? [{ key: i.key, label: i.label, sku: i.sku, status: b, stock: i.stock, incoming: i.incoming, ratePerDay: i.ratePerDay, daysOfStock: i.daysOfStock, orderBy: i.orderBy,
         suggestedQty: i.suggestedQty, costCents: i.costCents, supplier: i.supplier, collections: i.collections, stores: i.stores }] : [];
@@ -1211,6 +1215,14 @@ export async function assignSupplier(a: SupplierAssign, staffId: string | null) 
 }
 
 /** Sets the lead time on all of a supplier's products (e.g. to what they actually take). */
+/** To order → Skip: leave products out of suggestions and alerts until a date (null = turn them back on). */
+export async function skipProducts(keys: string[], until: string | null, staffId: string | null) {
+  await db().query(
+    `INSERT INTO stock_products(product_key, skip_until, updated_by_staff_id) SELECT k, $2::date, $3 FROM unnest($1::text[]) k
+     ON CONFLICT (product_key) DO UPDATE SET skip_until = $2::date, updated_by_staff_id = $3, updated_at = now()`, [[...new Set(keys)], until, staffId]);
+  forgetStockCache();
+}
+
 export async function setSupplierLeadTime(name: string, days: number, staffId: string | null) {
   const r = await db().query<{ product_key: string }>('UPDATE stock_products SET lead_time_days = $2, updated_by_staff_id = $3, updated_at = now() WHERE supplier = $1 RETURNING product_key', [name, days, staffId]);
   forgetStockCache();
@@ -1333,7 +1345,7 @@ export async function notifyNewPreorders(notify: (staffIds: string[], title: str
  */
 export async function notifyStockAlerts(notify: (staffIds: string[], title: string, body: string) => Promise<void>, recipients: () => Promise<string[]>) {
   const f = await stockForecast();
-  const state = (i: StockForecastDTO) => (i.status === 'discontinued' ? null : i.stock <= 0 && i.ratePerDay > 0 ? 'out' : i.stockoutRisk ? 'risk' : null);
+  const state = (i: StockForecastDTO) => (i.status === 'discontinued' || i.skippedUntil ? null : i.stock <= 0 && i.ratePerDay > 0 ? 'out' : i.stockoutRisk ? 'risk' : null);
   const now: Record<string, 'out' | 'risk'> = {};
   for (const i of f.items) { const s = state(i); if (s) now[i.key] = s; }
   const before = (await getKV<Record<string, string>>('stock.alerts.seen')) ?? null;

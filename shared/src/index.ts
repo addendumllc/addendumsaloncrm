@@ -2217,6 +2217,8 @@ export interface StockForecastDTO {
   shippingDays: number;
   /** Stock-out risk: at this rate it runs out before an order placed today would arrive. */
   stockoutRisk: boolean;
+  /** Skipped (not going to order) until this date — '9999-12-31' = until turned back on; left out of suggestions and alerts. */
+  skippedUntil: string | null;
   stock: number;
   /** On open purchase orders (ordered or shipped), not yet received. */
   incoming: number;

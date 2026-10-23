@@ -7,7 +7,7 @@ import {
   unmarkSeparate,
 } from '../domain/inventorySync.js';
 import { addToSquare, applyNewLength, applyPrices, applyProPrices, newLengthPlan, priceList, proPricePlan, squareCandidates,
-  applyStockChanges, createPurchaseOrders, suggestPurchaseOrders, suggestedOrderPlan, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
+  applyStockChanges, createPurchaseOrders, skipProducts, suggestPurchaseOrders, suggestedOrderPlan, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
   assignSupplier, deleteSupplier, refreshShopifySales, renameSupplier, saveProductSettings, saveSupplier, setForecastSettings, setSupplierLeadTime, stockForecast, stockHistory, stockProducts, updatePurchaseOrder,
 } from '../domain/stock.js';
 import { setSquareSku } from '../domain/squareInventory.js';
@@ -129,6 +129,13 @@ const intOrNull = (max: number) => z.number().int().min(0).max(max).nullable().o
 /** Every product in Square and Shopify, with stock in each and ordering details. */
 inventorySyncRouter.get('/stock/products', ah(async (_req, res) => res.json(await stockProducts())));
 
+// To order → Skip: not going to order these (until a date, or until turned back on with until = null).
+inventorySyncRouter.put('/stock/products/skip', ah(async (req, res) => {
+  const b = parse(z.object({ keys: z.array(z.string().min(1).max(200)).min(1).max(1000), until: ymd.nullable() }), req.body);
+  await skipProducts(b.keys, b.until, req.user!.id);
+  await logAction(req, 'stock.skip', 'stock', null, { products: b.keys.length, until: b.until });
+  res.json({ ok: true });
+}));
 inventorySyncRouter.put('/stock/products/settings', ah(async (req, res) => {
   const b = parse(z.object({ rows: z.array(z.object({
     key: z.string().min(1).max(200), supplier: z.string().max(120).nullable().optional(), costCents: intOrNull(10_000_000), leadTimeDays: intOrNull(730),

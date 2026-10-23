@@ -312,5 +312,22 @@ describe('Suppliers', () => {
       demoSquareStock.delete('demo-dup');
     }
   });
+
+  it('Skip: a product not being ordered drops out of suggestions, alerts and the forecast until the date or Undo', async () => {
+    await api.post('/api/inventory-sync/stock/sales/refresh');
+    const products = (await api.get('/api/inventory-sync/stock/products')).body.products;
+    await api.put('/api/inventory-sync/stock/products/settings', { rows: products.map((p: any) => ({ key: p.key, leadTimeDays: 700 })) });
+    forgetStockCache();
+    const plan = (await api.get('/api/inventory-sync/stock/purchase-orders/suggest?store=all')).body.groups;
+    const key = plan[0].lines[0].productKey;
+    expect((await api.put('/api/inventory-sync/stock/products/skip', { keys: [key], until: '9999-12-31' })).status).toBe(200);
+    const item = (await api.get('/api/inventory-sync/stock/forecast')).body.items.find((i: any) => i.key === key);
+    expect(item).toMatchObject({ skippedUntil: '9999-12-31', suggestedQty: 0, stockoutRisk: false });
+    const after = (await api.get('/api/inventory-sync/stock/purchase-orders/suggest?store=all')).body.groups;
+    expect(after.some((g: any) => g.lines.some((l: any) => l.productKey === key))).toBe(false);
+    expect((await api.get('/api/analytics/forecast')).body.items.some((i: any) => i.key === key)).toBe(false);
+    await api.put('/api/inventory-sync/stock/products/skip', { keys: [key], until: null });
+    expect((await api.get('/api/inventory-sync/stock/forecast')).body.items.find((i: any) => i.key === key).skippedUntil).toBeNull();
+  });
 });
 
