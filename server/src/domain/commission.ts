@@ -911,13 +911,17 @@ export async function rebuildCommission(now = new Date()) {
 function refundRow(o: SquareOrder, at: Date, txDate: string, key: string, staff: string | null, name: string, gross: number, disc: number, elig: number,
   net: number, commission: number, og: { rate_bps: number | null; method: string | null; rule_id: string | null; category: string; appointment_id: string | null; service_id: string | null } | null,
   steps: string[], review: boolean, reason: string | null, sourceOrder: string | null, base: (o: any, d: string, at: Date) => any): Desired {
+  // Commission never goes negative on its own: a refund that takes commission back is held until an admin accepts it.
+  const holds = !!staff && commission < 0;
+  if (holds) steps.push('On hold: refunds don’t come off commission until accepted in Needs review.');
   return {
     ...base(o, txDate, at), source_key: key, staff_id: staff, kind: 'refund', category: (og?.category as any) ?? 'other', square_line_item_uid: null,
     source_order_id: sourceOrder, appointment_id: og?.appointment_id ?? null, service_id: og?.service_id ?? null, catalog_object_id: null,
     item_name: `Refund: ${name}`, quantity: 1, share: 1, service_date: null, gross_cents: gross, discount_cents: disc, eligible_cents: elig,
     net_sales_cents: net, tip_cents: 0, rule_id: og?.rule_id ?? null, method: og?.method ?? null, rate_bps: og?.rate_bps ?? null, flat_cents: null,
-    commission_cents: commission, calc: { steps }, attribution: null, needs_review: review || !staff, review_reason: reason ?? (staff ? null : 'Needs a team member.'),
-    line_key: null,
+    commission_cents: commission, calc: { steps }, attribution: null, needs_review: review || !staff || holds,
+    review_reason: reason ?? (!staff ? 'Needs a team member.' : holds ? 'Refund — on hold so commission doesn’t go negative. Accept it to take it off their commission.' : null),
+    line_key: null, on_hold: holds,
   };
 }
 
@@ -1025,7 +1029,8 @@ export function summarize(entries: CommissionEntryDTO[], from: string, to: strin
   const counted = (e: CommissionEntryDTO) => !!e.staffId && !e.onHold;
   return {
     from, to, staffId,
-    totalCommissionCents: sum(counted, (e) => e.commissionCents),
+    // Never below zero: what's owed can't be negative (refunds are held until accepted; anything left over waits).
+    totalCommissionCents: Math.max(0, sum(counted, (e) => e.commissionCents)),
     serviceCommissionCents: sum((e) => counted(e) && e.kind === 'sale' && e.category === 'service', (e) => e.commissionCents),
     retailCommissionCents: sum((e) => counted(e) && e.kind === 'sale' && e.category === 'retail', (e) => e.commissionCents),
     refundsCents: sum((e) => counted(e) && e.kind === 'refund', (e) => e.commissionCents),

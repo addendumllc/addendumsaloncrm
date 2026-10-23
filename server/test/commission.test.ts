@@ -118,6 +118,12 @@ describe('Square sales → commission', () => {
     expect(refund.source_order_id).toBe('demo-ord-walkin');
     expect(refund.commission_cents).toBe(-Math.round(original.commission_cents / 2)); // 1 of 2 returned
     expect(refund.net_sales_cents).toBe(-6500);
+    // Held until accepted: it doesn't come off commission on its own.
+    expect(refund).toMatchObject({ on_hold: true, needs_review: true });
+    expect(refund.review_reason).toMatch(/on hold/);
+    const s = (await admin.get(`/api/commission/staff/${lisaId}?${RANGE()}`)).body.summary;
+    expect(s.refundsCents).toBe(0);
+    expect(s.totalCommissionCents).toBeGreaterThanOrEqual(0);
   });
 
   it('sends what Square can’t attribute to review instead of guessing, and a person can credit it', async () => {
