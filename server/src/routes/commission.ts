@@ -259,6 +259,16 @@ commissionRouter.put('/pay/:staffId', requirePermission('commission:manage'), ah
   res.json({ pay: await getPay(req.params.staffId) });
 }));
 
+/** Whether someone can be picked or suggested for commission when Square didn't record who checked out. */
+commissionRouter.put('/pay/:staffId/suggest', requirePermission('commission:manage'), ah(async (req, res) => {
+  const b = parse(z.object({ suggest: z.boolean() }), req.body);
+  const r = await db().query('UPDATE staff SET commission_suggest = $2, updated_at = now() WHERE id = $1 RETURNING id', [req.params.staffId, b.suggest]);
+  if (!r.length) throw notFound('That team member');
+  await logAction(req, 'commission.suggest_update', 'staff', req.params.staffId, { suggest: b.suggest });
+  if ((await getSettings()).commission.enabled) await rebuildCommission();
+  res.json({ pay: await getPay(req.params.staffId) });
+}));
+
 /** Correct a wage in the history (amount, type or start date), or remove it. */
 const rateInput = z.object({
   payType: z.enum(['none', 'hourly', 'salary']), hourlyRateCents: z.number().int().min(0).max(100_000).nullable(),

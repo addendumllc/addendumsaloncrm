@@ -144,6 +144,10 @@ export function WagesSection({ staffId, staffName, part }: { staffId: string; st
       {(saved.rates.length > 0 || editable) && <RateHistory staffId={staffId} rates={saved.rates} editable={editable} onChanged={reload} />}
       <Toggle checked={d.tipEligible} disabled={!editable} onChange={(v) => setD({ ...d, tipEligible: v })} label="Tip eligible"
         description={d.tipEligible ? `Tips on ${first}’s work go to ${first}.` : `Tips on ${first}’s work go to Needs review on Team Payroll, to be credited by hand.`} />
+      {/* Saved right away (not with Save pay). */}
+      <Toggle checked={saved.suggestForCommission !== false} disabled={!editable} label="Suggest for commission"
+        onChange={async (v) => { try { await api.put(`/commission/pay/${staffId}/suggest`, { suggest: v }); toast(v ? `${first} can be suggested again` : `${first} won’t be suggested for commission`); reload(); } catch (e) { toast((e as Error).message, 'error'); } }}
+        description={saved.suggestForCommission !== false ? `When Square didn’t record who checked out, ${first} can be picked or suggested.` : `Never picked or suggested (e.g. not at the salon) — credit ${first} only by choosing them.`} />
       </>}
       {part !== 'pay' && <TaxFields t={d.tax} editable={editable} location={location} onChange={(tax) => setD({ ...d, tax })} />}
       {editable && dirty && <Button variant="primary" size="sm" loading={saving} onClick={save}>{part === 'taxes' ? 'Save tax information' : part === 'pay' ? 'Save pay' : 'Save pay & taxes'}</Button>}

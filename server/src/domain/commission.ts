@@ -459,7 +459,7 @@ export async function rebuildCommission(now = new Date()) {
   // When Square didn't record who checked out: the client's preferred stylist, whoever was on the clock, a backup person.
   // Saved settings from before this option existed fall back to the defaults (settings are deep-merged on read).
   const uc = cs.unrecordedCheckout ?? { clientStylist: true, onTheClock: true, fallbackStaffId: null, hold: true };
-  const roles = new Map((await db().query<any>('SELECT id, role, active FROM staff')).map((s) => [s.id as string, s]));
+  const roles = new Map((await db().query<any>('SELECT id, role, active, commission_suggest FROM staff')).map((s) => [s.id as string, s]));
   const preferredByCustomer = new Map((await db().query<any>(
     'SELECT square_customer_id, preferred_staff_id FROM clients WHERE square_customer_id IS NOT NULL AND preferred_staff_id IS NOT NULL'))
     .map((c) => [c.square_customer_id as string, c.preferred_staff_id as string]));
@@ -475,7 +475,8 @@ export async function rebuildCommission(now = new Date()) {
   const fallbackFor = (customerId: string | null | undefined, at: Date) => {
     const suggestions: CommissionSuggestion[] = [];
     const add = (id: string | null | undefined, why: string) => {
-      if (id && staffNames.has(id) && roles.get(id)?.active !== false && !suggestions.some((s) => s.staffId === id)) suggestions.push({ staffId: id, name: staffNames.get(id)!, why });
+      // Never someone who's switched off for suggestions (e.g. never at the salon) — they're credited only when chosen.
+      if (id && staffNames.has(id) && roles.get(id)?.active !== false && roles.get(id)?.commission_suggest !== false && !suggestions.some((s) => s.staffId === id)) suggestions.push({ staffId: id, name: staffNames.get(id)!, why });
       return suggestions.find((s) => s.staffId === id) ?? null;
     };
     let pick: CommissionSuggestion | null = null;

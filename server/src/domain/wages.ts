@@ -46,7 +46,7 @@ async function listRates(staffId: string): Promise<PayRateDTO[]> {
 }
 
 const payDTO = async (r: any): Promise<StaffPayDTO> => ({
-  staffId: r.id, payType: r.pay_type, hourlyRateCents: r.hourly_rate_cents, salaryCents: r.salary_cents, salaryPeriod: r.salary_period, tipEligible: r.tip_eligible,
+  staffId: r.id, payType: r.pay_type, hourlyRateCents: r.hourly_rate_cents, salaryCents: r.salary_cents, salaryPeriod: r.salary_period, tipEligible: r.tip_eligible, suggestForCommission: r.commission_suggest !== false,
   taxes: taxDTO(r), rates: await listRates(r.id),
 });
 

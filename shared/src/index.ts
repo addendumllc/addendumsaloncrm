@@ -939,6 +939,8 @@ export type PayType = 'none' | 'hourly' | 'salary';
 export type SalaryPeriod = 'week' | 'biweekly' | 'semimonthly' | 'month' | 'year';
 export interface StaffPayDTO {
   staffId: string;
+  /** False: never picked or suggested for commission when Square didn't record who checked out (credit them by choosing). */
+  suggestForCommission?: boolean;
   payType: PayType;
   hourlyRateCents: number | null;
   /** Salary per salaryPeriod. */

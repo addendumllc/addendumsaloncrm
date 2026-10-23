@@ -250,6 +250,13 @@ describe('Rate changes, finalizing and history', () => {
     expect(b2).toMatchObject({ staff_id: michaelId, attribution: 'fallback', on_hold: true });
     const review = (await admin.get('/api/commission/review')).body.entries;
     expect(review.find((e: any) => e.squareOrderId === 'demo-ord-nobody-b').calc.suggestions[0]).toMatchObject({ staffId: michaelId });
+    // Someone switched off for suggestions (e.g. never at the salon) is never picked or suggested.
+    expect((await admin.put(`/api/commission/pay/${michaelId}/suggest`, { suggest: false })).status).toBe(200);
+    const b3 = (await entries("square_order_id = 'demo-ord-nobody-b'"))[0];
+    expect(b3.staff_id).toBeNull();
+    const review3 = (await admin.get('/api/commission/review')).body.entries.find((e: any) => e.squareOrderId === 'demo-ord-nobody-b');
+    expect((review3.calc.suggestions ?? []).some((x: any) => x.staffId === michaelId)).toBe(false);
+    await admin.put(`/api/commission/pay/${michaelId}/suggest`, { suggest: true });
 
     // Both credited to Jen at once.
     const ids = review.filter((e: any) => e.squareOrderId?.startsWith('demo-ord-nobody')).map((e: any) => e.id);
