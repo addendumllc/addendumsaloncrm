@@ -7,6 +7,7 @@ import type {
   CommissionTier,
   CommissionSuggestion,
 } from '@addendum/shared';
+import { payPeriodFor } from '@addendum/shared';
 import { db } from '../db/index.js';
 import { squareService } from '../integrations/registry.js';
 import type { SquareOrder, SquareOrderLineItem } from '../integrations/square/types.js';
@@ -1014,11 +1015,12 @@ export async function listEntries(f: { staffId: string | null | 'all'; from: str
 }
 
 /** Needs review looks back one month (sale date) unless other dates are chosen. */
+/** Needs review covers the current pay period unless other dates are chosen. */
 export async function reviewRange(range?: { from?: string | null; to?: string | null }) {
-  const today = localDate(new Date(), (await getSettings()).business.timezone);
-  const d = new Date(`${today}T12:00:00Z`);
-  d.setUTCMonth(d.getUTCMonth() - 1);
-  return { from: range?.from || d.toISOString().slice(0, 10), to: range?.to || today };
+  const s = await getSettings();
+  const today = localDate(new Date(), s.business.timezone);
+  const period = payPeriodFor(today, s.commission.paySchedule);
+  return { from: range?.from || period.from, to: range?.to || (period.to < today ? period.to : today) };
 }
 
 export async function reviewQueue(range?: { from?: string | null; to?: string | null }) {

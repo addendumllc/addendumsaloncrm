@@ -284,13 +284,15 @@ describe('Rate changes, finalizing and history', () => {
     demoExtraOrders.length = 0;
   });
 
-  it('Needs review shows the last month unless other dates are chosen', async () => {
+  it('Needs review shows this pay period unless other dates are chosen', async () => {
     const all = (await admin.get(`/api/commission/review?from=${daysAgo(400)}&to=${today()}`)).body.entries;
     const r = (await admin.get('/api/commission/review')).body;
-    const monthAgo = (() => { const d = new Date(`${today()}T12:00:00Z`); d.setUTCMonth(d.getUTCMonth() - 1); return d.toISOString().slice(0, 10); })();
-    expect(r).toMatchObject({ from: monthAgo, to: today() });
-    expect(r.entries.every((e: any) => e.transactionDate >= monthAgo)).toBe(true);
-    expect(r.entries.length).toBe(all.filter((e: any) => e.transactionDate >= monthAgo).length);
+    const period = payPeriodFor(today(), (await admin.get('/api/settings')).body.settings.commission.paySchedule);
+    expect(r).toMatchObject({ from: period.from, to: period.to < today() ? period.to : today() });
+    expect(r.entries.every((e: any) => e.transactionDate >= period.from)).toBe(true);
+    expect(r.entries.length).toBe(all.filter((e: any) => e.transactionDate >= period.from).length);
+    // Other dates on request.
+    expect((await admin.get(`/api/commission/review?from=${daysAgo(400)}&to=${today()}`)).body.entries.length).toBe(all.length);
     expect((await admin.get('/api/commission/status')).body.status?.needsReview ?? (await admin.get('/api/commission/status')).body.needsReview).toBe(r.entries.length);
   });
 

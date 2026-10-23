@@ -345,7 +345,7 @@ function ReviewQueue() {
   const toast = useToast();
   const qc = useQueryClient();
   const canDo = useCanDo();
-  // The last month unless other dates are chosen.
+  // The current pay period unless other dates are chosen.
   const [range, setRange] = useState<{ from: string; to: string } | null>(null);
   const rq = range ? `?from=${range.from}&to=${range.to}` : '';
   const { data: res, isLoading } = useQuery({ queryKey: ['commission-review', range], queryFn: () => api.get<{ entries: CommissionEntryDTO[]; from: string; to: string }>(`/commission/review${rq}`) });
@@ -375,7 +375,7 @@ function ReviewQueue() {
     <div className="flex flex-wrap items-end gap-2">
       <Field label="Sales from"><input type="date" className="field h-9 py-1 text-sm" value={res.from} max={res.to} onChange={(e) => e.target.value && setRange({ from: e.target.value, to: res.to })} /></Field>
       <Field label="To"><input type="date" className="field h-9 py-1 text-sm" value={res.to} min={res.from} onChange={(e) => e.target.value && setRange({ from: res.from, to: e.target.value })} /></Field>
-      {range ? <Button size="sm" variant="ghost" onClick={() => setRange(null)}>Back to the last month</Button> : <span className="pb-2 text-[13px] text-stone">The last month. Choose earlier dates to check older sales.</span>}
+      {range ? <Button size="sm" variant="ghost" onClick={() => setRange(null)}>Back to this pay period</Button> : <span className="pb-2 text-[13px] text-stone">This pay period. Choose other dates to check older sales.</span>}
     </div>
   );
   if (isLoading) return <div className="flex justify-center py-8"><Spinner /></div>;
