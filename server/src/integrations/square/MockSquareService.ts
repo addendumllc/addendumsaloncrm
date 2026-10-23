@@ -70,6 +70,15 @@ export class MockSquareService implements SquareService {
       return { sku: it.sku, variationId: id };
     });
   }
+  async addVariations(variations: { itemId: string; name: string; sku: string; priceCents: number }[]) {
+    return variations.map((v, i) => {
+      const item = DEMO_PRODUCTS.find((p) => p.itemId === v.itemId);
+      if (!item) throw new Error('not found');
+      const id = `demo-var-${Date.now().toString(36)}-${i}`;
+      DEMO_PRODUCTS.push({ ...item, variationId: id, variationName: v.name, sku: v.sku, upc: null, priceCents: v.priceCents, trackInventory: true });
+      return { sku: v.sku, variationId: id };
+    });
+  }
   async setVariationPrice(variationId: string, priceCents: number) {
     if (!DEMO_PRODUCTS.some((p) => p.variationId === variationId)) throw new Error('not found');
     demoSquarePrices.set(variationId, priceCents);

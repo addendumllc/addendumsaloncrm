@@ -6,7 +6,7 @@ import {
   copyShopifySkuToSquare, editLinkedProduct, getRun, linkByIds, linkBySku, listLinks, listRuns, markSeparate, resolveLink, setProductKind, setShopifySync, skuCandidates, startInventorySync, syncOverview, unlink,
   unmarkSeparate,
 } from '../domain/inventorySync.js';
-import { addToSquare, applyPrices, applyProPrices, priceList, proPricePlan, squareCandidates,
+import { addToSquare, applyNewLength, applyPrices, applyProPrices, newLengthPlan, priceList, proPricePlan, squareCandidates,
   applyStockChanges, createPurchaseOrders, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
   assignSupplier, deleteSupplier, refreshShopifySales, renameSupplier, saveProductSettings, saveSupplier, setForecastSettings, setSupplierLeadTime, stockForecast, stockHistory, stockProducts, updatePurchaseOrder,
 } from '../domain/stock.js';
@@ -178,6 +178,21 @@ inventorySyncRouter.post('/stock/to-square', ah(async (req, res) => {
   await logAction(req, 'stock.add_to_square', 'stock', null, { created: r.created, skipped: r.skipped.length });
   res.json(r);
 }));
+const cents = z.number().int().min(0).max(10_000_000);
+// Add a length (e.g. 22" next to 18"): preview, then create, in every store that sells the product. Stock starts at 0.
+const newLengthBody = z.object({
+  search: z.string().trim().min(1).max(100), from: z.string().trim().regex(/^[0-9]{1,3}$/), to: z.string().trim().regex(/^[0-9]{1,3}$/),
+  prices: z.object({ pro: cents.nullable(), retail: cents.nullable(), retailPro: cents.nullable(), square: cents.nullable() }),
+});
+inventorySyncRouter.post('/stock/new-length/preview', ah(async (req, res) => {
+  const { services: _s, ...plan } = await newLengthPlan(parse(newLengthBody, req.body));
+  res.json({ ...plan, plan: plan.plan.map(({ options: _o, productId: _p, ...p }) => p) });
+}));
+inventorySyncRouter.post('/stock/new-length', ah(async (req, res) => {
+  const r = await applyNewLength(parse(newLengthBody, req.body));
+  await logAction(req, 'stock.new_length', 'stock', null, { created: r.created, failed: r.failed.length });
+  res.json(r);
+}));
 // Pro listings in the retail store take the professional store's price for the same SKU (preview, then apply).
 inventorySyncRouter.get('/stock/prices/pro', ah(async (_req, res) => {
   const { retailService: _s, ...plan } = await proPricePlan();
@@ -188,7 +203,6 @@ inventorySyncRouter.post('/stock/prices/pro', ah(async (req, res) => {
   await logAction(req, 'stock.pro_prices', 'stock', null, { saved: r.saved, failed: r.failed.length });
   res.json(r);
 }));
-const cents = z.number().int().min(0).max(10_000_000);
 const variantPrices = z.array(z.object({ variantId: z.string().min(1).max(200), productId: z.string().min(1).max(200), priceCents: cents })).max(20);
 inventorySyncRouter.put('/stock/prices', ah(async (req, res) => {
   const { changes } = parse(z.object({ changes: z.array(z.object({

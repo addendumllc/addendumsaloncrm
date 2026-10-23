@@ -208,6 +208,8 @@ export interface SquareService {
   setVariationPrice(variationId: string, priceCents: number, idempotencyKey: string): Promise<void>;
   /** Creates retail items (stock tracked, at every location), grouping variations by item name; a missing category is created. Needs ITEMS_WRITE. */
   createItems(items: NewSquareItem[], idempotencyKey: string): Promise<{ sku: string; variationId: string }[]>;
+  /** Adds variations to existing items (stock tracked, at every location). Needs ITEMS_WRITE. */
+  addVariations(variations: { itemId: string; name: string; sku: string; priceCents: number }[], idempotencyKey: string): Promise<{ sku: string; variationId: string }[]>;
   /** The permissions of the access token in use (null when Square doesn't list them). */
   tokenScopes(): Promise<{ scopes: string[] | null; expiresAt: string | null }>;
   /** Orders at these locations updated in [from, to], oldest first (POST /v2/orders/search; ORDERS_READ). */

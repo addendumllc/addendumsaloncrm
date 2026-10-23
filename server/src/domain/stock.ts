@@ -1347,6 +1347,119 @@ export async function applyProPrices() {
   return { saved, failed, skipped: plan.skipped, alreadyMatching: plan.alreadyMatching };
 }
 
+// ---------------- Add a length (Inventory → Products → Add a length) ----------------
+export interface NewLengthInput {
+  /** Words the products' names must contain, e.g. "Clip-Ins". */
+  search: string;
+  /** The length to copy and the new one, e.g. 18 → 22: SKU "18-BMCI-120g" → "22-BMCI-120g", option "18 inch - 120g" → "22 inch - 120g". */
+  from: string;
+  to: string;
+  /** Prices for the new variants (null: leave that store out). */
+  prices: { pro: number | null; retail: number | null; retailPro: number | null; square: number | null };
+}
+type NewVariantPlan = { store: 'pro' | 'retail' | 'square'; label: string; fromSku: string; sku: string; option: string; priceCents: number; productId: string; options: { name: string; value: string }[]; pro?: boolean };
+
+const swapLength = (text: string, from: string, to: string) => text.replace(new RegExp(`(^|[^0-9])${from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![0-9])`, 'g'), `$1${to}`);
+
+/**
+ * Plans a new length for products that already come in another one: for each matching variant whose SKU starts with
+ * "<from>-", a "<to>-" variant with the same option values (the length swapped), in each store that sells it — the
+ * professional store, the retail store's retail and Pro listings, and Square — at the prices given. Stock starts at 0.
+ * Nothing is changed here.
+ */
+export async function newLengthPlan(input: NewLengthInput) {
+  const { config } = await import('../config.js');
+  const c = config();
+  const s1 = shopifyService();
+  const s2 = shopifyService2();
+  const from = input.from.trim(); const to = input.to.trim();
+  if (!/^[0-9]+$/.test(from) || !/^[0-9]+$/.test(to) || from === to) throw badRequest('Enter the length to copy and the new length as numbers, e.g. 18 and 22.');
+  const words = input.search.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) throw badRequest('Enter which products, e.g. Clip-Ins.');
+  const proFirst = /professional/i.test(c.SHOPIFY_STORE_DOMAIN ?? '') || !/professional/i.test(c.SHOPIFY2_STORE_DOMAIN ?? '');
+  const [pro, retail] = s1 && s2 ? (proFirst ? [s1, s2] : [s2, s1]) : [s1, null];
+  const names = { pro: shopifyNameOf(proFirst ? 'shopify' : 'shopify2'), retail: s2 ? shopifyNameOf(proFirst ? 'shopify2' : 'shopify') : null, square: storeNames().square };
+  const prefix = `${from}-`.toLowerCase();
+  const newSkuOf = (sku: string) => `${to}-${sku.slice(prefix.length)}`;
+  const matches = (text: string, sku: string | null) => !!sku && sku.toLowerCase().startsWith(prefix) && words.every((w) => text.toLowerCase().includes(w));
+  const plan: NewVariantPlan[] = [];
+  const skipped: { store: string; label: string; reason: string }[] = [];
+
+  const shopifyPart = async (svc: NonNullable<typeof s1>, which: 'pro' | 'retail') => {
+    const prices = await svc.listPrices();
+    const have = new Set(prices.map((p) => norm(p.sku)).filter(Boolean));
+    const hits = prices.filter((p) => matches(`${p.productTitle ?? ''} ${p.label}`, p.sku));
+    const variants = new Map((await svc.productVariants([...new Set(hits.map((h) => h.productId))])).map((v) => [v.productId, v]));
+    const named = (p: { label: string; productTitle?: string }) => /\bpro\b/i.test(`${p.productTitle ?? ''} ${p.label}`);
+    const skusWithNamedPro = new Set(prices.filter(named).map((p) => norm(p.sku)));
+    for (const h of hits) {
+      const sku = newSkuOf(h.sku!);
+      const isPro = which === 'retail' && (named(h) || (isProListing(h) && !skusWithNamedPro.has(norm(h.sku))));
+      const price = which === 'pro' ? input.prices.pro : isPro ? input.prices.retailPro : input.prices.retail;
+      const storeName = which === 'pro' ? names.pro : `${names.retail}${isPro ? ' (Pro listing)' : ''}`;
+      if (price == null) continue;
+      const source = variants.get(h.productId)?.variants.find((v) => norm(v.sku) === norm(h.sku));
+      if (!source) { skipped.push({ store: storeName, label: h.label, reason: 'Couldn’t read its options' }); continue; }
+      const options = source.options.map((o) => ({ name: o.name, value: swapLength(o.value, from, to) }));
+      if (options.every((o, i) => o.value === source.options[i].value)) { skipped.push({ store: storeName, label: h.label, reason: `No option mentions ${from}` }); continue; }
+      const taken = variants.get(h.productId)!.variants.some((v) => v.options.every((o, i) => o.value === options[i]?.value));
+      if (have.has(norm(sku)) || taken) { skipped.push({ store: storeName, label: h.label, reason: `${sku} is already there` }); continue; }
+      plan.push({ store: which, label: h.productTitle ?? h.label, fromSku: h.sku!, sku, option: options.map((o) => o.value).join(' / '), priceCents: price, productId: h.productId, options, pro: isPro });
+    }
+  };
+  if (pro) await shopifyPart(pro, 'pro');
+  if (retail) await shopifyPart(retail, 'retail');
+
+  const sq = await squareService();
+  if (sq && input.prices.square != null) {
+    const products = await sq.listProducts();
+    const have = new Set(products.map((p) => norm(p.sku)).filter(Boolean));
+    for (const p of products.filter((x) => matches(`${x.itemName} ${x.variationName}`, x.sku))) {
+      const sku = newSkuOf(p.sku!);
+      const name = swapLength(p.variationName ?? '', from, to) || 'Regular';
+      if (have.has(norm(sku))) { skipped.push({ store: names.square, label: p.itemName, reason: `${sku} is already there` }); continue; }
+      plan.push({ store: 'square', label: p.itemName, fromSku: p.sku!, sku, option: name, priceCents: input.prices.square, productId: p.itemId, options: [] });
+    }
+  }
+  return { stores: names, plan, skipped, services: { pro, retail, sq } };
+}
+
+/** Creates what newLengthPlan lists (worked out again now). Each store and product is tried separately. */
+export async function applyNewLength(input: NewLengthInput) {
+  const { plan, skipped, services } = await newLengthPlan(input);
+  const failed: { label: string; store: string; message: string }[] = [];
+  let created = 0;
+  for (const which of ['pro', 'retail'] as const) {
+    const svc = services[which];
+    const mine = plan.filter((p) => p.store === which);
+    if (!svc || !mine.length) continue;
+    const loc = await svc.locationId();
+    const byProduct = new Map<string, NewVariantPlan[]>();
+    for (const p of mine) byProduct.set(p.productId, [...(byProduct.get(p.productId) ?? []), p]);
+    for (const [productId, list] of byProduct) {
+      try {
+        created += (await svc.addVariants(productId, list.map((p) => ({ options: p.options, sku: p.sku, priceCents: p.priceCents })), loc)).length;
+      } catch (e) {
+        for (const p of list) failed.push({ label: p.label, store: which, message: (e as Error).message });
+      }
+    }
+  }
+  const sqPlan = plan.filter((p) => p.store === 'square');
+  if (services.sq && sqPlan.length) {
+    try {
+      const made = await services.sq.addVariations(sqPlan.map((p) => ({ itemId: p.productId, name: p.option, sku: p.sku, priceCents: p.priceCents })), `add-len-${Date.now().toString(36)}`);
+      created += made.length;
+      const ok = new Set(made.map((m) => norm(m.sku)));
+      for (const p of sqPlan) if (!ok.has(norm(p.sku))) failed.push({ label: p.label, store: 'square', message: 'Square didn’t confirm it' });
+    } catch (e) {
+      const msg = e instanceof IntegrationError && e.authProblem ? 'Square needs the ITEMS_WRITE permission to add variations.' : (e as Error).message;
+      for (const p of sqPlan) failed.push({ label: p.label, store: 'square', message: msg });
+    }
+  }
+  forgetStockCache();
+  return { created, failed, skipped };
+}
+
 // ---------------- Add online products to Square (Inventory → Products → Add to Square) ----------------
 /**
  * "Black Magic - Clip-Ins - 18 inch - 120g" → item "Black Magic Clip-Ins", variation `18" Clip-Ins`, category

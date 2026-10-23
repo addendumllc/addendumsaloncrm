@@ -273,3 +273,41 @@ describe('Add online products to Square', () => {
     }
   });
 });
+
+describe('Add a length', () => {
+  it('previews, then adds the new length in every store at its price, with the SKU’s length swapped and 0 in stock — and pairs on sync', async () => {
+    const { DEMO_PRODUCTS } = await import('../src/integrations/square/MockSquareService.js');
+    const { demoPrices } = await import('../src/integrations/shopify/ShopifyService.js');
+    const PROSTORE = { sku: '18-BMCI-120g', inventoryItemId: 'gid://shopify/InventoryItem/77', label: 'Black Magic Clip-Ins – 18 inch - 120g', tracked: true };
+    const RETAIL = { sku: '18-BMCI-120g', inventoryItemId: 'gid://shopify/InventoryItem/277', label: 'Black Magic Clip-Ins – 18 inch - 120g', tracked: true };
+    const RETAILPRO = { sku: '18-BMCI-120g', inventoryItemId: 'gid://shopify/InventoryItem/278', label: 'Black Magic Clip-Ins Pro – 18 inch - 120g', tracked: true };
+    const c1 = MockShopifyService.catalog.length; const c2 = MockShopifyStore2.catalog.length; const sq = DEMO_PRODUCTS.length;
+    MockShopifyService.catalog.push(PROSTORE);
+    MockShopifyStore2.catalog.push(RETAIL, RETAILPRO);
+    DEMO_PRODUCTS.push({ ...DEMO_PRODUCTS[0], variationId: 'demo-clip18', itemId: 'item-clip', itemName: 'Black Magic Clip-Ins', variationName: '18" Clip-Ins', sku: '18-BMCI-120g', upc: null, priceCents: 55000, trackInventory: true });
+    const body = { search: 'clip-ins', from: '18', to: '22', prices: { pro: 56000, retail: 70000, retailPro: 56000, square: 70000 } };
+    try {
+      const plan = (await api.post('/api/inventory-sync/stock/new-length/preview', body)).body;
+      expect(plan.plan.map((p: any) => [p.store, !!p.pro, p.sku, p.option, p.priceCents]).sort()).toEqual([
+        ['pro', false, '22-BMCI-120g', '22 inch - 120g', 56000],
+        ['retail', false, '22-BMCI-120g', '22 inch - 120g', 70000],
+        ['retail', true, '22-BMCI-120g', '22 inch - 120g', 56000],
+        ['square', false, '22-BMCI-120g', '22" Clip-Ins', 70000],
+      ]);
+      expect(DEMO_PRODUCTS.some((p) => p.sku === '22-BMCI-120g')).toBe(false); // preview changes nothing
+      const r = (await api.post('/api/inventory-sync/stock/new-length', body)).body;
+      expect(r).toMatchObject({ created: 4, failed: [] });
+      const added1 = MockShopifyService.catalog.find((c) => c.sku === '22-BMCI-120g')!;
+      expect(MockShopifyService.stock.get(added1.inventoryItemId)).toBe(0);
+      expect(demoPrices.get(added1.inventoryItemId)?.priceCents).toBe(56000);
+      const added2 = MockShopifyStore2.catalog.filter((c) => c.sku === '22-BMCI-120g');
+      expect(added2.map((c) => demoPrices.get(c.inventoryItemId)?.priceCents).sort()).toEqual([56000, 70000]);
+      expect(DEMO_PRODUCTS.find((p) => p.sku === '22-BMCI-120g')).toMatchObject({ itemId: 'item-clip', variationName: '22" Clip-Ins', priceCents: 70000 });
+      // Already there now: nothing more to create.
+      expect((await api.post('/api/inventory-sync/stock/new-length/preview', body)).body.plan).toEqual([]);
+    } finally {
+      for (const id of [...MockShopifyService.catalog.slice(c1), ...MockShopifyStore2.catalog.slice(c2)].map((c) => c.inventoryItemId)) demoPrices.delete(id);
+      MockShopifyService.catalog.splice(c1); MockShopifyStore2.catalog.splice(c2); DEMO_PRODUCTS.splice(sq);
+    }
+  });
+});

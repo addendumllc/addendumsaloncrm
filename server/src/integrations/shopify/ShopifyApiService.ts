@@ -1,6 +1,6 @@
 import { config } from '../../config.js';
 import { IntegrationError } from '../../lib/errors.js';
-import { ShopifyStaleQuantityError, type ShopifyInventoryEntry, type ShopifyOrderLine, type ShopifyOrderWho, type ShopifyPriceEntry, type ShopifySetQuantity, type ShopifyService, type ShopifyVariantBySku } from './ShopifyService.js';
+import { ShopifyStaleQuantityError, type ShopifyInventoryEntry, type ShopifyOrderLine, type ShopifyOrderWho, type ShopifyPriceEntry, type ShopifyNewVariant, type ShopifyProductVariants, type ShopifySetQuantity, type ShopifyService, type ShopifyVariantBySku } from './ShopifyService.js';
 
 /** Access scopes the Shopify app needs. */
 export const SHOPIFY_SCOPES = ['read_products', 'read_inventory', 'write_inventory', 'read_locations', 'read_orders'];
@@ -267,6 +267,34 @@ export class ShopifyApiService implements ShopifyService {
       { id: inventoryItemId, input: { cost: costCents == null ? null : (costCents / 100).toFixed(2) } });
     const errs = d.inventoryItemUpdate?.userErrors ?? [];
     if (errs.length) throw new IntegrationError('shopify', `Shopify didn't accept the cost: ${errs.map((x: any) => x.message).join('; ')}`, false, false, JSON.stringify(errs));
+  }
+
+  async productVariants(productIds: string[]): Promise<ShopifyProductVariants[]> {
+    const out: ShopifyProductVariants[] = [];
+    for (let i = 0; i < productIds.length; i += 50) {
+      const d: any = await this.gql<any>(
+        'query($ids: [ID!]!) { nodes(ids: $ids) { ... on Product { id variants(first: 100) { nodes { sku selectedOptions { name value } } } } } }', { ids: productIds.slice(i, i + 50) });
+      for (const p of d.nodes ?? []) if (p?.id) out.push({ productId: p.id, variants: p.variants.nodes.map((v: any) => ({ sku: v.sku || null, options: v.selectedOptions ?? [] })) });
+    }
+    return out;
+  }
+
+  async addVariants(productId: string, variants: ShopifyNewVariant[], locationId: string) {
+    let d: any;
+    try {
+      d = await this.gql<any>(
+        `mutation($pid: ID!, $v: [ProductVariantsBulkInput!]!) { productVariantsBulkCreate(productId: $pid, variants: $v) { productVariants { sku inventoryItem { id } } userErrors { field message } } }`,
+        { pid: productId, v: variants.map((x) => ({
+          optionValues: x.options.map((o) => ({ optionName: o.name, name: o.value })), price: (x.priceCents / 100).toFixed(2),
+          inventoryItem: { sku: x.sku, tracked: true }, inventoryQuantities: [{ locationId, availableQuantity: 0 }],
+        })) });
+    } catch (e) {
+      if (e instanceof IntegrationError && e.authProblem) throw new IntegrationError('shopify', 'The Shopify app needs the write_products permission to add variants. Add it to the app, then try again.', false, true, e.technical);
+      throw e;
+    }
+    const errs = d.productVariantsBulkCreate?.userErrors ?? [];
+    if (errs.length) throw new IntegrationError('shopify', `Shopify didn't add the variant: ${errs.map((x: any) => x.message).join('; ')}`, false, false, JSON.stringify(errs));
+    return (d.productVariantsBulkCreate?.productVariants ?? []).filter((v: any) => v.inventoryItem?.id).map((v: any) => ({ sku: v.sku as string, inventoryItemId: v.inventoryItem.id as string }));
   }
 
   async orderWho(orderIds: string[]): Promise<Map<string, ShopifyOrderWho>> {

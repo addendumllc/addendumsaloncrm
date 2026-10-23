@@ -12,6 +12,7 @@ import { ToOrderView } from '../components/domain/ToOrder';
 import { PreorderBanner } from '../components/domain/Preorders';
 import { PricingView } from '../components/domain/Pricing';
 import { AddToSquareButton } from '../components/domain/AddToSquare';
+import { AddLengthButton } from '../components/domain/AddLength';
 import { pageBusiness, useWorkspace } from '../lib/workspace';
 import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, PageTabs, Segmented, Spinner, Toggle, cx, useToast } from '../components/ui';
 import { NumberField } from './settings/shared';
@@ -109,7 +110,7 @@ export function InventorySyncPage() {
       {view !== 'toorder' && <PreorderBanner />}
       {view === 'pricing' && <PricingView />}
       {view === 'toorder' && <ToOrderView key={forHair ? 'online' : 'salon'} store={forHair ? 'online' : 'salon'} />}
-      {view === 'products' && <div className="mb-3 flex justify-end"><AddToSquareButton /></div>}
+      {view === 'products' && <div className="mb-3 flex flex-wrap justify-end gap-2"><AddLengthButton /><AddToSquareButton /></div>}
       {view === 'products' && <ProductsView setup />}
       {view === 'stock' && <StockView />}
       {view === 'reorder' && <ReorderView onOrders={() => setView('orders')} />}

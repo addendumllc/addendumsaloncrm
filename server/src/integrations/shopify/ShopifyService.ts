@@ -40,6 +40,10 @@ export interface ShopifyInventoryEntry {
 export interface ShopifyPriceEntry { variantId: string; productId: string; inventoryItemId: string; sku: string | null; label: string; priceCents: number | null; costCents: number | null; productTitle?: string; tags?: string[] }
 /** An order's number (e.g. "#1042") and the customer's name, when the app may read customers. */
 export interface ShopifyOrderWho { name: string | null; customer: string | null }
+/** A product's variants with their options (e.g. "Length - Density" = "18 inch - 120g"). */
+export interface ShopifyProductVariants { productId: string; variants: { sku: string | null; options: { name: string; value: string }[] }[] }
+/** A variant to add to an existing product: its option values, SKU and price; stock is tracked and starts at 0. */
+export interface ShopifyNewVariant { options: { name: string; value: string }[]; sku: string; priceCents: number }
 
 /** One line of a Shopify order (for sales history and forecasts). */
 export interface ShopifyOrderLine {
@@ -91,6 +95,10 @@ export interface ShopifyService {
   setUnitCost(inventoryItemId: string, costCents: number | null): Promise<void>;
   /** Order numbers and customer names for these orders (the name only when the app may read customers). */
   orderWho(orderIds: string[]): Promise<Map<string, ShopifyOrderWho>>;
+  /** These products' variants and options (needs read_products). */
+  productVariants(productIds: string[]): Promise<ShopifyProductVariants[]>;
+  /** Adds variants to one product, stocked at the location with 0 (needs write_products). */
+  addVariants(productId: string, variants: ShopifyNewVariant[], locationId: string): Promise<{ sku: string; inventoryItemId: string }[]>;
 }
 
 /** Demo prices and costs per listing (by inventory item), shared by both demo stores. */
@@ -104,6 +112,22 @@ function demoWho(orderIds: string[]) {
     const n = [...id].reduce((a, ch) => a + ch.charCodeAt(0), 0);
     return [id, { name: `#${1000 + (n % 900)}`, customer: DEMO_CUSTOMERS[n % DEMO_CUSTOMERS.length] }];
   }));
+}
+/** Demo: a product's variants from the catalog labels ("Product – Option value"). */
+function demoProductVariants(catalog: ShopifyVariantBySku[], prefix: string, productIds: string[]): ShopifyProductVariants[] {
+  const list = demoPriceList(catalog, prefix);
+  return productIds.map((productId) => ({ productId, variants: list.filter((l) => l.productId === productId).map((l) => ({ sku: l.sku, options: [{ name: 'Option', value: l.label.split(/\s+[–-]\s+/).slice(1).join(' - ') || 'Default Title' }] })) }));
+}
+function demoAddVariants(catalog: ShopifyVariantBySku[], stock: Map<string, number>, prefix: string, productId: string, variants: ShopifyNewVariant[]) {
+  const title = demoPriceList(catalog, prefix).find((l) => l.productId === productId)?.productTitle;
+  if (!title) throw new Error('not found');
+  return variants.map((v) => {
+    const inventoryItemId = `gid://shopify/InventoryItem/${prefix}new${catalog.length}`;
+    catalog.push({ sku: v.sku, inventoryItemId, label: `${title} – ${v.options.map((o) => o.value).join(' / ')}`, tracked: true });
+    stock.set(inventoryItemId, 0);
+    demoPrices.set(inventoryItemId, { priceCents: v.priceCents, costCents: null });
+    return { sku: v.sku, inventoryItemId };
+  });
 }
 function demoPriceList(catalog: ShopifyVariantBySku[], prefix: string) {
   return catalog.map((c, i) => ({
@@ -192,6 +216,8 @@ export class MockShopifyService implements ShopifyService {
     if (i >= 0) demoPrices.set(inventoryItemId, { ...demoPriceOf(inventoryItemId, i), costCents });
   }
   async orderWho(orderIds: string[]) { return demoWho(orderIds); }
+  async productVariants(productIds: string[]) { return demoProductVariants(MockShopifyService.view(), '1', productIds); }
+  async addVariants(productId: string, variants: ShopifyNewVariant[]) { return demoAddVariants(MockShopifyService.catalog, MockShopifyService.stock, '1', productId, variants); }
 
   /** Demo sales: a few units of each tracked product most days, the same every time. */
   async listOrderLines(updatedSince: Date) {
@@ -268,6 +294,8 @@ export class MockShopifyStore2 implements ShopifyService {
     if (i >= 0) demoPrices.set(inventoryItemId, { ...demoPriceOf(inventoryItemId, i), costCents });
   }
   async orderWho(orderIds: string[]) { return demoWho(orderIds); }
+  async productVariants(productIds: string[]) { return demoProductVariants(MockShopifyStore2.view(), '2', productIds); }
+  async addVariants(productId: string, variants: ShopifyNewVariant[]) { return demoAddVariants(MockShopifyStore2.catalog, MockShopifyStore2.stock, '2', productId, variants); }
   async setAvailable(_loc: string, quantities: ShopifySetQuantity[], key: string) {
     if (MockShopifyStore2.applied.has(key)) return;
     for (const q of quantities) if (q.changeFromQuantity != null && (MockShopifyStore2.stock.get(q.inventoryItemId) ?? 0) !== q.changeFromQuantity) throw new ShopifyStaleQuantityError();
