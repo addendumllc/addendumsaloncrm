@@ -27,11 +27,25 @@ export function ForecastWidget({ scope }: { scope: 'all' | 'salon' | 'online' })
   const [shop, setShop] = useState<'all' | 'salon' | 'online'>(scope);
   const [coll, setColl] = useState('');
   const [status, setStatus] = useState<Status>('order_now');
+  // View by product (one list), or a what-to-order summary per collection or supplier; a group narrows the list.
+  const [by, setBy] = useState<'product' | 'collection' | 'supplier'>('product');
+  const [group, setGroup] = useState<string | null>(null);
   const inShop = useMemo(() => (data?.items ?? []).filter((i) => shop === 'all' || i.stores[shop]), [data, shop]);
   const collections = useMemo(() => [...new Set(inShop.flatMap((i) => i.collections))].sort((a, b) => a.localeCompare(b)), [inShop]);
   if (isLoading) return <PageLoading />;
   if (error || !data) return <ErrorNote error={error} onRetry={refetch} />;
-  const shown = inShop.filter((i) => !coll || i.collections.includes(coll));
+  // A product in several collections counts once, under its most specific one (the one with the fewest products).
+  const size = new Map<string, number>();
+  for (const i of inShop) for (const c of i.collections) size.set(c, (size.get(c) ?? 0) + 1);
+  const groupOf = (i: Item) => (by === 'supplier' ? i.supplier ?? 'No supplier' : [...i.collections].sort((a, b) => (size.get(a) ?? 0) - (size.get(b) ?? 0) || a.localeCompare(b))[0] ?? 'No collection');
+  const inColl = inShop.filter((i) => !coll || i.collections.includes(coll));
+  const groups = by === 'product' ? [] : [...inColl.reduce((m, i) => m.set(groupOf(i), [...(m.get(groupOf(i)) ?? []), i]), new Map<string, Item[]>())]
+    .map(([name, list]) => {
+      const toOrder = list.filter((i) => i.status === 'order_now' || i.status === 'soon');
+      return { name, list, toOrder, units: toOrder.reduce((n, i) => n + i.suggestedQty, 0), cost: toOrder.reduce((n, i) => n + (i.costCents ?? 0) * i.suggestedQty, 0) };
+    })
+    .sort((a, b) => b.toOrder.length - a.toOrder.length || b.cost - a.cost || a.name.localeCompare(b.name));
+  const shown = inColl.filter((i) => by === 'product' || !group || groupOf(i) === group);
   const of = (s: Status) => shown.filter((i) => i.status === s);
   const cost = (list: Item[]) => list.reduce((n, i) => n + (i.costCents ?? 0) * i.suggestedQty, 0);
   const list = of(status).sort((a, b) => (a.orderBy ?? '').localeCompare(b.orderBy ?? '') || a.label.localeCompare(b.label));
@@ -39,6 +53,9 @@ export function ForecastWidget({ scope }: { scope: 'all' | 'salon' | 'online' })
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <Segmented size="sm" value={shop} onChange={(v) => { setShop(v); setColl(''); }} options={[{ value: 'all', label: 'All shops' }, { value: 'salon', label: 'Addendum Salon' }, { value: 'online', label: 'Addendum Hair' }]} />
+        <select className="field h-9 w-auto py-1 text-sm" value={by} onChange={(e) => { setBy(e.target.value as typeof by); setGroup(null); }} aria-label="View by">
+          <option value="product">View by product</option><option value="collection">View by collection</option><option value="supplier">View by supplier</option>
+        </select>
         <select className="field h-9 w-auto max-w-full py-1 text-sm" value={coll} onChange={(e) => setColl(e.target.value)} aria-label="Collection">
           <option value="">All collections</option>{collections.map((c) => <option key={c}>{c}</option>)}
         </select>
@@ -58,6 +75,26 @@ export function ForecastWidget({ scope }: { scope: 'all' | 'salon' | 'online' })
           );
         })}
       </div>
+      {groups.length > 0 && (
+        <div className="max-h-[360px] overflow-auto rounded-xl2 border border-line bg-white">
+          <table className="w-full min-w-[640px] text-left text-[13px]">
+            <thead className="sticky top-0 border-b border-line bg-mist text-[11px] uppercase tracking-wide text-stone">
+              <tr><th className="px-3 py-2">{by === 'supplier' ? 'Supplier' : 'Collection'}</th>{STATUSES.map((s) => <th key={s.value} className="px-2 py-2 text-right">{s.label}</th>)}<th className="px-2 py-2 text-right">Units to order</th><th className="px-3 py-2 text-right">About</th></tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {groups.map((g) => (
+                <tr key={g.name} className={cx('cursor-pointer hover:bg-mist/40', group === g.name && 'bg-plum-tint/40')} onClick={() => setGroup(group === g.name ? null : g.name)}>
+                  <td className="px-3 py-1.5 font-medium text-ink">{g.name}</td>
+                  {STATUSES.map((s) => { const n = g.list.filter((i) => i.status === s.value).length; return <td key={s.value} className={cx('num px-2 py-1.5 text-right', n > 0 && s.tone)}>{n || '—'}</td>; })}
+                  <td className="num px-2 py-1.5 text-right">{g.units || '—'}</td>
+                  <td className="num px-3 py-1.5 text-right">{g.cost ? `$${Math.round(g.cost / 100).toLocaleString()}` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {by !== 'product' && <p className="-mt-2 text-[12px] text-stone">{group ? <>Showing {group}. <button type="button" className="text-plum hover:underline" onClick={() => setGroup(null)}>Show all</button></> : 'Units and cost are for Order now and Reorder soon. Click a row to see its products.'}</p>}
       {!list.length ? <EmptyState title={`Nothing in ${STATUSES.find((s) => s.value === status)!.label.toLowerCase()}`} /> : (
         <div className="max-h-[420px] overflow-auto rounded-xl2 border border-line bg-white">
           <table className="w-full min-w-[640px] text-left text-[13px]">
