@@ -378,7 +378,22 @@ export async function stockHistory(f: { key?: string; kind?: string; q?: string;
 // ---------------- Sales and forecasts ----------------
 const SALES_KEY = 'stock.shopify-sales';
 const FORECAST_KEY = 'stock.forecast-settings';
-export const DEFAULT_FORECAST: StockForecastSettings = { leadTimeDays: 30, safetyDays: 14, coverageDays: 60, slowToUseDays: 120, soonDays: 7, watchDays: 21 };
+export const DEFAULT_FORECAST: StockForecastSettings = { leadTimeDays: 30, safetyDays: 14, coverageDays: 60, slowToUseDays: 120, soonDays: 7, watchDays: 21, defaultMoq: 0 };
+
+/**
+ * What a product is counted in, from its name: "Prosecco Redefined Weft · 18\" Weft" → weft(s), "Black Magic Clip-Ins" →
+ * clip-ins; "units" when the name doesn't say.
+ */
+export function unitNoun(label: string, n: number) {
+  // Hair first, wherever it's named ("Signature Hand-Tied Weft · 22\" / #60 Platinum" → wefts).
+  const hair = label.match(/\b(weft|clip-ins?|tape-ins?|extensions?|bundles?|ponytails?|toppers?|wigs?|[ik]-tips?)\b/i)?.[1].toLowerCase();
+  if (hair) return n === 1 ? hair.replace(/s$/, '') : hair.endsWith('s') ? hair : `${hair}s`;
+  const part = label.split(/\s+[·]\s+|\s+[-–]\s+/).reverse().find((x) => /[a-z]{3,}/i.test(x.replace(/\d+(\.\d+)?\s*("|”|inch(es)?|in|g|oz|ml)\b/gi, ''))) ?? '';
+  const word = part.replace(/\d+(\.\d+)?\s*("|”|inch(es)?|in|g|oz|ml)?/gi, '').trim().split(/\s+/).pop()?.toLowerCase() ?? '';
+  if (!/^[a-z][a-z-]{2,}$/.test(word)) return n === 1 ? 'unit' : 'units';
+  if (n === 1) return word.replace(/(?<=[^s])s$/, '');
+  return word.endsWith('s') ? word : `${word}s`;
+}
 
 /** A practical order amount: small amounts stay as they are; then up to the next 5 (7 → 10, 23 → 25), 10 from 100, 50 from 500. */
 export function practicalQty(n: number) {
@@ -516,7 +531,9 @@ export async function stockForecast(): Promise<StockForecastResponse> {
     const noLead = untracked.has(r.supplier ?? fallback ?? '');
     const shipping = noLead ? 0 : sup?.shipping_days ?? 0;
     const lead = noLead ? 0 : (r.leadTimeDays ?? sup?.lead_time_days ?? settings.leadTimeDays) + shipping;
-    const moq = r.moq ?? sup?.default_moq ?? null;
+    // Minimum order: the product's own, else its supplier's default, else the overall default (Forecast settings).
+    const moq: number | null = r.moq ?? sup?.default_moq ?? (settings.defaultMoq || null);
+    const moqFrom = r.moq != null ? '' : sup?.default_moq != null ? `${sup.name}’s default` : 'the default minimum order';
     const safety = r.safetyDays ?? settings.safetyDays;
     const why: string[] = [];
     let status: StockForecastDTO['status'];
@@ -542,10 +559,6 @@ export async function stockForecast(): Promise<StockForecastResponse> {
         const need = rate * (lead + settings.coverageDays + safety) - (stock + inc);
         suggested = Math.max(0, Math.ceil(need));
         why.push(`Order enough for ${settings.coverageDays} days after it arrives, plus safety stock: ${suggested}.`);
-        const practical = practicalQty(suggested);
-        if (practical !== suggested) { why.push(`Rounded up to ${practical}.`); suggested = practical; }
-        if (moq && suggested < moq) { suggested = moq; why.push(`Raised to the minimum order (${moq}${r.moq == null ? `, ${r.supplier ?? fallback}’s default` : ''}).`); }
-        if (r.caseSize && suggested % r.caseSize) { suggested = Math.ceil(suggested / r.caseSize) * r.caseSize; why.push(`Rounded up to full cases of ${r.caseSize}.`); }
       }
     }
     // Pre-orders are owed to customers: always order at least enough to fill them (on top of what's on order).
@@ -555,9 +568,15 @@ export async function stockForecast(): Promise<StockForecastResponse> {
         status = 'out';
         // Stock above was counted as 0, so the pre-orders come on top of what keeps it in stock.
         suggested += owed;
-        if (r.caseSize && suggested % r.caseSize) suggested = Math.ceil(suggested / r.caseSize) * r.caseSize;
       }
-      why.push(`${preorders} pre-order${preorders === 1 ? '' : 's'} in Shopify (customers waiting)${inc ? `, ${Math.min(inc, preorders)} covered by what's on order` : ''}.`);
+      why.push(`${preorders} ${unitNoun(r.label, preorders)} pre-ordered${inc ? `, ${Math.min(inc, preorders)} covered by what's on order` : ''}.`);
+    }
+    // Any order: a practical amount, then at least the minimum order, then full cases.
+    if (suggested > 0) {
+      const practical = practicalQty(suggested);
+      if (practical !== suggested) { why.push(`Rounded up to ${practical}.`); suggested = practical; }
+      if (moq && suggested < moq) { suggested = moq; why.push(`Raised to the minimum order (${moq}${moqFrom ? `, ${moqFrom}` : ''}).`); }
+      if (r.caseSize && suggested % r.caseSize) { suggested = Math.ceil(suggested / r.caseSize) * r.caseSize; why.push(`Rounded up to full cases of ${r.caseSize}.`); }
     }
     // MOQ timing: the minimum order's cost, when it lands if ordered today, and how long it lasts at this rate.
     const moqLastsDays = moq && rate > 0 ? Math.round(moq / rate) : null;

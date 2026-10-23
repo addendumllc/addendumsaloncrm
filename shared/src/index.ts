@@ -2248,7 +2248,8 @@ export interface StockForecastDTO {
   preorders: number;
 }
 /** `soonDays` / `watchDays`: Reorder soon and Watch windows — days until the order-by date, worked out from how fast each product sells. */
-export interface StockForecastSettings { leadTimeDays: number; safetyDays: number; coverageDays: number; slowToUseDays: number; soonDays: number; watchDays: number }
+/** `defaultMoq`: minimum order for products with none of their own or from their supplier (0 = none). */
+export interface StockForecastSettings { leadTimeDays: number; safetyDays: number; coverageDays: number; slowToUseDays: number; soonDays: number; watchDays: number; defaultMoq: number }
 export interface StockForecastResponse {
   items: StockForecastDTO[];
   settings: StockForecastSettings;

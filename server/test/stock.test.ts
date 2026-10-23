@@ -138,7 +138,7 @@ describe('Inventory tools (Stockline features)', () => {
     expect(f.preorders).toBe(3);
     expect(f.status).toBe('out');
     expect(f.suggestedQty).toBeGreaterThanOrEqual(3);
-    expect(f.why.join(' ')).toMatch(/3 pre-orders/);
+    expect(f.why.join(' ')).toMatch(/3 wefts pre-ordered/);
   });
 
   it('the sync’s own changes show in the stock history', async () => {

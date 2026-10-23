@@ -824,11 +824,11 @@ const F_STATUS: Record<StockForecastDTO['status'], { label: string; tone: 'rose'
 };
 
 /** A number of days with its label and an explanation (Forecast settings). */
-function DaysField({ label, hint, value, onChange }: { label: string; hint?: string; value: number; onChange: (v: number) => void }) {
+function DaysField({ label, hint, value, onChange, unit = 'days' }: { label: string; hint?: string; value: number; onChange: (v: number) => void; unit?: string }) {
   return (
     <Field label={label} hint={hint}>
       <span className="relative block"><input className="field num pr-12" inputMode="numeric" value={value} onChange={(e) => onChange(Number(e.target.value.replace(/\D/g, '')) || 0)} />
-        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[13px] text-stone">days</span></span>
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[13px] text-stone">{unit}</span></span>
     </Field>
   );
 }
@@ -954,6 +954,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
             <section>
               <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-stone">Minimum orders</h3>
               <div className="grid gap-3 sm:grid-cols-3">
+                <DaysField label="Default minimum order" unit="units" hint="For products with no MOQ of their own or from their supplier. 0 = none." value={d.defaultMoq} onChange={(v) => setDefaults({ ...d, defaultMoq: v })} />
                 <DaysField label="Slow to use after" hint="Flag a minimum order that takes longer than this to sell." value={d.slowToUseDays} onChange={(v) => setDefaults({ ...d, slowToUseDays: v })} />
               </div>
             </section>

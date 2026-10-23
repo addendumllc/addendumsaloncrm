@@ -215,7 +215,7 @@ inventorySyncRouter.put('/stock/prices', ah(async (req, res) => {
 inventorySyncRouter.get('/stock/forecast', ah(async (_req, res) => res.json(await stockForecast())));
 inventorySyncRouter.put('/stock/forecast/settings', ah(async (req, res) => {
   const b = parse(z.object({ leadTimeDays: z.number().int().min(0).max(730), safetyDays: z.number().int().min(0).max(365), coverageDays: z.number().int().min(7).max(365), slowToUseDays: z.number().int().min(7).max(730).default(120),
-    soonDays: z.number().int().min(0).max(180).default(7), watchDays: z.number().int().min(0).max(365).default(21) }).refine((x) => x.watchDays >= x.soonDays, 'the Watch window must be at least the Reorder soon window'), req.body);
+    soonDays: z.number().int().min(0).max(180).default(7), watchDays: z.number().int().min(0).max(365).default(21), defaultMoq: z.number().int().min(0).max(100_000).default(0) }).refine((x) => x.watchDays >= x.soonDays, 'the Watch window must be at least the Reorder soon window'), req.body);
   await setForecastSettings(b);
   res.json({ settings: await forecastSettings() });
 }));
