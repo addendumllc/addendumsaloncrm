@@ -17,7 +17,7 @@ import { getKV, getSettings, setKV } from '../repos/settings.js';
 import { toE164 } from '../lib/phone.js';
 import { roleTemplates } from '../domain/users.js';
 import { badRequest, forbidden } from '../lib/errors.js';
-import { DEFAULT_THEME_SETTINGS, themesFor, workspacesFor } from '@addendum/shared';
+import { DEFAULT_THEME_SETTINGS, themesFor, userThemeId, withUserThemes, workspacesFor, type CrmTheme, type UserThemeDTO } from '@addendum/shared';
 import { ah, logAction, parse } from './util.js';
 
 export const miscRouter = Router();
@@ -80,7 +80,7 @@ miscRouter.put('/look', ah(async (req, res) => {
   // Only a theme that's published for them (Settings → Theme Management).
   if (b.themeId) {
     const t = { ...DEFAULT_THEME_SETTINGS, ...((await getSettings()).appearance.themeSettings ?? {}) };
-    if (!themesFor(t, req.user!.role).some((x) => x.id === b.themeId)) throw badRequest('That theme isn’t available to you.');
+    if (!themesFor(withUserThemes(t, (await userThemes(req.user!.id)).map((u) => u.theme)) as typeof t, req.user!.role).some((x) => x.id === b.themeId)) throw badRequest('That theme isn’t available to you.');
   }
   // Only the parts sent change (switching business keeps their accent and theme, and the other way round).
   const look = { accent: null, mode: null, theme: null, workspace: null, ...((await getKV<object>(lookKey(req.user!.id))) ?? {}), ...b };
@@ -212,4 +212,50 @@ miscRouter.post('/notifications/read-all', ah(async (req, res) => {
 
 miscRouter.get('/services', ah(async (_req, res) => {
   res.json({ services: await db().query('SELECT id, name, duration_minutes AS "durationMinutes", price_cents AS "priceCents" FROM services ORDER BY name') });
+}));
+
+// ---------------- Personal themes (each person's Appearance) ----------------
+/** One theme per person, kept with their account. Published ones can be chosen by everyone. */
+const themeKey = (id: string) => `user-theme:${id}`;
+type StoredTheme = { theme: Omit<CrmTheme, 'id' | 'status' | 'roles'>; published: boolean; updatedAt: string };
+/** Their own theme, and every theme others have published (from people still on the team). */
+async function userThemes(viewerId: string): Promise<UserThemeDTO[]> {
+  const rows = await db().query<{ key: string; value: StoredTheme; name: string }>(
+    `SELECT s.key, s.value, st.name FROM settings s JOIN staff st ON st.id::text = substring(s.key from 12)
+      WHERE s.key LIKE 'user-theme:%' AND st.active`);
+  return rows
+    .map((r) => {
+      const authorId = r.key.slice('user-theme:'.length);
+      const v = typeof r.value === 'string' ? JSON.parse(r.value) as StoredTheme : r.value;
+      return { theme: { ...v.theme, id: userThemeId(authorId), status: 'published' as const, roles: [] }, published: v.published, authorId, authorName: r.name, mine: authorId === viewerId };
+    })
+    .filter((t) => t.mine || t.published)
+    .sort((a, b) => Number(b.mine) - Number(a.mine) || a.theme.name.localeCompare(b.theme.name));
+}
+miscRouter.get('/user-themes', ah(async (req, res) => res.json({ themes: await userThemes(req.user!.id) })));
+
+const themeHex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+const themeScale = z.enum(['small', 'default', 'large', 'xlarge']);
+const themeFont = z.string().regex(/^[a-z0-9-]{1,40}$/);
+miscRouter.put('/user-themes/mine', ah(async (req, res) => {
+  const b = parse(z.object({
+    name: z.string().trim().min(1, 'give it a name').max(40), description: z.string().trim().max(120).default(''),
+    colors: z.object({ accent: themeHex, accent2: themeHex, background: themeHex, sidebar: themeHex, surface: themeHex, text: themeHex, line: themeHex }),
+    type: z.object({ font: themeFont, headingFont: themeFont, base: themeScale, heading: themeScale, small: themeScale, weight: z.union([z.literal(400), z.literal(500)]) }),
+    buttons: z.object({ size: z.enum(['small', 'default', 'large']), radius: z.enum(['square', 'soft', 'rounded']) }),
+    sidebarOpacity: z.number().int().min(0).max(100).optional(),
+    published: z.boolean(),
+  }), req.body);
+  const { published, ...theme } = b;
+  await setKV(themeKey(req.user!.id), { theme, published, updatedAt: new Date().toISOString() } satisfies StoredTheme);
+  await logAction(req, 'theme.personal_saved', 'staff', req.user!.id, { published });
+  res.json({ themes: await userThemes(req.user!.id) });
+}));
+/** Their own theme; an administrator (settings) can also remove someone's published one. Anyone using it goes back to the default. */
+miscRouter.delete('/user-themes/:who', ah(async (req, res) => {
+  const who = req.params.who === 'mine' ? req.user!.id : req.params.who;
+  if (who !== req.user!.id && !can(req.user, 'settings:write')) throw forbidden();
+  await db().query('DELETE FROM settings WHERE key = $1', [themeKey(who)]);
+  await logAction(req, 'theme.personal_removed', 'staff', who);
+  res.json({ themes: await userThemes(req.user!.id) });
 }));

@@ -81,6 +81,8 @@ export const API_RULES: { method: string; path: RegExp; anyOf: string[] }[] = [
   { method: 'GET', path: /^\/access\/status$/, anyOf: ANY_SIGNED_IN },
   // Each person's own sidebar order and hidden items (Customize menu).
   { method: '*', path: /^\/sidebar\/layout$/, anyOf: ANY_SIGNED_IN },
+  // Each person's own theme (and the ones others published); removing someone else's is checked in the route.
+  { method: '*', path: /^\/user-themes(\/[a-z0-9-]+)?$/, anyOf: ANY_SIGNED_IN },
   { method: 'PUT', path: /^\/access$/, anyOf: ['settings:write'] },
   // Everyone gets notifications addressed to them (e.g. a task sent to them); salon-wide alerts need the Dashboard (the routes filter).
   { method: 'GET', path: /^\/notifications$/, anyOf: ANY_SIGNED_IN },

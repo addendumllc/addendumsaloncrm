@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type {
+import type { UserThemeDTO,
   PersonalLook, AppSettings, AppointmentDTO, ClientSummaryDTO, ConversationDTO, CurrentUser, DashboardSummary, IntegrationStatusDTO,
   InventoryRequestDTO, LeadDTO, MessageDTO, RebookingInsight, RecommendedAction, StaffDTO, TaskDTO,
 } from '@addendum/shared';
@@ -52,6 +52,11 @@ export function useSettings() {
 }
 
 /** This person's own look (accent, light/dark) over the salon's. */
+/** Personal themes: this person's own, and every one others have published. */
+export function useUserThemes(enabled = true) {
+  return useQuery({ queryKey: ['user-themes'], enabled, queryFn: () => api.get<{ themes: UserThemeDTO[] }>('/user-themes').then((r) => r.themes), staleTime: 60_000 });
+}
+
 export function useLook() {
   return useQuery({ queryKey: ['look'], queryFn: () => api.get<{ look: PersonalLook }>('/look').then((r) => r.look), staleTime: Infinity });
 }

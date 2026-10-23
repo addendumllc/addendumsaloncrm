@@ -2,10 +2,10 @@ import { Suspense, lazy, useEffect, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AWAY_SECTIONS, pathInAwaySections, type TimeClockStatusDTO } from '@addendum/shared';
-import { useLook, useMe, useSettings } from './api/hooks';
+import { useLook, useMe, useSettings, useUserThemes } from './api/hooks';
 import { dayKey, setTimezone } from './lib/format';
 import { api } from './api/client';
-import { setThemeRole, applyAppearance } from './lib/theme';
+import { setThemeRole, setUserThemes, applyAppearance } from './lib/theme';
 import { AppShell, NAV } from './components/layout/AppShell';
 import { StylistShell } from './components/layout/StylistShell';
 import { NetworkBlocked, useAccessStatus } from './components/layout/NetworkBlocked';
@@ -96,6 +96,8 @@ function SignedIn() {
   const loc = useLocation();
   // This person's own accent and light/dark (My look), over the salon's look.
   const { data: look } = useLook();
+  const { data: personalThemes } = useUserThemes(!!me);
+  useEffect(() => { setUserThemes((personalThemes ?? []).map((t) => t.theme)); }, [personalThemes]);
   useEffect(() => {
     if (settings?.settings.business?.timezone) setTimezone(settings.settings.business.timezone);
     // Themes can be limited to roles.

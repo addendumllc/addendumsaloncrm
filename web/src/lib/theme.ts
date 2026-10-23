@@ -1,4 +1,4 @@
-import { DEFAULT_ACCENT, DEFAULT_APPEARANCE, FONT_CHOICES, FONT_SCALES, fontUrl, logoUrl, resolveTheme, type Appearance, type ColorTheme, type FontScale, type FontSlot, type PersonalLook } from '@addendum/shared';
+import { DEFAULT_ACCENT, DEFAULT_APPEARANCE, FONT_CHOICES, FONT_SCALES, fontUrl, logoUrl, resolveTheme, withUserThemes, type Appearance, type CrmTheme, type ColorTheme, type FontScale, type FontSlot, type PersonalLook } from '@addendum/shared';
 
 /** Accent colour theming (Settings → Appearance). Derives the tint/soft/dark shades from one colour. */
 type RGB = [number, number, number];
@@ -112,6 +112,13 @@ function readableOn(c: RGB, bg: RGB, min: number): RGB {
 }
 
 /** The signed-in person's role (themes can be limited to roles). */
+/** Personal themes this person can use (their own, and others' published): chosen like any other theme. */
+let userThemes: CrmTheme[] = [];
+export function setUserThemes(list: CrmTheme[]) {
+  if (JSON.stringify(list) === JSON.stringify(userThemes)) return;
+  userThemes = list;
+  if (lastSalon) applyAppearance(lastSalon, lastPersonal);
+}
 let currentRole: string | null = null;
 export function setThemeRole(role: string | null | undefined) {
   if ((role ?? null) === currentRole) return;
@@ -130,7 +137,7 @@ export function applyAppearance(input: Partial<Appearance> | undefined | null, p
   lastSalon = input ?? lastSalon;
   lastPersonal = personal ?? null;
   const org = { ...DEFAULT_APPEARANCE, ...(lastSalon ?? {}) };
-  const t = resolveTheme(org.themeSettings, lastPersonal, currentRole);
+  const t = resolveTheme(withUserThemes(org.themeSettings, userThemes), lastPersonal, currentRole);
   const c = t.colors;
   const html = document.documentElement;
   const root = html.style;

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { DEFAULT_APPEARANCE, DEFAULT_THEME_SETTINGS, fontFile, resolveTheme, themesFor, type ColorMode, type PersonalLook, type ThemeColors, type ThemeCustom } from '@addendum/shared';
+import { DEFAULT_APPEARANCE, DEFAULT_THEME_SETTINGS, fontFile, resolveTheme, themesFor, withUserThemes, type ColorMode, type CrmTheme, type PersonalLook, type ThemeColors, type ThemeCustom, type UserThemeDTO } from '@addendum/shared';
 import { api } from '../../api/client';
-import { useLook, useMe, useSettings } from '../../api/hooks';
+import { useLook, useMe, useSettings, useUserThemes } from '../../api/hooks';
 import { USER_COLORS, applyPersonalLook } from '../../lib/theme';
-import { ButtonFields, COLOR_FIELDS, ColorField, LivePreview, ThemeCard, TypeFields, suggestColors, SidebarOpacityField } from '../../components/domain/ThemeFields';
-import { Button, Segmented, cx, useToast } from '../../components/ui';
+import { ButtonFields, COLOR_FIELDS, ColorField, LivePreview, ThemeCard, ThemePreviewLarge, TypeFields, suggestColors, SidebarOpacityField } from '../../components/domain/ThemeFields';
+import { Button, Field, Modal, Segmented, Toggle, cx, useToast } from '../../components/ui';
+import { Pencil, Plus } from 'lucide-react';
 
 /** A section of the Appearance page. */
 function Part({ title, hint, children, locked }: { title: string; hint: string; children: React.ReactNode; locked?: string }) {
@@ -30,8 +31,14 @@ export function MyAppearance() {
   const qc = useQueryClient();
   const toast = useToast();
   const org = { ...DEFAULT_APPEARANCE, ...(settings?.settings.appearance ?? {}) };
-  const ts = { ...DEFAULT_THEME_SETTINGS, ...(org.themeSettings ?? {}) };
-  const offered = themesFor(ts, me?.role);
+  // The organization's themes, plus personal ones: their own and others' published (chosen the same way).
+  const { data: personal } = useUserThemes();
+  const mine = personal?.find((t) => t.mine) ?? null;
+  const shared = (personal ?? []).filter((t) => !t.mine);
+  const ts = { ...DEFAULT_THEME_SETTINGS, ...withUserThemes(org.themeSettings, (personal ?? []).map((t) => t.theme)) } as typeof DEFAULT_THEME_SETTINGS;
+  const userIds = new Set((personal ?? []).map((t) => t.theme.id));
+  const offered = themesFor(ts, me?.role).filter((t) => !userIds.has(t.id));
+  const [editing, setEditing] = useState(false);
   const base: PersonalLook = saved ?? { accent: null, mode: null, theme: null };
   // An accent chosen before themes existed becomes their own accent here.
   const start: PersonalLook = { ...base, custom: base.custom ?? (base.accent ? { colors: { accent: base.accent } } : {}), accent: null };
@@ -80,6 +87,30 @@ export function MyAppearance() {
             {def && <ThemeCard t={def} badge="Default" on={!d.themeId} onPick={() => setDraft({ ...d, themeId: null })} />}
             {offered.filter((x) => x.id !== ts.defaultTheme).map((t) => <ThemeCard key={t.id} t={t} on={d.themeId === t.id} onPick={() => setDraft({ ...d, themeId: t.id })} />)}
           </div>
+          {/* Their own theme (one each): only theirs unless they publish it for the team. */}
+          <div className="mt-5">
+            <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-stone">Your theme</p>
+            {mine ? (
+              <div className="-mx-1.5 flex flex-wrap items-center gap-1">
+                <ThemeCard t={mine.theme} badge={mine.published ? 'Published' : 'Only you'} on={d.themeId === mine.theme.id} onPick={() => setDraft({ ...d, themeId: mine.theme.id })} />
+                <Button size="sm" variant="ghost" icon={<Pencil className="h-4 w-4" />} onClick={() => setEditing(true)}>Edit your theme</Button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-3">
+                <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => setEditing(true)}>Create your theme</Button>
+                <span className="text-[13px] text-stone">One theme of your own. Keep it to yourself, or publish it so others can use it.</span>
+              </div>
+            )}
+          </div>
+          {shared.length > 0 && (
+            <div className="mt-5">
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-stone">Shared by the team</p>
+              <div className="-mx-1.5 flex flex-wrap gap-1">
+                {shared.map((u) => <ThemeCard key={u.theme.id} t={u.theme} badge={`By ${u.authorName.split(' ')[0]}`} on={d.themeId === u.theme.id} onPick={() => setDraft({ ...d, themeId: u.theme.id })} />)}
+              </div>
+            </div>
+          )}
+          {editing && <MyThemeEditor mine={mine} start={r} onClose={() => setEditing(false)} onSaved={(id) => setDraft({ ...d, themeId: id })} />}
         </Part>
         <Part title="Colors" hint="Your own accent colours over the theme — from the calendar colours, your own calendar colour, or any colour. The layout never changes." locked={ts.allow.colors ? undefined : locked}>
           {/* Accents first: the calendar colours, your own calendar colour, or any colour. */}
@@ -129,5 +160,81 @@ export function MyAppearance() {
         <Button variant="primary" disabled={!dirty} loading={saving} onClick={save}>Save changes</Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Your own theme (one per person): colours, fonts, text sizes and buttons, starting from what you see now. Only you
+ * see it unless you publish it — then everyone can choose it in their Appearance.
+ */
+function MyThemeEditor({ mine, start, onClose, onSaved }: {
+  mine: UserThemeDTO | null; start: Pick<CrmTheme, 'colors' | 'type' | 'buttons'> & { sidebarOpacity?: number }; onClose: () => void; onSaved: (id: string) => void;
+}) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [t, setT] = useState(() => ({
+    name: mine?.theme.name ?? 'My theme', description: mine?.theme.description ?? '',
+    colors: { ...(mine?.theme.colors ?? start.colors) }, type: { ...(mine?.theme.type ?? start.type) }, buttons: { ...(mine?.theme.buttons ?? start.buttons) },
+    sidebarOpacity: mine?.theme.sidebarOpacity ?? start.sidebarOpacity ?? 100,
+    published: mine?.published ?? false,
+  }));
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try {
+      const r = await api.put<{ themes: UserThemeDTO[] }>('/user-themes/mine', t);
+      qc.setQueryData(['user-themes'], r.themes);
+      const id = r.themes.find((x) => x.mine)?.theme.id;
+      if (id) onSaved(id);
+      toast(t.published ? 'Your theme is saved and published — press Save changes to use it' : 'Your theme is saved — press Save changes to use it');
+      onClose();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    if (!confirm('Delete your theme? Anyone using it goes back to the default.')) return;
+    setBusy(true);
+    try {
+      const r = await api.del<{ themes: UserThemeDTO[] }>('/user-themes/mine');
+      qc.setQueryData(['user-themes'], r.themes);
+      toast('Your theme was deleted');
+      onClose();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal open wide onClose={onClose} title={mine ? 'Edit your theme' : 'Create your theme'} footer={<>
+      {mine && <Button variant="ghost" className="mr-auto text-rose" disabled={busy} onClick={remove}>Delete</Button>}
+      <Button variant="ghost" onClick={onClose}>Cancel</Button>
+      <Button variant="primary" loading={busy} disabled={!t.name.trim()} onClick={save}>Save theme</Button>
+    </>}>
+      <div className="space-y-5">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Name"><input className="field" maxLength={40} value={t.name} onChange={(e) => setT({ ...t, name: e.target.value })} /></Field>
+          <Field label="Description (optional)"><input className="field" maxLength={120} value={t.description} onChange={(e) => setT({ ...t, description: e.target.value })} placeholder="e.g. Soft taupe with serif headings" /></Field>
+        </div>
+        <ThemePreviewLarge t={{ name: t.name, colors: t.colors, type: t.type, buttons: t.buttons, sidebarOpacity: t.sidebarOpacity }} />
+        <div className="border border-line px-4 py-1">
+          {COLOR_FIELDS.map((f) => (
+            <ColorField key={f.key} field={f.key} label={f.label} hint={f.hint} value={t.colors[f.key]} fallback={start.colors[f.key]} suggestions={suggestColors(f.key, t.colors)}
+              onChange={(v) => setT({ ...t, colors: { ...t.colors, [f.key]: v ?? start.colors[f.key] } })}>
+              {f.key === 'sidebar' && <SidebarOpacityField value={t.sidebarOpacity} onChange={(v) => setT({ ...t, sidebarOpacity: v ?? 100 })} />}
+            </ColorField>
+          ))}
+        </div>
+        <TypeFields value={t.type} onChange={(p) => setT({ ...t, type: { ...t.type, ...p } })} />
+        <ButtonFields value={t.buttons} onChange={(p) => setT({ ...t, buttons: { ...t.buttons, ...p } })} />
+        <div className="border-t border-line pt-3">
+          <Toggle checked={t.published} onChange={(v) => setT({ ...t, published: v })} label="Publish for the team"
+            description="Everyone can then choose it in their Appearance (shown with your name). Turn off any time; people using it go back to the default." />
+        </div>
+      </div>
+    </Modal>
   );
 }

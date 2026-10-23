@@ -1491,6 +1491,16 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   defaultTheme: 'neutral',
   allow: { colors: true, type: true, buttons: true },
 };
+/**
+ * A person's own theme (one each): made from scratch in their Appearance. Only they see it unless they publish it, then
+ * everyone can choose it too. Its id is "u-" + their account id.
+ */
+export interface UserThemeDTO { theme: CrmTheme; published: boolean; authorId: string; authorName: string; mine: boolean }
+export const userThemeId = (staffId: string) => `u-${staffId}`;
+/** The organization's themes plus personal ones (their own, and others' published) — what a person can choose from. */
+export const withUserThemes = (t: Partial<ThemeSettings> | undefined, extra: CrmTheme[]): Partial<ThemeSettings> =>
+  ({ ...(t ?? {}), themes: [...(t?.themes ?? DEFAULT_THEME_SETTINGS.themes), ...extra] });
+
 /** A person's own adjustments over their theme (only the parts their organization allows). */
 export interface ThemeCustom { colors?: Partial<ThemeColors>; type?: Partial<ThemeType>; buttons?: Partial<ThemeButtons>; sidebarOpacity?: number }
 /** Themes a person may choose: published, and open to their role. */
