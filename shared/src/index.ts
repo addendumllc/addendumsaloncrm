@@ -2207,6 +2207,8 @@ export interface StockForecastDTO {
   label: string;
   sku: string | null;
   supplier: string | null;
+  /** Shopify collections / product type and Square categories (To order can be grouped by them). */
+  collections: string[];
   stock: number;
   /** On open purchase orders (ordered or shipped), not yet received. */
   incoming: number;

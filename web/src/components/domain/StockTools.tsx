@@ -836,12 +836,30 @@ export function ReorderView({ onOrders, store = 'all' }: { onOrders: () => void;
   const [busy, setBusy] = useState(false);
   const [defaults, setDefaults] = useState<StockForecastResponse['settings'] | null>(null);
   const [showMoq, setShowMoq] = useState(() => { try { return localStorage.getItem('reorder-moq') !== '0'; } catch { return true; } });
+  // View by: one list of products, or grouped by collection or supplier (remembered on this device).
+  const [by, setByState] = useState<'product' | 'collection' | 'supplier'>(() => { try { const v = localStorage.getItem('reorder-by'); return v === 'collection' || v === 'supplier' ? v : 'product'; } catch { return 'product'; } });
+  const setBy = (v: typeof by) => { setByState(v); try { localStorage.setItem('reorder-by', v); } catch { /* private window */ } };
   if (isLoading) return <PageLoading />;
   if (error || !data) return <ErrorNote error={error} onRetry={refetch} />;
   const inStore = data.items.filter((i) => store === 'all' || (store === 'salon' ? i.stores.salon : i.stores.online));
   const items = inStore.filter((i) => filter === 'all' || ['out', 'order_now', 'soon'].includes(i.status));
   const counts = { out: 0, order_now: 0, soon: 0, watch: 0 } as Record<string, number>;
   for (const i of inStore) counts[i.status] = (counts[i.status] ?? 0) + 1;
+  // A product in several collections is shown under its most specific one (the one with the fewest products).
+  const collSize = new Map<string, number>();
+  for (const i of inStore) for (const c of i.collections) collSize.set(c, (collSize.get(c) ?? 0) + 1);
+  const groupOf = (i: StockForecastDTO) => by === 'supplier' ? i.supplier ?? fallbackSupplier ?? 'No supplier'
+    : [...i.collections].sort((a, b) => (collSize.get(a) ?? 0) - (collSize.get(b) ?? 0) || a.localeCompare(b))[0] ?? 'No collection';
+  const groups: [string | null, StockForecastDTO[]][] = by === 'product' ? [[null, items]]
+    : [...items.reduce((m, i) => m.set(groupOf(i), [...(m.get(groupOf(i)) ?? []), i]), new Map<string, StockForecastDTO[]>())]
+      .sort(([a], [b]) => (a.startsWith('No ') ? 1 : 0) - (b.startsWith('No ') ? 1 : 0) || a.localeCompare(b));
+  const pickGroup = (list: StockForecastDTO[]) => setPicked((s) => { const n = new Set(s); const all = list.every((i) => n.has(i.key)); for (const i of list) { if (all) n.delete(i.key); else n.add(i.key); } return n; });
+  const groupHead = (name: string, list: StockForecastDTO[]) => (
+    <span className="flex items-center gap-2">
+      <input type="checkbox" className="h-4 w-4 accent-plum" checked={list.every((i) => picked.has(i.key))} onChange={() => pickGroup(list)} aria-label={`Select all in ${name}`} />
+      <span className="font-medium text-ink">{name}</span><span className="text-stone">{list.length}</span>
+    </span>
+  );
   const toggle = (k: string) => setPicked((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const qOf = (i: StockForecastDTO) => Number(qty[i.key] ?? i.suggestedQty);
   const createPOs = async () => {
@@ -884,6 +902,11 @@ export function ReorderView({ onOrders, store = 'all' }: { onOrders: () => void;
       </p>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <Segmented value={filter} onChange={setFilter} options={[{ value: 'reorder', label: 'To reorder' }, { value: 'all', label: 'All products' }]} />
+        <label className="flex items-center gap-2 text-[13px] text-ink-soft">View by
+          <select className="field h-9 w-auto py-1 text-sm" value={by} onChange={(e) => setBy(e.target.value as typeof by)} aria-label="View by">
+            <option value="product">Product</option><option value="collection">Collection</option><option value="supplier">Supplier</option>
+          </select>
+        </label>
         <span className="ml-auto flex flex-wrap items-center gap-2 text-[13px] text-ink-soft">
           Defaults: lead <input className="field num w-16" value={d.leadTimeDays} onChange={(e) => setDefaults({ ...d, leadTimeDays: Number(e.target.value) || 0 })} /> days ·
           safety <input className="field num w-16" value={d.safetyDays} onChange={(e) => setDefaults({ ...d, safetyDays: Number(e.target.value) || 0 })} /> days ·
@@ -901,7 +924,9 @@ export function ReorderView({ onOrders, store = 'all' }: { onOrders: () => void;
       )}
       {/* Phones: a card per product — status, stock, when to order, and the amount to order. */}
       <ul className="space-y-2 sm:hidden">
-        {items.map((i) => (
+        {groups.map(([name, list]) => <Fragment key={name ?? 'all'}>
+        {name && <li className="px-1 pt-2 text-[14px]">{groupHead(name, list)}</li>}
+        {list.map((i) => (
           <li key={i.key} className={cx('rounded-xl2 border bg-white p-3', picked.has(i.key) ? 'border-plum/40' : 'border-line')}>
             <div className="flex items-start gap-3">
               <input type="checkbox" className="mt-1 h-5 w-5 shrink-0 accent-plum" checked={picked.has(i.key)} onChange={() => toggle(i.key)} aria-label={`Select ${i.label}`} />
@@ -924,6 +949,7 @@ export function ReorderView({ onOrders, store = 'all' }: { onOrders: () => void;
             {open === i.key && <ul className="mt-2 list-disc space-y-0.5 rounded-lg bg-mist/40 py-2 pl-6 pr-2 text-[12px] text-ink-soft">{i.why.map((w) => <li key={w}>{w}</li>)}</ul>}
           </li>
         ))}
+        </Fragment>)}
       </ul>
       <div className="hidden overflow-x-auto rounded-xl2 border border-line bg-white sm:block">
         <table className="w-full min-w-[980px] text-left text-[13px]">
@@ -931,7 +957,9 @@ export function ReorderView({ onOrders, store = 'all' }: { onOrders: () => void;
             <tr><th className="w-8 px-3 py-2" /><th className="px-2 py-2">Product</th><th className="px-2 py-2">Status</th><th className="px-2 py-2 text-right">Stock</th><th className="px-2 py-2 text-right">On order</th><th className="px-2 py-2 text-right">Per day</th><th className="px-2 py-2 text-right">Days left</th><th className="px-2 py-2">Order by</th><th className="w-24 px-2 py-2">Order qty</th>{showMoq && <><th className="px-2 py-2 text-right">MOQ</th><th className="px-2 py-2">MOQ arrives</th><th className="px-2 py-2 text-right">MOQ lasts</th></>}<th className="px-2 py-2">Supplier</th></tr>
           </thead>
           <tbody className="divide-y divide-line">
-            {items.map((i) => (
+            {groups.map(([name, list]) => <Fragment key={name ?? 'all'}>
+            {name && <tr className="bg-mist/40"><td colSpan={showMoq ? 13 : 10} className="px-3 py-2 text-[13px]">{groupHead(name, list)}</td></tr>}
+            {list.map((i) => (
               <Fragment key={i.key}>
                 <tr>
                   <td className="px-3 py-1.5"><input type="checkbox" checked={picked.has(i.key)} onChange={() => toggle(i.key)} aria-label={`Select ${i.label}`} /></td>
@@ -953,6 +981,7 @@ export function ReorderView({ onOrders, store = 'all' }: { onOrders: () => void;
                 {open === i.key && <tr><td /><td colSpan={showMoq ? 12 : 9} className="bg-mist/30 px-2 py-2 text-[12px] text-ink-soft"><ul className="list-disc space-y-0.5 pl-4">{i.why.map((w) => <li key={w}>{w}</li>)}</ul></td></tr>}
               </Fragment>
             ))}
+            </Fragment>)}
           </tbody>
         </table>
         {!items.length && <EmptyState title={filter === 'reorder' ? 'Nothing needs reordering right now' : 'No products'} />}

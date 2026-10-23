@@ -5,7 +5,7 @@ import { api } from '../../api/client';
 import { Button, EmptyState, ErrorNote, Field, Modal, PageLoading, cx, useToast } from '../ui';
 
 interface Listing { variantId: string; productId: string; inventoryItemId: string; label: string; priceCents: number | null; pro?: boolean }
-interface Row { key: string; label: string; sku: string | null; costCents: number | null; square: { variationId: string; priceCents: number | null } | null; shopify: Listing[]; shopify2: Listing[] }
+interface Row { key: string; label: string; sku: string | null; costCents: number | null; costFrom: 'crm' | 'shopify' | null; square: { variationId: string; priceCents: number | null } | null; shopify: Listing[]; shopify2: Listing[] }
 interface PriceData { rows: Row[]; stores: { square: string; shopify: string; shopify2: string | null }; errors: string[] }
 type Col = 'square' | 'shopify' | 'shopify2';
 type Draft = { cost?: string; square?: string; shopify?: Record<string, string>; shopify2?: Record<string, string> };
@@ -187,7 +187,7 @@ export function PricingView() {
                 <tr key={r.key} className={cx('border-b border-line/70 align-top last:border-0', selected.has(r.key) && 'bg-plum-tint/30')}>
                   <td className="px-3 py-3"><input type="checkbox" className="h-4 w-4 accent-plum" checked={selected.has(r.key)} onChange={() => setSelected((s) => { const n = new Set(s); if (n.has(r.key)) n.delete(r.key); else n.add(r.key); return n; })} aria-label={`Select ${r.label}`} /></td>
                   <td className="px-3 py-3"><span className="block text-ink">{r.label}</span>{r.sku && <span className="font-mono text-[12px] text-stone">{r.sku}</span>}</td>
-                  <td className="px-3 py-3"><PriceInput value={drafts[r.key]?.cost ?? dollars(r.costCents)} changed={drafts[r.key]?.cost !== undefined && toCents(drafts[r.key].cost!) !== r.costCents} onChange={(v) => set(r.key, { cost: v })} label={`${r.label} — unit cost`} /></td>
+                  <td className="px-3 py-3"><PriceInput value={drafts[r.key]?.cost ?? dollars(r.costCents)} changed={drafts[r.key]?.cost !== undefined && toCents(drafts[r.key].cost!) !== r.costCents} onChange={(v) => set(r.key, { cost: v })} label={`${r.label} — unit cost`} />{r.costFrom === 'shopify' && drafts[r.key]?.cost === undefined && <span className="mt-0.5 block text-[11px] text-stone">From Shopify</span>}</td>
                   {cols.map((c) => <td key={c.col} className="px-3 py-3">{priceCell(r, c.col)}</td>)}
                 </tr>
               ))}

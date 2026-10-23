@@ -544,7 +544,7 @@ export async function stockForecast(): Promise<StockForecastResponse> {
     const moqLastsDays = r.moq && rate > 0 ? Math.round(r.moq / rate) : null;
     if (moqLastsDays != null && moqLastsDays > settings.slowToUseDays) why.push(`Slow to use: the minimum order of ${r.moq} lasts about ${moqLastsDays} days.`);
     items.push({
-      key: r.key, label: r.label, sku: r.sku, supplier: r.supplier, stock, incoming: inc, ratePerDay: Math.round(rate * 100) / 100, units7: u7, units30: u30, units90: u90,
+      key: r.key, label: r.label, sku: r.sku, supplier: r.supplier, collections: r.collections ?? [], stock, incoming: inc, ratePerDay: Math.round(rate * 100) / 100, units7: u7, units30: u30, units90: u90,
       leadTimeDays: lead, safetyDays: safety, daysOfStock: daysOfStock == null ? null : Math.round(daysOfStock), orderBy, status, suggestedQty: suggested,
       moq: r.moq, caseSize: r.caseSize, costCents: r.costCents,
       moqCostCents: r.moq && r.costCents != null ? r.moq * r.costCents : null, moqArrivesOn: r.moq ? addDays(today, lead) : null, moqLastsDays,
@@ -1173,6 +1173,8 @@ export interface PriceListing {
 }
 export interface PriceRow {
   key: string; label: string; sku: string | null; costCents: number | null;
+  /** Where the unit cost comes from: set in the CRM, or the Shopify listing's cost per item. */
+  costFrom: 'crm' | 'shopify' | null;
   /** The salon's price in Square (null when it isn't sold in the salon). */
   square: { variationId: string; priceCents: number | null } | null;
   /** Each Shopify store's listings of it (a store can list one SKU more than once, e.g. stylist and salon prices). */
@@ -1206,8 +1208,11 @@ export async function priceList(): Promise<{ rows: PriceRow[]; stores: { square:
     const named = list.filter((l) => /\bpro\b/i.test(`${(p2.get(l.inventoryItemId) as { productTitle?: string } | undefined)?.productTitle ?? ''} ${l.label}`));
     return named.length ? list.map((l) => ({ ...l, pro: named.includes(l) })) : list;
   };
+  // Unit cost: the CRM's, else the cost per item set on the Shopify listing (pro store first; $0 counts as not set).
+  const shopifyCost = (r: (typeof L.rows)[number]) => [p1.get(r.shopifyInventoryItemId ?? ''), ...r.store2.map((e) => p2.get(e.inventoryItemId))]
+    .map((p) => (p as { costCents?: number | null } | undefined)?.costCents).find((c) => c != null && c > 0) ?? null;
   const rows: PriceRow[] = L.rows.filter((r) => r.status !== 'not_tracked').map((r) => ({
-    key: r.key, label: r.label, sku: r.sku, costCents: r.costCents,
+    key: r.key, label: r.label, sku: r.sku, costCents: r.costCents ?? shopifyCost(r), costFrom: r.costCents != null ? 'crm' as const : shopifyCost(r) != null ? 'shopify' as const : null,
     square: r.squareVariationId ? { variationId: r.squareVariationId, priceCents: r.priceCents } : null,
     shopify: listing(p1, r.shopifyInventoryItemId),
     shopify2: proOnly(r.store2.flatMap((e) => listing(p2, e.inventoryItemId, e.label))),
