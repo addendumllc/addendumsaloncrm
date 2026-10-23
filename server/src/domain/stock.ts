@@ -520,12 +520,33 @@ export async function stockForecast(): Promise<StockForecastResponse> {
     const re = new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
     return (r.collections ?? []).some((c) => re.test(c)) || re.test(r.label);
   }) ?? null;
+  // One line per SKU: hair comes from one supplier for the whole CRM, so a product listed in Square and online without
+  // being paired (the same SKU twice) is forecast and ordered once — its stock, sales and what's on order added together.
+  const stockOf = (r: (typeof L.rows)[number]) => Math.max(0, r.squareQty ?? r.shopifyQty ?? 0);
+  // Below zero in Shopify = pre-orders: customers waiting for units that aren't in stock yet.
+  const preordersOf = (r: (typeof L.rows)[number]) => Math.max(0, -(r.shopifyQty ?? 0), ...r.store2.map((e) => -(e.qty ?? 0)));
+  const bySku = new Map<string, (typeof L.rows)[number][]>();
+  for (const r of L.rows) if (r.status !== 'not_tracked' && norm(r.sku)) bySku.set(norm(r.sku), [...(bySku.get(norm(r.sku)) ?? []), r]);
+  const mergedInto = new Set<string>();
+  const group = new Map<string, (typeof L.rows)[number][]>(); // primary key → every row of that SKU
+  for (const list of bySku.values()) {
+    if (list.length < 2) continue;
+    const primary = list.find((x) => x.squareVariationId && x.shopifyInventoryItemId) ?? list.find((x) => x.squareVariationId) ?? list[0];
+    group.set(primary.key, list);
+    for (const o of list) {
+      if (o === primary) continue;
+      mergedInto.add(o.key);
+      const from = sales.get(o.key);
+      if (from) { const into = sales.get(primary.key) ?? new Map<string, number>(); for (const [d, v] of from) into.set(d, (into.get(d) ?? 0) + v); sales.set(primary.key, into); }
+      incoming.set(primary.key, (incoming.get(primary.key) ?? 0) + (incoming.get(o.key) ?? 0));
+    }
+  }
   for (const r of L.rows) {
-    if (r.status === 'not_tracked') continue;
+    if (r.status === 'not_tracked' || mergedInto.has(r.key)) continue;
+    const all = group.get(r.key) ?? [r];
     const m = sales.get(r.key);
-    const stock = Math.max(0, r.squareQty ?? r.shopifyQty ?? 0);
-    // Below zero in Shopify = pre-orders: customers waiting for units that aren't in stock yet.
-    const preorders = Math.max(0, -(r.shopifyQty ?? 0), ...r.store2.map((e) => -(e.qty ?? 0)));
+    const stock = all.reduce((n, x) => n + stockOf(x), 0);
+    const preorders = Math.max(...all.map(preordersOf));
     const inc = incoming.get(r.key) ?? 0;
     const u7 = units(m, 7), u30 = units(m, 30), u90 = units(m, 90);
     // A newer product's 90-day rate uses only the days since its first sale.
@@ -593,13 +614,13 @@ export async function stockForecast(): Promise<StockForecastResponse> {
     const stockoutRisk = !discontinued && rate > 0 && stock > 0 && daysOfStock != null && daysOfStock < lead;
     if (stockoutRisk) why.push(`Stock-out risk: about ${Math.round(daysOfStock!)} days of stock, but an order takes ${lead} days to arrive.`);
     items.push({
-      key: r.key, label: r.label, sku: r.sku, supplier: r.supplier, collections: r.collections ?? [], stock, incoming: inc, ratePerDay: Math.round(rate * 100) / 100, units7: u7, units30: u30, units90: u90,
+      key: r.key, label: r.label, sku: r.sku, supplier: r.supplier ?? all.find((x) => x.supplier)?.supplier ?? null, collections: [...new Set(all.flatMap((x) => x.collections ?? []))], stock, incoming: inc, ratePerDay: Math.round(rate * 100) / 100, units7: u7, units30: u30, units90: u90,
       leadTimeDays: lead, leadUntracked: noLead, shippingDays: shipping, stockoutRisk, safetyDays: safety, daysOfStock: daysOfStock == null ? null : Math.round(daysOfStock), orderBy, status, suggestedQty: suggested,
       moq, caseSize: r.caseSize, costCents: r.costCents,
       moqCostCents: moq && r.costCents != null ? moq * r.costCents : null, moqArrivesOn: moq ? addDays(today, lead) : null, moqLastsDays,
       slowToUse: moqLastsDays != null && moqLastsDays > settings.slowToUseDays, why, preorders,
       // Inventory → To order: which stores sell it, and the day it runs out at this rate (not counting what's on order).
-      stores: { salon: !!r.squareVariationId, online: !!r.shopifyInventoryItemId || r.store2.length > 0 },
+      stores: { salon: all.some((x) => !!x.squareVariationId), online: all.some((x) => !!x.shopifyInventoryItemId || x.store2.length > 0) },
       sellOutOn: stock <= 0 ? today : rate > 0 ? addDays(today, Math.floor(stock / rate)) : null,
     });
   }

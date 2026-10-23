@@ -283,5 +283,25 @@ describe('Suppliers', () => {
     expect(after).toMatchObject({ status: 'received', lotNumber: 'L0801' });
     expect(after.lines[0].lotNote).toBe('1 box dented');
   });
+
+  it('a SKU listed in Square and online without being paired is one line to order, with stock and sales added together', async () => {
+    const { DEMO_PRODUCTS } = await import('../src/integrations/square/MockSquareService.js');
+    const ONLINE = { sku: 'DUP-1', inventoryItemId: 'gid://shopify/InventoryItem/950', label: 'Dup Weft – 18"', tracked: true };
+    const before = DEMO_PRODUCTS.length;
+    DEMO_PRODUCTS.push({ ...DEMO_PRODUCTS[0], variationId: 'demo-dup', itemId: 'item-dup', itemName: 'Dup Weft', variationName: '18"', sku: 'DUP-1', upc: null, trackInventory: true });
+    demoSquareStock.set('demo-dup', 2);
+    MockShopifyService.catalog.push(ONLINE);
+    MockShopifyService.stock.set(ONLINE.inventoryItemId, 3);
+    try {
+      forgetStockCache();
+      const items = (await api.get('/api/inventory-sync/stock/forecast')).body.items.filter((i: any) => i.sku === 'DUP-1');
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({ key: 'demo-dup', stock: 5, stores: { salon: true, online: true } });
+    } finally {
+      MockShopifyService.catalog.splice(MockShopifyService.catalog.indexOf(ONLINE), 1);
+      DEMO_PRODUCTS.splice(before);
+      demoSquareStock.delete('demo-dup');
+    }
+  });
 });
 
