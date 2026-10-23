@@ -6,6 +6,7 @@ import { applyAppearance } from '../../lib/theme';
 import { ButtonFields, COLOR_FIELDS, ColorField, LivePreview, ThemeCard, TypeFields, suggestColors, SidebarOpacityField, OpacityField, ThemePreviewLarge } from '../../components/domain/ThemeFields';
 import { Badge, Button, Field, Modal, Segmented, Toggle } from '../../components/ui';
 import { Card, SaveBar, useCan, useSection } from './shared';
+import { FontStylesCard } from './FontStyles';
 
 const ROLE_LABEL: Record<BuiltinRole, string> = { admin: 'Admin', receptionist: 'Reception', stylist: 'Stylist', assistant: 'Assistant' };
 const STATUS: Record<CrmTheme['status'], { label: string; tone: 'sage' | 'amber' | 'neutral' }> = {
@@ -75,6 +76,8 @@ export function ThemesSettings() {
         </ul>
         <p className="mt-2 text-[12px] text-stone">The default theme must be published; it’s what everyone sees until they choose another. Make another theme the default before deleting this one.</p>
       </Card>
+
+      <FontStylesCard sec={sec as any} locked={locked} />
 
       <Card title="What team members can change" description="On top of their theme, for themselves only."
         footer={<SaveBar dirty={sec.dirty} saving={sec.saving} onSave={() => sec.save()} onReset={sec.reset} disabled={locked} />}>

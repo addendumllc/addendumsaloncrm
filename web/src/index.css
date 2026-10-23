@@ -116,3 +116,17 @@
 :is(.h-display, .font-display) { zoom: var(--size-heading, 1); }
 :is(.btn-sm, .btn-md, [role="tablist"]) { zoom: var(--size-button, 1); }
 .font-nav { zoom: var(--size-nav, 1); }
+
+/* Font styles (Theme Management → Font styles): a font, weight and capitals for each kind of text. */
+:is(h2, h3, h4):is(.h-display, .font-display) { font-family: var(--font-subheading, var(--font-display)); font-weight: var(--w-subheading, var(--heading-weight, 400)); }
+:is(h1).h-display, h1.font-display { font-weight: var(--w-heading, var(--heading-weight, 400)); }
+.label, thead th { font-family: var(--font-label, var(--font-body)); font-weight: var(--w-label, 500); }
+body { font-weight: var(--w-body, var(--body-weight, 400)); }
+.font-nav { font-weight: var(--w-menu, inherit); }
+.font-button { font-weight: var(--w-button, 500); }
+[data-caps-heading] :is(h1.h-display, h1.font-display),
+[data-caps-subheading] :is(h2, h3, h4):is(.h-display, .font-display),
+[data-caps-menu] .font-nav a,
+[data-caps-button] .font-button,
+[data-caps-label] :is(.label, thead th),
+[data-caps-body] body { text-transform: uppercase; letter-spacing: 0.04em; }

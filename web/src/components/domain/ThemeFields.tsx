@@ -160,10 +160,11 @@ export function OpacityField({ label, value, onChange, disabled, fromTheme }: { 
   );
 }
 
-export function TypeFields({ value, onChange, disabled, customFonts }: { value: ThemeType; onChange: (patch: Partial<ThemeType>) => void; disabled?: boolean; customFonts?: { heading?: string | null; body?: string | null } }) {
+export function TypeFields({ value, onChange, disabled, customFonts, hideFonts }: { value: ThemeType; onChange: (patch: Partial<ThemeType>) => void; disabled?: boolean; customFonts?: { heading?: string | null; body?: string | null }; hideFonts?: boolean }) {
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2">
+      {/* Fonts come from font styles (administrators) when there are any: then only sizes and weight here. */}
+      <div className={cx('grid gap-3 sm:grid-cols-2', hideFonts && 'hidden')}>
         <Field label="Interface font" hint="Text, buttons, menus and forms">
           <select className="field" disabled={disabled} value={value.font} onChange={(e) => onChange({ font: e.target.value })}>
             {customFonts?.body && <option value="custom">{customFonts.body} (brand font)</option>}

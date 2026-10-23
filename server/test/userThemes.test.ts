@@ -67,3 +67,28 @@ describe('Opacity for every colour, extra small sizes and button height', () => 
     expect(t.body.themes.find((x: any) => x.mine).theme).toMatchObject({ opacity: { accent: 80 }, buttons: { size: 'xsmall', height: 28 } });
   });
 });
+
+describe('Font styles', () => {
+  it('only administrators upload fonts and make styles; everyone picks a published one', async () => {
+    const jen = await signIn('jennifer@addendumsalon.com');
+    const woff2 = Buffer.concat([Buffer.from('wOF2'), Buffer.alloc(60)]);
+    const dataUrl = `data:font/woff2;base64,${woff2.toString('base64')}`;
+    expect((await jen.put('/api/settings/font-file', { dataUrl, name: 'Brand.woff2' })).status).toBe(403);
+    expect((await api.put('/api/settings/font-file', { dataUrl: `data:font/woff2;base64,${Buffer.from('nope').toString('base64')}`, name: 'x.woff2' })).status).toBe(400);
+    const up = await api.put('/api/settings/font-file', { dataUrl, name: 'Brand.woff2' });
+    expect(up.status).toBe(200);
+    const font = up.body.font;
+    expect(font).toMatchObject({ name: 'Brand' });
+    expect((await request(app).get(`/brand/fontfile/${font.id}?v=${font.version}`)).headers['content-type']).toBe('font/woff2');
+    const fonts = { heading: `file:${font.id}`, subheading: 'lora', body: 'inter', menu: 'inter', button: 'inter', label: 'inter', link: 'inter' };
+    const r = await api.patch('/api/settings', { appearance: { fontStyles: { styles: [
+      { id: 'brand', name: 'Brand', description: '', fonts, weights: { heading: 300 }, caps: { label: true }, status: 'published' },
+      { id: 'draft-one', name: 'Draft', description: '', fonts, status: 'draft' },
+    ], defaultStyle: 'brand' } } });
+    expect(r.status).toBe(200);
+    expect(r.body.settings.appearance.fontStyles.library).toEqual([expect.objectContaining({ id: font.id })]); // the library is kept
+    expect((await jen.put('/api/look', { fontStyleId: 'brand' })).status).toBe(200);
+    expect((await jen.put('/api/look', { fontStyleId: 'draft-one' })).status).toBe(400);
+    expect((await api.patch('/api/settings', { appearance: { fontStyles: { styles: [], defaultStyle: 'brand' } } })).status).toBe(400);
+  });
+});

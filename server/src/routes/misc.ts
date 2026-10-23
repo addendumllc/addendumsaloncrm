@@ -17,7 +17,7 @@ import { getKV, getSettings, setKV } from '../repos/settings.js';
 import { toE164 } from '../lib/phone.js';
 import { roleTemplates } from '../domain/users.js';
 import { badRequest, forbidden } from '../lib/errors.js';
-import { DEFAULT_THEME_SETTINGS, themesFor, userThemeId, withUserThemes, workspacesFor, type CrmTheme, type UserThemeDTO } from '@addendum/shared';
+import { DEFAULT_FONT_STYLES, DEFAULT_THEME_SETTINGS, themesFor, userThemeId, withUserThemes, workspacesFor, type CrmTheme, type UserThemeDTO } from '@addendum/shared';
 import { ah, logAction, parse } from './util.js';
 
 export const miscRouter = Router();
@@ -69,6 +69,8 @@ miscRouter.put('/look', ah(async (req, res) => {
     byWorkspace: z.object({ salon: choice, hair: choice }).partial().optional(),
     // Their theme and their own adjustments over it.
     themeId: z.string().regex(/^[a-z0-9-]{1,40}$/).nullable().optional(),
+    // Their font style (one an administrator published), or null for the default.
+    fontStyleId: z.string().regex(/^[a-z0-9-]{1,40}$/).nullable().optional(),
     custom: z.object({
       colors: z.object({ accent: hex, accent2: hex, background: hex, sidebar: hex, surface: hex, text: hex, line: hex }).partial(),
       type: z.object({ font: z.string().regex(/^[a-z0-9-]{1,40}$/), headingFont: z.string().regex(/^[a-z0-9-]{1,40}$/), base: scale, heading: scale, small: scale, weight: z.union([z.literal(400), z.literal(500)]) }).partial(),
@@ -79,6 +81,10 @@ miscRouter.put('/look', ah(async (req, res) => {
   }), req.body);
   if (b.workspace && !workspacesFor(req.user!.permissions).some((w) => w.id === b.workspace)) throw forbidden('You don’t have access to that business.');
   // Only a theme that's published for them (Settings → Theme Management).
+  if (b.fontStyleId) {
+    const fs = { ...DEFAULT_FONT_STYLES, ...((await getSettings()).appearance.fontStyles ?? {}) };
+    if (!fs.styles.some((x) => x.id === b.fontStyleId && x.status === 'published')) throw badRequest('That font style isn’t available.');
+  }
   if (b.themeId) {
     const t = { ...DEFAULT_THEME_SETTINGS, ...((await getSettings()).appearance.themeSettings ?? {}) };
     if (!themesFor(withUserThemes(t, (await userThemes(req.user!.id)).map((u) => u.theme)) as typeof t, req.user!.role).some((x) => x.id === b.themeId)) throw badRequest('That theme isn’t available to you.');

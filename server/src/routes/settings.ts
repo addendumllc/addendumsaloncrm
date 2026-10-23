@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from 'express';
-import { FONT_MAX_BYTES, LOGIN_IMAGE_MAX_BYTES, LOGO_MAX_BYTES, type FontSlot } from '@addendum/shared';
+import { DEFAULT_FONT_STYLES, FONT_MAX_BYTES, LOGIN_IMAGE_MAX_BYTES, LOGO_MAX_BYTES, type FontSlot } from '@addendum/shared';
 import { z } from 'zod';
 import { can } from '../auth/permissions.js';
 import { requireAnyPermission, requirePermission } from '../auth/session.js';
@@ -127,6 +127,17 @@ const settingsPatch = z.object({
       defaultTheme: z.string().regex(/^[a-z0-9-]{1,40}$/),
       allow: z.object({ colors: z.boolean(), type: z.boolean(), buttons: z.boolean() }),
     }).refine((t) => t.themes.some((x) => x.id === t.defaultTheme && x.status === 'published'), 'the default theme must be a published theme'),
+    // Font styles (the uploaded font library is changed only by uploading or removing a file).
+    fontStyles: z.object({
+      styles: z.array(z.object({
+        id: z.string().regex(/^[a-z0-9-]{1,40}$/), name: z.string().trim().min(1, 'give the font style a name').max(40), description: z.string().trim().max(160),
+        fonts: z.object(Object.fromEntries(['heading', 'subheading', 'body', 'menu', 'button', 'label', 'link'].map((k) => [k, z.string().regex(/^(file:)?[a-z0-9-]{1,40}$/)])) as Record<string, z.ZodString>),
+        weights: z.record(z.enum(['heading', 'subheading', 'body', 'menu', 'button', 'label', 'link']), z.union([z.literal(300), z.literal(400), z.literal(500), z.literal(600), z.literal(700)])).optional(),
+        caps: z.record(z.enum(['heading', 'subheading', 'body', 'menu', 'button', 'label', 'link']), z.boolean()).optional(),
+        status: z.enum(['draft', 'published']),
+      })).max(30),
+      defaultStyle: z.string().regex(/^[a-z0-9-]{1,40}$/).nullable(),
+    }).refine((f) => f.defaultStyle == null || f.styles.some((x) => x.id === f.defaultStyle && x.status === 'published'), 'the default font style must be a published one'),
   }).partial().optional(),
   accounts: z.object({ allowAccessRequests: z.boolean() }).partial().optional(),
   // Businesses: names and taglines, and which sidebar tabs belong to which business ('shared' = both).
@@ -160,6 +171,46 @@ settingsRouter.patch('/settings', ah(async (req, res) => {
   if (patch.rules || patch.reminders) await runRules();
   res.json({ settings });
 }));
+
+// ---------- Font library (Settings → Theme Management → Font styles) ----------
+/** Upload a font file for font styles (administrators). Checked from its bytes; added to the library. */
+settingsRouter.put('/settings/font-file', requirePermission('settings:write'), ah(async (req, res) => {
+  const b = parse(z.object({
+    dataUrl: z.string().max(Math.ceil(FONT_MAX_BYTES * 1.4) + 200, 'the font file must be 1.5 MB or smaller'),
+    name: z.string().trim().min(1).max(80),
+  }), req.body);
+  const m = /^data:[\w./+-]*;base64,([A-Za-z0-9+/=]+)$/.exec(b.dataUrl);
+  if (!m) throw badRequest('Upload a WOFF2, WOFF, TTF or OTF font file.');
+  const bytes = Buffer.from(m[1], 'base64');
+  if (bytes.length > FONT_MAX_BYTES) throw badRequest('The font file must be 1.5 MB or smaller.');
+  const mime = sniffFont(bytes);
+  if (!mime) throw badRequest('That file isn’t a WOFF2, WOFF, TTF or OTF font.');
+  const id = Math.random().toString(36).slice(2, 10);
+  await setKV(`branding.fontfile.${id}`, { mime, data: bytes.toString('base64') });
+  const current = (await getSettings()).appearance.fontStyles ?? DEFAULT_FONT_STYLES;
+  const entry = { id, name: b.name.replace(/\.(woff2?|ttf|otf)$/i, ''), version: Date.now().toString(36) };
+  const settings = await updateSettings({ appearance: { fontStyles: { ...current, library: [...(current.library ?? []), entry] } } as any });
+  await logAction(req, 'settings.font_file', 'settings', null, { id, bytes: bytes.length, mime });
+  res.json({ settings, font: entry });
+}));
+/** Remove a font file: font styles using it fall back to the built-in fonts for that text. */
+settingsRouter.delete('/settings/font-file/:id', requirePermission('settings:write'), ah(async (req, res) => {
+  const id = parse(z.string().regex(/^[a-z0-9]{1,20}$/), req.params.id);
+  const current = (await getSettings()).appearance.fontStyles ?? DEFAULT_FONT_STYLES;
+  await db().query('DELETE FROM settings WHERE key = $1', [`branding.fontfile.${id}`]);
+  const settings = await updateSettings({ appearance: { fontStyles: { ...current, library: (current.library ?? []).filter((f) => f.id !== id) } } as any });
+  await logAction(req, 'settings.font_file_removed', 'settings', null, { id });
+  res.json({ settings });
+}));
+/** Public (fonts load before and after sign-in). Versioned URLs are cached for good. */
+export async function serveFontFile(req: Request, res: Response) {
+  const id = /^[a-z0-9]{1,20}$/.test(req.params.id) ? req.params.id : null;
+  const font = id ? await getKV<{ mime: string; data: string }>(`branding.fontfile.${id}`) : null;
+  if (!font) return res.status(404).end();
+  res.setHeader('Content-Type', font.mime);
+  res.setHeader('Cache-Control', req.query.v ? 'public, max-age=31536000, immutable' : 'no-cache');
+  res.send(Buffer.from(font.data, 'base64'));
+}
 
 // ---------- Sign-in photo (Settings → Businesses) ----------
 const LOGIN_IMAGE_KEY = 'branding.login-image';

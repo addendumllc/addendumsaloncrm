@@ -1,4 +1,4 @@
-import { DEFAULT_ACCENT, DEFAULT_APPEARANCE, FONT_CHOICES, FONT_SCALES, fontUrl, logoUrl, resolveTheme, withUserThemes, type Appearance, type CrmTheme, type ColorTheme, type FontScale, type FontSlot, type PersonalLook } from '@addendum/shared';
+import { DEFAULT_ACCENT, DEFAULT_APPEARANCE, DEFAULT_FONT_STYLES, FONT_CHOICES, FONT_SCALES, fontFileUrl, fontUrl, logoUrl, resolveFontStyle, resolveTheme, withUserThemes, type Appearance, type CrmTheme, type FontLibraryEntry, type FontRole, type ColorTheme, type FontScale, type FontSlot, type PersonalLook } from '@addendum/shared';
 
 /** Accent colour theming (Settings → Appearance). Derives the tint/soft/dark shades from one colour. */
 type RGB = [number, number, number];
@@ -85,6 +85,25 @@ function loadCustomFont(slot: FontSlot, url: string | null) {
     document.fonts.forEach((x) => { if (x.family.replace(/"/g, '') === FAMILY[slot] && x !== f) document.fonts.delete(x); });
     document.fonts.add(f);
   }).catch(() => loaded.delete(slot));
+}
+
+/** Fonts uploaded to the font library: registered once each (family "AH Font <id>"), loaded when text uses them. */
+const libraryLoaded = new Set<string>();
+export function loadLibraryFont(e: FontLibraryEntry) {
+  const url = fontFileUrl(e);
+  if (libraryLoaded.has(url) || typeof FontFace === 'undefined') return;
+  libraryLoaded.add(url);
+  new FontFace(`AH Font ${e.id}`, `url(${url})`, { display: 'swap' }).load().then((f) => document.fonts.add(f)).catch(() => libraryLoaded.delete(url));
+}
+/** The CSS font stack for a font style's choice: a built-in font, or an uploaded one from the library. */
+export function fontStackFor(choice: string, library: FontLibraryEntry[], fallback: string) {
+  if (choice.startsWith('file:')) {
+    const e = library.find((x) => x.id === choice.slice(5));
+    if (!e) return fallback;
+    loadLibraryFont(e);
+    return `"AH Font ${e.id}", ${fallback}`;
+  }
+  return FONT_CHOICES.find((f) => f.id === choice)?.stack ?? fallback;
 }
 
 /** Dark palette (fixed, tuned for contrast): page, fills, borders, cards, text and status colours. */
@@ -239,7 +258,24 @@ export function applyAppearance(input: Partial<Appearance> | undefined | null, p
   };
   root.setProperty('--font-display', stack(ty.headingFont, 'heading', SERIF));
   root.setProperty('--font-body', stack(ty.font, 'body', SANS));
-  for (const k of ['--font-link', '--font-button', '--font-nav']) root.setProperty(k, 'var(--font-body)');
+  for (const k of ['--font-link', '--font-button', '--font-nav', '--font-label']) root.setProperty(k, 'var(--font-body)');
+  root.setProperty('--font-subheading', 'var(--font-display)');
+  // A font style (chosen by the person, or the organization's default) sets each kind of text: font, weight, capitals.
+  const fsSettings = { ...DEFAULT_FONT_STYLES, ...(org.fontStyles ?? {}) };
+  const style = resolveFontStyle(fsSettings, lastPersonal);
+  const ROLE_VAR: Record<FontRole, string> = { heading: '--font-display', subheading: '--font-subheading', body: '--font-body', menu: '--font-nav', button: '--font-button', label: '--font-label', link: '--font-link' };
+  for (const role of Object.keys(ROLE_VAR) as FontRole[]) {
+    root.removeProperty(`--w-${role}`);
+    delete html.dataset[`caps${role[0].toUpperCase()}${role.slice(1)}`];
+  }
+  if (style) {
+    for (const role of Object.keys(ROLE_VAR) as FontRole[]) {
+      root.setProperty(ROLE_VAR[role], fontStackFor(style.fonts[role], fsSettings.library ?? [], role === 'heading' || role === 'subheading' ? SERIF : SANS));
+      const w = style.weights?.[role];
+      if (w) root.setProperty(`--w-${role}`, String(w));
+      if (style.caps?.[role]) html.dataset[`caps${role[0].toUpperCase()}${role.slice(1)}`] = '';
+    }
+  }
 
   // Buttons: one size and corner style for every button (the theme's, or theirs).
   const b = t.buttons;

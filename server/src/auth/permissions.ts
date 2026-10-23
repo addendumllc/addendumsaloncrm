@@ -128,6 +128,7 @@ export const API_RULES: { method: string; path: RegExp; anyOf: string[] }[] = [
   { method: '*', path: /^\/settings\/logo$/, anyOf: ['settings:write'] },
   { method: '*', path: /^\/settings\/font\/(heading|body|link|button|nav)$/, anyOf: ['settings:write'] },
   { method: '*', path: /^\/settings\/login-image$/, anyOf: ['settings:write'] },
+  { method: '*', path: /^\/settings\/font-file(\/[a-z0-9]+)?$/, anyOf: ['settings:write'] },
   { method: 'PATCH', path: /^\/settings$/, anyOf: ['settings:rules', 'settings:write', 'integrations:manage', 'inventory:sync', 'users:manage'] },
   { method: 'GET', path: /^\/staff$/, anyOf: ['staff:read', 'users:manage', 'tasks:assign', 'inventory:order_for_others', 'commission:team'] },
   { method: 'PATCH', path: /^\/staff\/[^/]+$/, anyOf: ['users:manage'] },

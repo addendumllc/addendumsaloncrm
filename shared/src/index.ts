@@ -1347,6 +1347,8 @@ export interface Appearance {
   personalAccent?: boolean;
   /** Themes: the approved looks, the default, and what each person may change (Settings → Theme Management). */
   themeSettings?: ThemeSettings;
+  /** Font styles (administrators): a font for each kind of text; each person picks one. */
+  fontStyles?: FontStyleSettings;
 }
 
 /** One area's look: colours, fonts, heading style, corners, badges and text size. */
@@ -1506,6 +1508,58 @@ export const userThemeId = (staffId: string) => `u-${staffId}`;
 export const withUserThemes = (t: Partial<ThemeSettings> | undefined, extra: CrmTheme[]): Partial<ThemeSettings> =>
   ({ ...(t ?? {}), themes: [...(t?.themes ?? DEFAULT_THEME_SETTINGS.themes), ...extra] });
 
+// ---------------- Font styles (Settings → Theme Management → Font styles; each person's Appearance) ----------------
+/** The kinds of text a font style sets. */
+export type FontRole = 'heading' | 'subheading' | 'body' | 'menu' | 'button' | 'label' | 'link';
+export const FONT_ROLES: { key: FontRole; label: string; hint: string }[] = [
+  { key: 'heading', label: 'Headings', hint: 'Page titles' },
+  { key: 'subheading', label: 'Subheadings', hint: 'Section titles and card headings' },
+  { key: 'body', label: 'Paragraphs', hint: 'Body text, forms and tables' },
+  { key: 'menu', label: 'Menu', hint: 'The sidebar' },
+  { key: 'button', label: 'Buttons', hint: 'Every button and tab' },
+  { key: 'label', label: 'Labels', hint: 'Field labels and table headings' },
+  { key: 'link', label: 'Links', hint: 'Text links' },
+];
+export type FontWeight = 300 | 400 | 500 | 600 | 700;
+/**
+ * A font style: a font for each kind of text — a built-in one (FONT_CHOICES id) or an uploaded one ("file:<id>") —
+ * with its weight and capitals. Administrators make and publish them; each person picks one in their Appearance.
+ */
+export interface FontStyle {
+  id: string; name: string; description: string;
+  fonts: Record<FontRole, string>;
+  weights?: Partial<Record<FontRole, FontWeight>>;
+  caps?: Partial<Record<FontRole, boolean>>;
+  status: 'draft' | 'published';
+}
+/** An uploaded font file (administrators): usable in any font style. */
+export interface FontLibraryEntry { id: string; name: string; version: string }
+export interface FontStyleSettings {
+  styles: FontStyle[];
+  /** What everyone gets until they choose (null = the theme's own fonts). */
+  defaultStyle: string | null;
+  library: FontLibraryEntry[];
+}
+export const DEFAULT_FONT_STYLES: FontStyleSettings = {
+  styles: [
+    { id: 'editorial', name: 'Editorial', description: 'Serif headings, clean sans-serif everything else.', status: 'published',
+      fonts: { heading: 'nanum-myeongjo', subheading: 'nanum-myeongjo', body: 'inter', menu: 'inter', button: 'inter', label: 'inter', link: 'inter' } },
+    { id: 'modern', name: 'Modern', description: 'One crisp sans-serif, capital labels.', status: 'published', caps: { label: true },
+      fonts: { heading: 'inter', subheading: 'inter', body: 'inter', menu: 'inter', button: 'inter', label: 'inter', link: 'inter' }, weights: { heading: 500, subheading: 500 } },
+    { id: 'classic', name: 'Classic', description: 'Cormorant headings with Lora subheadings.', status: 'published',
+      fonts: { heading: 'cormorant-garamond', subheading: 'lora', body: 'instrument-sans', menu: 'instrument-sans', button: 'instrument-sans', label: 'instrument-sans', link: 'instrument-sans' } },
+  ],
+  defaultStyle: null,
+  library: [],
+};
+/** The font style that applies: their choice (if published), else the default (null = the theme's own fonts). */
+export function resolveFontStyle(fs: Partial<FontStyleSettings> | undefined, personal: Partial<PersonalLook> | null | undefined): FontStyle | null {
+  const s = { ...DEFAULT_FONT_STYLES, ...(fs ?? {}) };
+  const published = s.styles.filter((x) => x.status === 'published');
+  return published.find((x) => x.id === personal?.fontStyleId) ?? published.find((x) => x.id === s.defaultStyle) ?? null;
+}
+export const fontFileUrl = (e: FontLibraryEntry) => `/brand/fontfile/${e.id}?v=${encodeURIComponent(e.version)}`;
+
 /** A person's own adjustments over their theme (only the parts their organization allows). */
 export interface ThemeCustom { colors?: Partial<ThemeColors>; type?: Partial<ThemeType>; buttons?: Partial<ThemeButtons>; sidebarOpacity?: number; opacity?: ThemeOpacity }
 /** Themes a person may choose: published, and open to their role. */
@@ -1617,6 +1671,8 @@ export interface PersonalLook {
   theme?: string | null;
   /** The business workspace they last chose (opens there next time). null = the first they can use. */
   workspace?: BusinessId | null;
+  /** The font style they chose (Appearance); null = the organization's default. */
+  fontStyleId?: string | null;
   /** Their own secondary accent (active menu indicator) and highlight (badges). null = the theme's. */
   accent2?: string | null;
   highlight?: string | null;

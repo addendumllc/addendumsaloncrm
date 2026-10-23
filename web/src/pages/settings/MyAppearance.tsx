@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { DEFAULT_APPEARANCE, DEFAULT_THEME_SETTINGS, fontFile, resolveTheme, themesFor, withUserThemes, type ColorMode, type CrmTheme, type PersonalLook, type ThemeColors, type ThemeCustom, type ThemeOpacity, type UserThemeDTO } from '@addendum/shared';
+import { DEFAULT_APPEARANCE, DEFAULT_FONT_STYLES, DEFAULT_THEME_SETTINGS, fontFile, resolveTheme, themesFor, withUserThemes, type ColorMode, type CrmTheme, type PersonalLook, type ThemeColors, type ThemeCustom, type ThemeOpacity, type UserThemeDTO } from '@addendum/shared';
 import { api } from '../../api/client';
 import { useLook, useMe, useSettings, useUserThemes } from '../../api/hooks';
-import { USER_COLORS, applyPersonalLook } from '../../lib/theme';
+import { USER_COLORS, applyPersonalLook, fontStackFor } from '../../lib/theme';
 import { ButtonFields, COLOR_FIELDS, ColorField, LivePreview, ThemeCard, ThemePreviewLarge, TypeFields, suggestColors, SidebarOpacityField, OpacityField } from '../../components/domain/ThemeFields';
 import { Button, Field, Modal, Segmented, Toggle, cx, useToast } from '../../components/ui';
 import { Pencil, Plus } from 'lucide-react';
@@ -39,6 +39,10 @@ export function MyAppearance() {
   const userIds = new Set((personal ?? []).map((t) => t.theme.id));
   const offered = themesFor(ts, me?.role).filter((t) => !userIds.has(t.id));
   const [editing, setEditing] = useState(false);
+  // Font styles (made by administrators): published ones to choose from; the default is what applies until they choose.
+  const fsSettings = { ...DEFAULT_FONT_STYLES, ...(org.fontStyles ?? {}) };
+  const fontStyles = fsSettings.styles.filter((x) => x.status === 'published');
+  const fsDefault = fontStyles.find((x) => x.id === fsSettings.defaultStyle) ?? null;
   const base: PersonalLook = saved ?? { accent: null, mode: null, theme: null };
   // An accent chosen before themes existed becomes their own accent here.
   const start: PersonalLook = { ...base, custom: base.custom ?? (base.accent ? { colors: { accent: base.accent } } : {}), accent: null };
@@ -66,7 +70,7 @@ export function MyAppearance() {
   const save = async () => {
     setSaving(true);
     try {
-      const res = await api.put<{ look: PersonalLook }>('/look', { themeId: d.themeId ?? null, custom: d.custom ?? {}, mode: d.mode ?? null, accent: null });
+      const res = await api.put<{ look: PersonalLook }>('/look', { themeId: d.themeId ?? null, custom: d.custom ?? {}, mode: d.mode ?? null, accent: null, fontStyleId: d.fontStyleId ?? null });
       qc.setQueryData(['look'], res.look);
       setDraft(null);
       toast('Appearance saved');
@@ -144,8 +148,26 @@ export function MyAppearance() {
             </div>
           )}
         </Part>
-        <Part title="Fonts & text size" hint="The interface font and sizes for text, headings and small labels — applied evenly across the CRM." locked={ts.allow.type ? undefined : locked}>
-          <TypeFields value={r.type} onChange={(p) => setCustom({ ...custom, type: { ...(custom.type ?? {}), ...p } })}
+        {fontStyles.length > 0 && (
+          <Part title="Font style" hint="Font styles made by your administrator: a font for headings, subheadings, paragraphs, the menu, buttons and labels. Pick the one you prefer.">
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {[{ id: null as string | null, name: fsDefault ? `${fsDefault.name} (default)` : 'The theme’s fonts (default)', style: fsDefault }, ...fontStyles.filter((x) => x.id !== fsSettings.defaultStyle).map((x) => ({ id: x.id as string | null, name: x.name, style: x }))].map((o) => {
+                const on = (d.fontStyleId ?? null) === o.id;
+                const stack = (role: 'heading' | 'body') => (o.style ? fontStackFor(o.style.fonts[role], fsSettings.library ?? [], role === 'heading' ? 'Georgia, serif' : 'system-ui, sans-serif') : role === 'heading' ? 'var(--font-display)' : 'var(--font-body)');
+                return (
+                  <button key={o.id ?? 'default'} type="button" aria-pressed={on} onClick={() => setDraft({ ...d, fontStyleId: o.id })}
+                    className={cx('border p-3 text-left', on ? 'border-ink ring-1 ring-ink' : 'border-line-strong hover:border-ink/40')}>
+                    <span className="block text-[20px] leading-tight text-ink" style={{ fontFamily: stack('heading'), textTransform: o.style?.caps?.heading ? 'uppercase' : 'none' }}>Aa · Headings</span>
+                    <span className="mt-1 block text-[13px] text-ink-soft" style={{ fontFamily: stack('body') }}>Paragraphs, menu and buttons</span>
+                    <span className="mt-2 block text-[12px] font-medium text-stone">{o.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </Part>
+        )}
+        <Part title={fontStyles.length ? 'Text size' : 'Fonts & text size'} hint={fontStyles.length ? 'Sizes for text, headings and small labels — applied evenly across the CRM.' : 'The interface font and sizes for text, headings and small labels — applied evenly across the CRM.'} locked={ts.allow.type ? undefined : locked}>
+          <TypeFields hideFonts={fontStyles.length > 0} value={r.type} onChange={(p) => setCustom({ ...custom, type: { ...(custom.type ?? {}), ...p } })}
             customFonts={{ heading: fontFile(org, 'heading')?.name, body: fontFile(org, 'body')?.name }} />
         </Part>
         <Part title="Buttons" hint="One size and corner style for every button." locked={ts.allow.buttons ? undefined : locked}>

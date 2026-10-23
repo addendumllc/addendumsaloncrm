@@ -24,7 +24,7 @@ import { inventoryRouter } from './routes/inventory.js';
 import { leadsRouter } from './routes/leads.js';
 import { messagesRouter } from './routes/messages.js';
 import { miscRouter } from './routes/misc.js';
-import { serveFont, serveLoginImage, serveLogo, settingsRouter } from './routes/settings.js';
+import { serveFont, serveFontFile, serveLoginImage, serveLogo, settingsRouter } from './routes/settings.js';
 import { tasksRouter } from './routes/tasks.js';
 import { accessRouter } from './routes/access.js';
 import { announcementsRouter } from './routes/announcements.js';
@@ -83,10 +83,12 @@ export function createApp() {
   // Font uploads are larger than anything else the app receives; everything else stays at 1 MB.
   app.use('/api/settings/font', express.json({ limit: '2.5mb' }));
   app.use('/api/settings/login-image', express.json({ limit: '2.5mb' }));
+  app.use('/api/settings/font-file', express.json({ limit: '2.5mb' }));
   app.use(express.json({ limit: '1mb' }));
   app.get('/api/health', (_req, res) => res.json({ ok: true }));
   app.get('/brand/logo', (req, res, next) => serveLogo(req, res).catch(next));
   app.get('/brand/font/:slot', (req, res, next) => serveFont(req, res).catch(next));
+  app.get('/brand/fontfile/:id', (req, res, next) => serveFontFile(req, res).catch(next));
   app.get('/brand/login-image', (req, res, next) => serveLoginImage(req, res).catch(next));
 
   // CSRF defence: state-changing API calls must carry a custom header, which other sites can't send
