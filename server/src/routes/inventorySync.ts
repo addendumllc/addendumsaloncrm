@@ -7,7 +7,7 @@ import {
   unmarkSeparate,
 } from '../domain/inventorySync.js';
 import { addToSquare, applyNewLength, applyPrices, applyProPrices, newLengthPlan, priceList, proPricePlan, squareCandidates,
-  applyStockChanges, createPurchaseOrders, suggestPurchaseOrders, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
+  applyStockChanges, createPurchaseOrders, suggestPurchaseOrders, suggestedOrderPlan, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
   assignSupplier, deleteSupplier, refreshShopifySales, renameSupplier, saveProductSettings, saveSupplier, setForecastSettings, setSupplierLeadTime, stockForecast, stockHistory, stockProducts, updatePurchaseOrder,
 } from '../domain/stock.js';
 import { setSquareSku } from '../domain/squareInventory.js';
@@ -237,9 +237,16 @@ inventorySyncRouter.post('/stock/purchase-orders', ah(async (req, res) => {
   res.status(201).json({ orders });
 }));
 // Suggested orders: a draft per collection with what needs ordering (replaces earlier suggested drafts for the store).
+inventorySyncRouter.get('/stock/purchase-orders/suggest', ah(async (req, res) => {
+  const store = (['salon', 'shopify'] as const).find((s) => s === req.query.store) ?? 'all';
+  res.json({ groups: await suggestedOrderPlan(store) });
+}));
 inventorySyncRouter.post('/stock/purchase-orders/suggest', ah(async (req, res) => {
-  const b = parse(z.object({ store: z.enum(['salon', 'shopify', 'all']).default('all') }), req.body ?? {});
-  const orders = await suggestPurchaseOrders(b.store, req.user!.id);
+  const b = parse(z.object({
+    store: z.enum(['salon', 'shopify', 'all']).default('all'),
+    groups: z.array(z.object({ collection: z.string().min(1).max(120), lines: z.array(z.object({ productKey: z.string().min(1).max(200), quantity: z.number().int().min(0).max(100_000) })).max(500) })).max(200).optional(),
+  }), req.body ?? {});
+  const orders = await suggestPurchaseOrders(b.store, req.user!.id, b.groups);
   await logAction(req, 'stock.po_suggest', 'purchase_order', null, { orders: orders.map((o) => o.number), store: b.store });
   res.status(201).json({ orders });
 }));

@@ -797,21 +797,42 @@ function collectionOfEach(items: StockForecastDTO[]) {
  * pre-orders, order now, reorder soon) at the suggested amounts — named "Suggested · <collection>". Earlier suggested
  * drafts for the same store are replaced, so it can be run again after stock changes. Nothing is ordered.
  */
-export async function suggestPurchaseOrders(store: 'salon' | 'shopify' | 'all', staffId: string | null) {
+export interface SuggestedGroup {
+  collection: string;
+  suppliers: string[];
+  lines: { productKey: string; label: string; sku: string | null; status: StockForecastDTO['status']; stock: number; quantity: number; costCents: number | null }[];
+}
+
+/** What suggested orders would contain, per collection (nothing is saved). */
+export async function suggestedOrderPlan(store: 'salon' | 'shopify' | 'all'): Promise<SuggestedGroup[]> {
   const f = await stockForecast();
   const fallback = await defaultSupplier();
   const inStore = (i: StockForecastDTO) => store === 'all' || (store === 'salon' ? i.stores.salon : i.stores.online);
   const need = f.items.filter((i) => i.suggestedQty > 0 && ['out', 'order_now', 'soon'].includes(i.status) && inStore(i));
-  await db().query(`DELETE FROM purchase_orders WHERE status = 'draft' AND name LIKE 'Suggested · %' AND ($1 = 'all' OR store = $1)`, [store]);
-  if (!need.length) return [];
   const coll = collectionOfEach(f.items.filter(inStore));
   const groups = new Map<string, StockForecastDTO[]>();
   for (const i of need) groups.set(coll(i), [...(groups.get(coll(i)) ?? []), i]);
+  return [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([collection, list]) => ({
+    collection,
+    suppliers: [...new Set(list.map((i) => i.supplier ?? fallback).filter((x): x is string => !!x))],
+    lines: list.map((i) => ({ productKey: i.key, label: i.label, sku: i.sku, status: i.status, stock: i.stock, quantity: i.suggestedQty, costCents: i.costCents })),
+  }));
+}
+
+/**
+ * Makes the suggested drafts — the plan as previewed (with any products left out or amounts changed), or the current
+ * plan. Earlier suggested drafts for the same store are replaced first.
+ */
+export async function suggestPurchaseOrders(store: 'salon' | 'shopify' | 'all', staffId: string | null, chosen?: { collection: string; lines: { productKey: string; quantity: number }[] }[]) {
+  const plan = await suggestedOrderPlan(store);
+  const groups = chosen
+    ? chosen.filter((g) => g.lines.some((l) => l.quantity > 0)).map((g) => ({ collection: g.collection, suppliers: plan.find((p) => p.collection === g.collection)?.suppliers ?? [], lines: g.lines.filter((l) => l.quantity > 0) }))
+    : plan;
+  await db().query(`DELETE FROM purchase_orders WHERE status = 'draft' AND name LIKE 'Suggested · %' AND ($1 = 'all' OR store = $1)`, [store]);
   const orders: PurchaseOrderDTO[] = [];
-  for (const [c, list] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
-    const suppliers = [...new Set(list.map((i) => i.supplier ?? fallback).filter((x): x is string => !!x))];
-    orders.push(...await createPurchaseOrders(list.map((i) => ({ productKey: i.key, quantity: i.suggestedQty })), staffId, null,
-      store === 'all' ? undefined : store, suppliers.length ? suppliers : undefined, `Suggested · ${c}`.slice(0, 80)));
+  for (const g of groups) {
+    orders.push(...await createPurchaseOrders(g.lines.map((l) => ({ productKey: l.productKey, quantity: l.quantity })), staffId, null,
+      store === 'all' ? undefined : store, g.suppliers.length ? g.suppliers : undefined, `Suggested · ${g.collection}`.slice(0, 80)));
   }
   return orders;
 }

@@ -247,6 +247,15 @@ describe('Suppliers', () => {
     const products = (await api.get('/api/inventory-sync/stock/products')).body.products;
     await api.put('/api/inventory-sync/stock/products/settings', { rows: products.map((p: any) => ({ key: p.key, leadTimeDays: 700 })) });
     forgetStockCache();
+    // Preview first: nothing is saved.
+    const preview = (await api.get('/api/inventory-sync/stock/purchase-orders/suggest?store=all')).body.groups;
+    expect(preview.length).toBeGreaterThan(0);
+    expect((await api.get('/api/inventory-sync/stock/purchase-orders')).body.orders.some((o: any) => o.name?.startsWith('Suggested · '))).toBe(false);
+    // Create with one amount changed.
+    const g0 = preview[0];
+    const edited = preview.map((g: any, gi: number) => ({ collection: g.collection, lines: g.lines.map((l: any, li: number) => ({ productKey: l.productKey, quantity: gi === 0 && li === 0 ? 7 : l.quantity })) }));
+    const made = (await api.post('/api/inventory-sync/stock/purchase-orders/suggest', { store: 'all', groups: edited })).body.orders;
+    expect(made.find((o: any) => o.name === `Suggested · ${g0.collection}`).lines.find((l: any) => l.productKey === g0.lines[0].productKey).quantity).toBe(7);
     const first = (await api.post('/api/inventory-sync/stock/purchase-orders/suggest', { store: 'all' })).body.orders;
     expect(first.length).toBeGreaterThan(0);
     expect(first.every((o: any) => o.status === 'draft' && o.name.startsWith('Suggested · '))).toBe(true);

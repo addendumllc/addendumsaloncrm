@@ -825,6 +825,74 @@ const F_STATUS: Record<StockForecastDTO['status'], { label: string; tone: 'rose'
   watch: { label: 'Watch', tone: 'plum' }, healthy: { label: 'Healthy', tone: 'sage' }, no_sales: { label: 'No recent sales', tone: 'neutral' }, discontinued: { label: 'Discontinued', tone: 'neutral' },
 };
 
+type SuggestedGroup = { collection: string; suppliers: string[]; lines: { productKey: string; label: string; sku: string | null; status: StockForecastDTO['status']; stock: number; quantity: number; costCents: number | null }[] };
+
+/**
+ * Draft suggested orders: a preview of the draft per collection — products, suggested amounts and suppliers. Untick
+ * products or change amounts, then Create (earlier suggested drafts for this store are replaced; nothing is ordered).
+ */
+function SuggestedOrders({ store, onClose, onMade }: { store: 'all' | 'salon' | 'shopify'; onClose: () => void; onMade: () => void }) {
+  const toast = useToast();
+  const { data, isLoading, error, refetch } = useQuery({ queryKey: ['suggested-orders', store], gcTime: 0, queryFn: () => api.get<{ groups: SuggestedGroup[] }>(`/inventory-sync/stock/purchase-orders/suggest?store=${store}`).then((r) => r.groups) });
+  const [qty, setQty] = useState<Record<string, string>>({});
+  const [off, setOff] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const q = (l: SuggestedGroup['lines'][number]) => (off.has(l.productKey) ? 0 : Math.max(0, Math.round(Number(qty[l.productKey] ?? l.quantity) || 0)));
+  const groups = data ?? [];
+  const kept = groups.filter((g) => g.lines.some((l) => q(l) > 0));
+  const items = kept.reduce((n, g) => n + g.lines.filter((l) => q(l) > 0).length, 0);
+  const total = groups.reduce((n, g) => n + g.lines.reduce((m, l) => m + (l.costCents ?? 0) * q(l), 0), 0);
+  const toggle = (k: string) => setOff((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const create = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post<{ orders: PurchaseOrderDTO[] }>('/inventory-sync/stock/purchase-orders/suggest', {
+        store, groups: groups.map((g) => ({ collection: g.collection, lines: g.lines.map((l) => ({ productKey: l.productKey, quantity: q(l) })) })),
+      });
+      toast(`${r.orders.length} suggested draft${r.orders.length === 1 ? '' : 's'} made — review them in Purchase orders.`);
+      onMade();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal open wide onClose={onClose} title="Draft suggested orders" footer={<>
+      <span className="mr-auto text-[13px] text-stone">{kept.length ? `${kept.length} draft${kept.length === 1 ? '' : 's'} · ${items} product${items === 1 ? '' : 's'}${total ? ` · about $${Math.round(total / 100).toLocaleString()}` : ''}` : 'Nothing selected'}</span>
+      <Button variant="ghost" onClick={onClose}>Cancel</Button>
+      <Button variant="primary" loading={busy} disabled={!kept.length} onClick={create}>Create {kept.length || ''} draft{kept.length === 1 ? '' : 's'}</Button>
+    </>}>
+      {isLoading ? <PageLoading /> : error || !data ? <ErrorNote error={error} onRetry={refetch} /> : !groups.length ? (
+        <EmptyState title="Nothing needs ordering right now">Nothing is out of stock, due to order now, or reorder soon.</EmptyState>
+      ) : (
+        <div className="space-y-4 text-[13px]">
+          <p className="text-ink-soft">One draft per collection, at the suggested amounts. Untick anything you don’t want or change an amount. Earlier suggested drafts are replaced; nothing is ordered until you mark a draft ordered.</p>
+          {groups.map((g) => (
+            <section key={g.collection} className="rounded-xl2 border border-line">
+              <header className="flex flex-wrap items-baseline gap-x-2 border-b border-line bg-mist/40 px-3 py-2">
+                <span className="font-medium text-ink">Suggested · {g.collection}</span>
+                <span className="text-stone">{g.suppliers.length ? g.suppliers.join(' + ') : 'No supplier set'}</span>
+              </header>
+              <ul className="divide-y divide-line">
+                {g.lines.map((l) => (
+                  <li key={l.productKey} className={cx('flex items-center gap-3 px-3 py-1.5', off.has(l.productKey) && 'opacity-50')}>
+                    <input type="checkbox" className="h-4 w-4 accent-plum" checked={!off.has(l.productKey)} onChange={() => toggle(l.productKey)} aria-label={`Include ${l.label}`} />
+                    <span className="min-w-0 flex-1"><span className="block truncate text-ink">{l.label}</span><span className="font-mono text-[11px] text-stone">{l.sku}</span></span>
+                    <Badge tone={F_STATUS[l.status].tone}>{F_STATUS[l.status].label}</Badge>
+                    <span className="num w-16 text-right text-stone">{l.stock} in stock</span>
+                    <input inputMode="numeric" disabled={off.has(l.productKey)} className="w-16 rounded-md border border-line bg-white px-2 py-1 text-right num" value={qty[l.productKey] ?? String(l.quantity)} onChange={(e) => setQty((x) => ({ ...x, [l.productKey]: e.target.value }))} aria-label={`Amount of ${l.label}`} />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 /** A number of days with its label and an explanation (Forecast settings). */
 function DaysField({ label, hint, value, onChange, unit = 'days' }: { label: string; hint?: string; value: number; onChange: (v: number) => void; unit?: string }) {
   return (
@@ -847,6 +915,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
   const [open, setOpen] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [defaults, setDefaults] = useState<StockForecastResponse['settings'] | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
   const [showMoq, setShowMoq] = useState(() => { try { return localStorage.getItem('reorder-moq') !== '0'; } catch { return true; } });
   // View by: one list of products, or grouped by collection or supplier (remembered on this device).
   const [by, setByState] = useState<'product' | 'collection' | 'supplier'>(() => { try { const v = localStorage.getItem('reorder-by'); return v === 'collection' || v === 'supplier' ? v : 'product'; } catch { return 'product'; } });
@@ -894,21 +963,6 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
       setBusy(false);
     }
   };
-  // A draft purchase order per collection with what needs ordering; earlier suggested drafts for this store are replaced.
-  const suggestPOs = async () => {
-    if (!window.confirm('Make a draft purchase order for each collection with what needs ordering now (suggested amounts)? Earlier suggested drafts are replaced; nothing is ordered.')) return;
-    setBusy(true);
-    try {
-      const r = await api.post<{ orders: PurchaseOrderDTO[] }>('/inventory-sync/stock/purchase-orders/suggest', { store: store === 'hair' ? 'shopify' : store });
-      toast(r.orders.length ? `${r.orders.length} suggested draft${r.orders.length === 1 ? '' : 's'} made, one per collection — review them in Purchase orders.` : 'Nothing needs ordering right now.');
-      refresh();
-      if (r.orders.length) onOrders();
-    } catch (e) {
-      toast((e as Error).message, 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
   const refreshSales = async () => {
     setBusy(true);
     try { await api.post('/inventory-sync/stock/sales/refresh'); refetch(); } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
@@ -939,7 +993,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
         </select>
         <span className="ml-auto flex items-center gap-2">
           <Toggle checked={showMoq} onChange={(v) => { setShowMoq(v); try { localStorage.setItem('reorder-moq', v ? '1' : '0'); } catch { /* private window */ } }} label="MOQ timing" />
-          <Button size="sm" icon={<ListPlus className="h-4 w-4" />} loading={busy} onClick={suggestPOs}>Draft suggested orders</Button>
+          <Button size="sm" icon={<ListPlus className="h-4 w-4" />} onClick={() => setSuggesting(true)}>Draft suggested orders</Button>
           <Button size="sm" icon={<Settings2 className="h-4 w-4" />} onClick={() => setDefaults(data.settings)}>Forecast settings</Button>
         </span>
       </div>
@@ -949,6 +1003,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
         {data.salesFrom.shopifyNote && <span className="text-amber"> · {data.salesFrom.shopifyNote}</span>}
         {' · '}<button type="button" className="text-plum hover:underline" onClick={refreshSales} disabled={busy}>Update now</button>
       </p>
+      {suggesting && <SuggestedOrders store={store === 'hair' ? 'shopify' : store} onClose={() => setSuggesting(false)} onMade={() => { setSuggesting(false); refresh(); onOrders(); }} />}
       {defaults && (
         <Modal open onClose={() => setDefaults(null)} title="Forecast settings"
           footer={<><Button variant="ghost" onClick={() => setDefaults(null)}>Cancel</Button><Button variant="primary" onClick={saveDefaults}>Save</Button></>}>
