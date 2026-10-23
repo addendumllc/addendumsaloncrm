@@ -14,7 +14,7 @@ import { Badge, Button, Modal, cx, useToast } from '../ui';
  * Businesses) applies. Only the layout — what they may open is still decided by their permissions, and tabs an
  * administrator made required can't be hidden.
  */
-export type SidebarLayout = { order: string[]; hidden: string[]; sections?: Record<string, MenuSection>; sectionList?: { key: string; label: string }[]; labels?: Record<string, string> };
+export type SidebarLayout = { order: string[]; hidden: string[]; sections?: Record<string, MenuSection>; sectionList?: { key: string; label: string }[]; labels?: Record<string, string>; subOrder?: Record<string, string[]> };
 export type MenuItem = { to: string; label: string; icon: LucideIcon };
 
 export function useSidebarLayout() {

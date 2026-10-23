@@ -139,3 +139,21 @@ describe('Placing an order', () => {
     expect(MockShopifyService.sets.length).toBe(1);
   });
 });
+
+describe('Products in Order Hair (admin choice)', () => {
+  it('offers only the chosen products, in order; the rest can’t be ordered; admins still see everything', async () => {
+    const { hairParts } = await import('@addendum/shared');
+    expect(hairParts('Black Magic - Clip-Ins - 18 inch - 120g')).toEqual({ color: 'Black Magic', collection: 'Clip-Ins', length: '18 inch', detail: '120g' });
+    expect(hairParts('Signature Hand-Tied Weft – 20" / #60 Platinum')).toMatchObject({ collection: 'Signature Hand-Tied Weft', length: '20"', color: '#60 Platinum' });
+    expect((await api.patch('/api/settings', { inventory: { orderHair: { onlyListed: true, listed: ['TAPE-16-8', 'KTIP-22-1B'], collections: ['Tape-In Extensions'] } } })).status).toBe(200);
+    const r = (await api.get('/api/inventory/shopify-products?fresh=true')).body;
+    expect(r.products.map((p: any) => p.sku)).toEqual(['TAPE-16-8', 'KTIP-22-1B']);
+    expect(r.layout.collections).toEqual(['Tape-In Extensions']);
+    expect((await api.get('/api/inventory/shopify-products?all=1')).body.products.length).toBeGreaterThan(2);
+    const refused = await place({ items: [{ sku: 'HTW-20-60', quantity: 1 }] });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error.message).toMatch(/isn’t offered/);
+    expect((await place({ items: [{ sku: 'KTIP-22-1B', quantity: 1 }] })).status).toBe(201);
+    await api.patch('/api/settings', { inventory: { orderHair: { onlyListed: false, listed: [], collections: [] } } });
+  });
+});

@@ -1,5 +1,7 @@
 import { Router } from 'express';
-import { IntegrationError } from '../lib/errors.js';
+import { IntegrationError, badRequest } from '../lib/errors.js';
+import { DEFAULT_ORDER_HAIR, arrangeOrderHair } from '@addendum/shared';
+import { getSettings } from '../repos/settings.js';
 import { z } from 'zod';
 import { can } from '../auth/permissions.js';
 import { requirePermission } from '../auth/session.js';
@@ -66,7 +68,12 @@ const itemSchema = z.object({
 /** Shopify hair inventory for the order form (search by SKU or name). Read-only. */
 inventoryRouter.get('/shopify-products', ah(async (req, res) => {
   try {
-    res.json(await shopifyHairProducts(req.query.fresh === 'true'));
+    // What Order Hair offers (Settings → Order Hair): only the chosen products, in the chosen order. Admins can ask for
+    // everything (?all=1) to choose from.
+    const r = await shopifyHairProducts(req.query.fresh === 'true');
+    const layout = { ...DEFAULT_ORDER_HAIR, ...((await getSettings()).inventory.orderHair ?? {}) };
+    const all = req.query.all === '1' && (can(req.user, 'settings:write') || can(req.user, 'inventory:manage'));
+    res.json({ ...r, products: all ? r.products : arrangeOrderHair(r.products, layout), layout });
   } catch (e) {
     res.json({ connected: true, products: [], error: e instanceof IntegrationError ? e.userMessage : 'Shopify inventory couldn’t be loaded right now.' });
   }
@@ -83,6 +90,13 @@ inventoryRouter.post('/requests', ah(async (req, res) => {
   }), req.body);
   // Only people allowed to order for others can pick a different stylist.
   if (!can(req.user, 'inventory:order_for_others')) b.forStaffId = req.user!.id;
+  // Only products Order Hair offers (when an admin chose them).
+  const layout = (await getSettings()).inventory.orderHair;
+  if (layout?.onlyListed) {
+    const ok = new Set(layout.listed.map((x) => x.toLowerCase()));
+    const off = b.items.find((i) => i.sku && !ok.has(i.sku.toLowerCase()));
+    if (off) throw badRequest(`${off.sku} isn’t offered in Order Hair.`);
+  }
   const { request: r, duplicate } = await createInventoryRequest(b, req.user!.id);
   if (!duplicate) await logAction(req, 'inventory.request', 'inventory_request', r.id, { items: r.items.length, fromInventory: r.items.filter((i) => i.sku).length });
   res.status(duplicate ? 200 : 201).json({ request: r, duplicate });

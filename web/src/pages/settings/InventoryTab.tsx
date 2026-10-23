@@ -4,6 +4,7 @@ import { useIntegrations } from '../../api/hooks';
 import { Button, Field, Toggle, useToast } from '../../components/ui';
 import { EnvRow, useSetupInfo } from './IntegrationTabs';
 import { Card, SaveBar, StatusLine, useCan, useSection } from './shared';
+import { OrderHairProducts } from './OrderHairProducts';
 
 export function InventorySettings() {
   const inv = useSection('inventory');
@@ -69,6 +70,8 @@ export function InventorySettings() {
         </Field>
         {locked && <p className="mt-3 text-[13px] text-stone">Only administrators (with “Edit business settings”) can change where requests are sent.</p>}
       </Card>
+
+      <OrderHairProducts inv={inv as any} locked={locked} />
 
       <Card title="Shopify inventory" description="Square is the source of truth for stock. Administrators can push Square's counts to Shopify by hand from Inventory Sync → Square inventory; products are matched by SKU. Nothing is sent to Shopify automatically, and hair orders never change Shopify.">
         <StatusLine state={integ.shopify.connected ? 'ok' : 'off'}>

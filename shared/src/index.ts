@@ -1225,6 +1225,8 @@ export interface AppSettings {
     sendAsSubmitter: boolean;
     /** Email domains the email service may send from (e.g. addendumsalon.com). The sending address's domain counts too. */
     senderDomains: string[];
+    /** What Order Hair offers (Settings → Order Hair): only chosen products if set, in this order; collections in this order. */
+    orderHair?: OrderHairLayout;
   };
   appearance: Appearance;
   /** Where the CRM can be used from (Settings → Location & Access). Changed only through PUT /api/access. */
@@ -1245,6 +1247,33 @@ export interface AppSettings {
 
 /** The default accent for anyone who hasn't chosen their own (administrators can change it). */
 export const DEFAULT_ACCENT = '#6B5242';
+
+/** Order Hair's product list: everything, or only the chosen SKUs (in their order); collections shown in this order. */
+export interface OrderHairLayout { onlyListed: boolean; listed: string[]; collections: string[] }
+export const DEFAULT_ORDER_HAIR: OrderHairLayout = { onlyListed: false, listed: [], collections: [] };
+/**
+ * A Shopify hair listing's parts, for choosing by collection → length → colour:
+ * "Black Magic - Clip-Ins - 18 inch - 120g" → collection Clip-Ins, length 18 inch, colour Black Magic, detail 120g;
+ * "Hand-Tied Weft – 20\" / #60 Platinum" → collection Hand-Tied Weft, length 20", colour #60 Platinum. Single items
+ * (tools, beads) are "Tools & accessories".
+ */
+export function hairParts(label: string): { collection: string; length: string; color: string; detail: string } {
+  const parts = label.split(/\s+[-–]\s+/).map((x) => x.trim()).filter((x) => x && x.toLowerCase() !== 'default title');
+  if (parts.length >= 3) return { color: parts[0], collection: parts[1], length: parts[2], detail: parts.slice(3).join(' · ') };
+  if (parts.length === 2) {
+    const v = parts[1].split(/\s+\/\s+/);
+    const len = v.find((x) => /^\d+(\.\d+)?\s*("|”|in\b|inch)/i.test(x)) ?? '';
+    return { collection: parts[0], length: len, color: v.filter((x) => x !== len).join(' / ') || parts[1], detail: '' };
+  }
+  return { collection: 'Tools & accessories', length: '', color: parts[0] ?? label, detail: '' };
+}
+/** Order Hair's list after the admin's choices: only listed (if set), listed ones in their order, the rest by name. */
+export function arrangeOrderHair<T extends { sku: string; label: string }>(items: T[], layout: Partial<OrderHairLayout> | undefined): T[] {
+  const l = { ...DEFAULT_ORDER_HAIR, ...(layout ?? {}) };
+  const pos = new Map(l.listed.map((s, i) => [s.toLowerCase(), i]));
+  const shown = l.onlyListed ? items.filter((x) => pos.has(x.sku.toLowerCase())) : items;
+  return [...shown].sort((a, b) => (pos.get(a.sku.toLowerCase()) ?? 1e9) - (pos.get(b.sku.toLowerCase()) ?? 1e9) || a.label.localeCompare(b.label));
+}
 
 /**
  * Location & Access. With "Allow Access Anywhere" off and at least one salon IP registered, desktop browsers can only

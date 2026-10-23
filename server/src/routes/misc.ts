@@ -127,6 +127,8 @@ miscRouter.put('/sidebar/layout', ah(async (req, res) => {
     // Their own section headings (renamed or new) and tab names.
     sectionList: z.array(z.object({ key, label: z.string().trim().min(1).max(30) })).max(15).optional(),
     labels: z.record(item, z.string().trim().min(1).max(30)).optional(),
+    // Their own order for each tab's sub-menu (the sub-tabs' links).
+    subOrder: z.record(item, z.array(z.string().max(160)).max(30)).optional(),
   }).nullable(), req.body?.layout ?? null);
   await setKV(sidebarKey(req.user!.id, sidebarWs(req.query)), b);
   res.json({ layout: b });

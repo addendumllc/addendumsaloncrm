@@ -139,7 +139,12 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
   // What didn't save last time (stays until dismissed; those cells keep their edits).
   const [problems, setProblems] = useState<StockApplyResultDTO['results']>([]);
   const scoped = useMemo(() => (data?.products ?? []).filter((p) => only !== 'shopify' || !p.squareVariationId), [data, only]);
-  const shown = useMemo(() => filterProducts(scoped, q, status), [scoped, q, status]);
+  // Collections (from Square and Shopify) to narrow the list fast, and ticking products to change many at once.
+  const [coll, setColl] = useState('');
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [bulkSupplier, setBulkSupplier] = useState('');
+  const collectionList = useMemo(() => [...new Set(scoped.flatMap((p) => p.collections))].sort((a, b) => a.localeCompare(b)), [scoped]);
+  const shown = useMemo(() => filterProducts(scoped, q, status).filter((p) => !coll || p.collections.includes(coll)), [scoped, q, status, coll]);
   if (isLoading) return <PageLoading />;
   if (error || !data) return <ErrorNote error={error} onRetry={refetch} />;
 
@@ -219,7 +224,32 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone" />
           <input className="field h-11 pl-9 text-[16px] sm:text-[14px]" type="search" placeholder={SEARCH_HINT} value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
+        {collectionList.length > 0 && (
+          <select className="field h-11 w-auto max-w-full py-1 text-[14px]" value={coll} onChange={(e) => setColl(e.target.value)} aria-label="Collection">
+            <option value="">All collections</option>
+            {collectionList.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
         <Segmented className="max-w-full overflow-x-auto" value={status} onChange={setStatus} options={[{ value: 'active', label: 'Active' }, { value: 'all', label: 'All' }, { value: 'discontinued', label: 'Discontinued' }, { value: 'not_tracked', label: 'Not tracked' }]} />
+      </div>
+      {/* Select all (what's shown), then change many at once; nothing is saved until Save. */}
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-[13px]">
+        <label className="flex items-center gap-2 text-ink-soft">
+          <input type="checkbox" className="h-4 w-4 accent-plum" checked={shown.length > 0 && shown.slice(0, 500).every((p) => picked.has(p.key))}
+            onChange={(e) => setPicked(e.target.checked ? new Set(shown.slice(0, 500).map((p) => p.key)) : new Set())} aria-label="Select all shown" />
+          {picked.size ? `${picked.size} selected` : `Select all ${Math.min(shown.length, 500)} shown`}
+        </label>
+        {picked.size > 0 && <>
+          <select className="field h-9 w-auto py-1 text-[13px]" value="" onChange={(e) => { const v = e.target.value as StockProductStatus; if (v) for (const k of picked) set(k, { status: v }); }} aria-label="Set status for selected">
+            <option value="">Set status…</option>
+            {Object.entries(STATUS_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          {details && <>
+            <input className="field h-9 w-40 py-1 text-[13px]" placeholder="Supplier for selected" value={bulkSupplier} onChange={(e) => setBulkSupplier(e.target.value)} aria-label="Supplier for selected" />
+            <Button size="sm" disabled={!bulkSupplier.trim()} onClick={() => { for (const k of picked) set(k, { supplier: bulkSupplier.trim() }); }}>Set supplier</Button>
+          </>}
+          <Button size="sm" variant="ghost" onClick={() => setPicked(new Set())}>Clear</Button>
+        </>}
       </div>
       <div className="mb-4 flex flex-wrap items-center gap-x-1 gap-y-2 text-[13px]">
         <span className="mr-1 text-stone">Change many at once:</span>
@@ -259,6 +289,7 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
           return (
             <li key={p.key} className={cx('rounded-xl2 border bg-white p-3', edits[p.key] ? 'border-amber/50' : 'border-line')}>
               <div className="flex items-start gap-3">
+                <input type="checkbox" className="mt-1 h-5 w-5 shrink-0 accent-plum" checked={picked.has(p.key)} onChange={() => setPicked((x) => { const n = new Set(x); if (n.has(p.key)) n.delete(p.key); else n.add(p.key); return n; })} aria-label={`Select ${p.label}`} />
                 <ProductThumb src={p.imageUrl} alt={p.label} size="lg" />
                 <div className="min-w-0 flex-1"><p className="text-[15px] font-medium leading-snug text-ink">{p.label}</p><Collections p={p} /></div>
                 {b}
@@ -293,6 +324,7 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
         <table className={cx('w-full text-left text-[14px]', details ? 'min-w-[1100px]' : 'min-w-[800px]')}>
           <thead className="border-b border-line bg-mist/50 text-[11px] uppercase tracking-wide text-stone">
             <tr>
+              <th className="w-8 pl-4"><span className="sr-only">Select</span></th>
               <th className="px-4 py-2.5 font-medium">Product</th><th className="px-2 py-2.5 font-medium">SKU</th><th className="px-2 py-2.5 font-medium">In stock</th><th className="px-2 py-2.5 font-medium">New count</th>
               {details && <><th className="px-2 py-2.5 font-medium">Supplier</th><th className="px-2 py-2.5 font-medium">Cost $</th><th className="px-2 py-2.5 font-medium" title="Days from ordering to arriving">Lead days</th><th className="px-2 py-2.5 font-medium" title="Extra days of stock to keep">Safety days</th><th className="px-2 py-2.5 font-medium" title="Minimum order quantity">Min order</th><th className="px-2 py-2.5 font-medium">Case size</th></>}
               <th className="px-2 py-2.5 font-medium" title="Discontinued or Not tracked: left out of syncing and lists">Status</th>
@@ -303,6 +335,7 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
               const rowChanged = !!edits[p.key];
               return (
               <tr key={p.key} className={cx(rowChanged && 'bg-amber-tint/40')}>
+                <td className="pl-4"><input type="checkbox" className="h-4 w-4 accent-plum" checked={picked.has(p.key)} onChange={() => setPicked((x) => { const n = new Set(x); if (n.has(p.key)) n.delete(p.key); else n.add(p.key); return n; })} aria-label={`Select ${p.label}`} /></td>
                 <td className="max-w-[340px] px-4 py-2.5">
                   <span className="flex items-start gap-3">
                     <ProductThumb src={p.imageUrl} alt={p.label} />

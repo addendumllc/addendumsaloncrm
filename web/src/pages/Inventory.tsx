@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { INVENTORY_STATUS_LABELS, type InventoryItemDTO, type InventoryRequestDTO, type InventoryStatus } from '@addendum/shared';
-import { AlertCircle, ArrowLeftRight, CheckCircle2, Clock, Mail, Minus, Package, PackageCheck, Plus, RotateCw, Search, Send, ShoppingBag, Trash2, Truck, X } from 'lucide-react';
+import { INVENTORY_STATUS_LABELS, hairParts, type OrderHairLayout, type InventoryItemDTO, type InventoryRequestDTO, type InventoryStatus } from '@addendum/shared';
+import { AlertCircle, ArrowLeft, ArrowLeftRight, CheckCircle2, ChevronRight, Clock, Mail, Minus, Package, PackageCheck, Plus, RotateCw, Search, Send, ShoppingBag, Trash2, Truck, X } from 'lucide-react';
 import { api, ApiError } from '../api/client';
 import { useCanDo, useInventory, useInventorySuggestions, useIntegrations, useMe, useRefreshAll, useStaff } from '../api/hooks';
 import { addDaysKey, dateShort, dateTime, dayKey, relative } from '../lib/format';
@@ -36,6 +36,8 @@ export function InventoryPage() {
   };
 
   const ws = useWorkspace();
+  // Ordering is its own page (not a side panel): collection → length → colour → quantity, with the order beside it.
+  if (composing) return <ComposeRequest onClose={() => { setComposing(false); set('new', null); }} />;
   return (
     <div className="animate-rise">
       {/* Order Hair wears Addendum Hair's look, but it's the salon ordering: say so. */}
@@ -73,7 +75,6 @@ export function InventoryPage() {
       </>
       )}
 
-      {composing && <ComposeRequest onClose={() => { setComposing(false); set('new', null); }} />}
       {openId && <RequestDetail id={openId} onClose={() => set('open', null)} canManage={!!data?.canManage} seesAll={!!data?.seesAll} />}
     </div>
   );
@@ -228,7 +229,7 @@ function ComposeRequest({ onClose }: { onClose: () => void }) {
   const { data: staff } = useStaff(forOthers);
   const { data: sugg } = useInventorySuggestions();
   const { data: integ } = useIntegrations(canDo('dashboard:view'));
-  const shopify = useQuery({ queryKey: ['shopify-hair-products'], queryFn: () => api.get<{ connected: boolean; products: ShopifyOption[]; error?: string }>('/inventory/shopify-products'), staleTime: 30_000 });
+  const shopify = useQuery({ queryKey: ['shopify-hair-products'], queryFn: () => api.get<{ connected: boolean; products: ShopifyOption[]; error?: string; layout?: OrderHairLayout }>('/inventory/shopify-products'), staleTime: 30_000 });
   const refresh = useRefreshAll();
   const toast = useToast();
   const [forStaffId, setForStaffId] = useState<string>('');
@@ -248,10 +249,10 @@ function ComposeRequest({ onClose }: { onClose: () => void }) {
   const update = (key: number, patch: Partial<Line>) => setLines((ls) => ls.map((l) => (l.key === key ? ({ ...l, ...patch } as Line) : l)));
   const remove = (key: number) => setLines((ls) => ls.filter((l) => l.key !== key));
   /** Picking the same product again adds one more to its line (up to what's in stock). */
-  const pick = (o: ShopifyOption) => setLines((ls) => {
+  const pick = (o: ShopifyOption, qty = 1) => setLines((ls) => {
     const same = ls.find((l) => l.kind === 'inventory' && l.option.sku === o.sku);
-    if (same) return ls.map((l) => (l.key === same.key ? { ...l, quantity: Math.min(o.available, l.quantity + 1) } : l));
-    return [...ls, { key: ++lineKey, kind: 'inventory', option: o, quantity: 1 }];
+    if (same) return ls.map((l) => (l.key === same.key ? { ...l, quantity: Math.min(o.available, l.quantity + qty) } : l));
+    return [...ls, { key: ++lineKey, kind: 'inventory', option: o, quantity: Math.min(o.available, qty) }];
   });
   const quick = useMemo(() => (sugg?.collections ?? []).slice(0, 8), [sugg]);
   const added = new Map(lines.flatMap((l) => (l.kind === 'inventory' ? [[l.option.sku, l.quantity] as const] : [])));
@@ -288,42 +289,38 @@ function ComposeRequest({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Modal
-      open side onClose={onClose} title="New Hair Order Request"
-      footer={
-        <>
-          <span className="mr-auto text-[13px] text-stone">{filled.length ? `${plural(filled.length, 'item')} · ${plural(units, 'unit')}` : 'Add hair to order'}</span>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button variant="primary" icon={<Send className="h-4 w-4" />} loading={sending} disabled={!filled.length || missingDate} onClick={send}>Submit order</Button>
-        </>
-      }
-    >
-      <p className="mb-4 flex items-start gap-2 rounded-lg bg-mist px-3 py-2 text-[13px] text-ink-soft"><Mail className="mt-0.5 h-4 w-4 shrink-0 text-stone" /><span>Sent to <b className="font-medium text-ink">Addendum Hair</b>{integ?.demoMode ? ' · Demo Mode, not actually sent' : ''}</span></p>
-
-      {/* Filled in with whoever is signed in; receptionists and admins can change it to order for someone else. */}
-      <Field label="For stylist">
-        {forOthers ? (
-          <select className="field" value={who} onChange={(e) => setForStaffId(e.target.value)}>
-            {/* The signed-in person always comes first (and shows even before the team list loads). */}
-            {me && <option value={me.id}>{me.name} (me)</option>}
-            {staff?.filter((s) => s.active && s.id !== me?.id).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
-        ) : (
-          <input className="field" value={me?.name ?? ''} readOnly aria-readonly="true" />
-        )}
-      </Field>
-
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <Field label="Needed By (required)">
-          <input type="date" className={cx('field h-11', error && missingDate && 'border-rose')} min={tomorrow} value={neededBy} onChange={(e) => { setNeededBy(e.target.value >= tomorrow ? e.target.value : ''); setError(null); }} required aria-required="true" />
-        </Field>
-        <Field label="Client (optional)">
-          <input className="field h-11" value={customer} maxLength={120} onChange={(e) => setCustomer(e.target.value)} placeholder="Client name" autoComplete="off" />
-        </Field>
-      </div>
-
-      <HairPicker shopify={shopify.data} loading={shopify.isLoading} onPick={pick} added={added} />
-
+    <div className="animate-rise">
+      <button type="button" onClick={onClose} className="mb-3 inline-flex items-center gap-1 text-sm text-stone hover:text-ink"><ArrowLeft className="h-4 w-4" />Order Hair</button>
+      <PageHeader title="New hair order" subtitle={<span className="inline-flex items-center gap-1.5"><Mail className="h-4 w-4" />Sent to Addendum Hair{integ?.demoMode ? ' · Demo Mode, not actually sent' : ''}</span>} />
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)]">
+        {/* Choose hair: collection → length → colour → quantity (or search). */}
+        <section className="min-w-0 space-y-4">
+          {shopify.data && !shopify.data.connected
+            ? <p className="rounded-lg bg-amber-tint px-3 py-2 text-[13px] text-amber">Shopify isn’t connected, so hair can’t be taken from inventory. You can still add items by hand.</p>
+            : <StepPicker products={shopify.data?.products ?? []} layout={shopify.data?.layout} loading={shopify.isLoading} added={added} onAdd={pick} />}
+          {shopify.data?.error && <p className="text-[13px] text-rose">{shopify.data.error}</p>}
+          <HairPicker shopify={shopify.data} loading={shopify.isLoading} onPick={pick} added={added} />
+        </section>
+        {/* The order: who it's for, when, the items, notes and Submit. */}
+        <aside className="self-start border border-line bg-white p-4 lg:sticky lg:top-4">
+          <Field label="For stylist">
+            {forOthers ? (
+              <select className="field" value={who} onChange={(e) => setForStaffId(e.target.value)}>
+                {me && <option value={me.id}>{me.name} (me)</option>}
+                {staff?.filter((s) => s.active && s.id !== me?.id).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            ) : (
+              <input className="field" value={me?.name ?? ''} readOnly aria-readonly="true" />
+            )}
+          </Field>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+            <Field label="Needed By (required)">
+              <input type="date" className={cx('field h-11', error && missingDate && 'border-rose')} min={tomorrow} value={neededBy} onChange={(e) => { setNeededBy(e.target.value >= tomorrow ? e.target.value : ''); setError(null); }} required aria-required="true" />
+            </Field>
+            <Field label="Client (optional)">
+              <input className="field h-11" value={customer} maxLength={120} onChange={(e) => setCustomer(e.target.value)} placeholder="Client name" autoComplete="off" />
+            </Field>
+          </div>
       <div className="mt-4">
         <span className="label">Items</span>
         {lines.length === 0 && <p className="rounded-lg border border-dashed border-line-strong px-3 py-3 text-[13px] text-stone">Search above or choose from the list to add hair.</p>}
@@ -364,7 +361,101 @@ function ComposeRequest({ onClose }: { onClose: () => void }) {
         <textarea className="field min-h-[70px]" value={note} maxLength={1000} onChange={(e) => setNote(e.target.value)} placeholder="Special instructions, e.g. For Sarah's install on the 14th" />
       </Field>
       {error && <p className="mt-3 flex items-start gap-2 rounded-lg border border-rose/30 bg-rose-tint px-3 py-2 text-[14px] text-rose" role="alert"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</p>}
-    </Modal>
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+            <span className="mr-auto text-[13px] text-stone">{filled.length ? `${plural(filled.length, 'item')} · ${plural(units, 'unit')}` : 'Add hair to order'}</span>
+            <Button variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button variant="primary" icon={<Send className="h-4 w-4" />} loading={sending} disabled={!filled.length || missingDate} onClick={send}>Submit order</Button>
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Choose hair step by step: the collection, then the length, then the colour (out of stock can't be chosen), then how
+ * many. Collections and products follow the order an admin set (Settings → Order Hair).
+ */
+function StepPicker({ products, layout, loading, added, onAdd }: { products: ShopifyOption[]; layout?: OrderHairLayout; loading: boolean; added: Map<string, number>; onAdd: (o: ShopifyOption, qty: number) => void }) {
+  const [collection, setCollection] = useState<string | null>(null);
+  const [length, setLength] = useState<string | null>(null);
+  const [chosen, setChosen] = useState<ShopifyOption | null>(null);
+  const [qty, setQty] = useState(1);
+  const items = useMemo(() => products.map((p) => ({ p, ...hairParts(p.label) })), [products]);
+  const collections = useMemo(() => {
+    const seen = [...new Set(items.map((i) => i.collection))];
+    const order = layout?.collections ?? [];
+    const pos = (c: string) => { const i = order.findIndex((x) => x.toLowerCase() === c.toLowerCase()); return i < 0 ? 1e9 : i; };
+    return seen.sort((a, b) => pos(a) - pos(b) || (a === 'Tools & accessories' ? 1 : b === 'Tools & accessories' ? -1 : 0));
+  }, [items, layout]);
+  const inCol = items.filter((i) => i.collection === collection);
+  const lengths = [...new Set(inCol.map((i) => i.length))].sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0));
+  const effLength = lengths.length === 1 ? lengths[0] : length;
+  const colors = effLength != null ? inCol.filter((i) => i.length === effLength) : [];
+  const step = !collection ? 1 : effLength == null ? 2 : 3;
+  const reset = (to: 1 | 2) => { if (to === 1) { setCollection(null); setLength(null); } else setLength(null); setChosen(null); setQty(1); };
+  const crumb = 'inline-flex items-center gap-1 text-[13px] text-plum hover:underline';
+  if (loading) return <PageLoading />;
+  if (!items.length) return <p className="text-[13px] text-stone">No hair is offered in Order Hair right now. Add an item by hand instead.</p>;
+  return (
+    <div className="border border-line bg-white p-4">
+      <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
+        <span className={cx('font-medium', step === 1 ? 'text-ink' : 'text-stone')}>1 · Collection</span>
+        {collection && <button type="button" className={crumb} onClick={() => reset(1)}>{collection}</button>}
+        <ChevronRight className="h-3.5 w-3.5 text-stone" />
+        <span className={cx('font-medium', step === 2 ? 'text-ink' : 'text-stone')}>2 · Length</span>
+        {effLength && lengths.length > 1 && <button type="button" className={crumb} onClick={() => reset(2)}>{effLength}</button>}
+        <ChevronRight className="h-3.5 w-3.5 text-stone" />
+        <span className={cx('font-medium', step === 3 ? 'text-ink' : 'text-stone')}>3 · Colour & quantity</span>
+      </div>
+      {step === 1 && (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {collections.map((c) => {
+            const list = items.filter((i) => i.collection === c);
+            const inStock = list.some((i) => i.p.available > 0);
+            return (
+              <button key={c} type="button" onClick={() => { setCollection(c); setLength(null); setChosen(null); }}
+                className={cx('border border-line px-3 py-3 text-left hover:border-plum hover:bg-plum-tint/30', !inStock && 'opacity-50')}>
+                <span className="block text-[15px] font-medium text-ink">{c}</span>
+                <span className="text-[12px] text-stone">{inStock ? (() => { const n = new Set(list.map((i) => i.color)).size; return `${n} colour${n === 1 ? '' : 's'}`; })() : 'Out of stock'}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {step === 2 && (
+        <div className="flex flex-wrap gap-2">
+          {lengths.map((l) => (
+            <button key={l || 'one'} type="button" onClick={() => setLength(l)} className="min-w-[5.5rem] border border-line px-4 py-3 text-[15px] font-medium text-ink hover:border-plum hover:bg-plum-tint/30">{l || 'One size'}</button>
+          ))}
+        </div>
+      )}
+      {step === 3 && (
+        <>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {colors.map(({ p, color, detail }) => {
+              const out = p.available <= 0;
+              const n = added.get(p.sku) ?? 0;
+              return (
+                <button key={p.sku} type="button" disabled={out || n >= p.available} onClick={() => { setChosen(p); setQty(1); }}
+                  className={cx('border px-3 py-2 text-left', chosen?.sku === p.sku ? 'border-plum bg-plum-tint/40' : 'border-line hover:border-plum', (out || n >= p.available) && 'opacity-45')}>
+                  <span className="block text-[14px] font-medium text-ink">{color}</span>
+                  <span className="block text-[12px] text-stone">{out ? 'Out of stock' : n ? `${n} in this order` : detail || 'In stock'}</span>
+                </button>
+              );
+            })}
+          </div>
+          {chosen && (
+            <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-line pt-3">
+              <div className="min-w-0 flex-1"><p className="text-[14px] font-medium text-ink">{chosen.label}</p><p className="font-mono text-[12px] text-stone">{chosen.sku}</p></div>
+              <div><span className="mb-1 block text-xs text-stone">Quantity</span>
+                <Stepper value={qty} max={Math.max(1, chosen.available - (added.get(chosen.sku) ?? 0))} onChange={setQty} label="Quantity" /></div>
+              <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => { onAdd(chosen, qty); setChosen(null); setQty(1); }}>Add to order</Button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -376,14 +467,13 @@ function HairPicker({ shopify, loading, onPick, added }: { shopify?: { connected
   const results = products.filter((p) => words.every((w) => norm(`${p.sku} ${p.label}`).includes(w)));
   if (shopify && !shopify.connected) return <p className="mt-4 rounded-lg bg-amber-tint px-3 py-2 text-[13px] text-amber">Shopify isn’t connected, so hair can’t be taken from inventory. You can still add items by hand below.</p>;
   return (
-    <div className="sticky top-0 z-10 -mx-5 mt-4 border-b border-line bg-white px-5 pb-3 pt-1">
-      <span className="label">Hair Item — Search Shopify Inventory</span>
+    <div>
+      <span className="label">Or search by SKU, name, length or colour</span>
       <label className="relative block">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone" />
         <input className="field h-11 pl-9 pr-9" type="search" inputMode="search" value={text} onChange={(e) => setText(e.target.value)} placeholder="SKU, name, length or colour" aria-label="Search Shopify hair inventory" />
         {text && <button type="button" onClick={() => setText('')} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-stone hover:bg-mist hover:text-ink" aria-label="Clear search"><X className="h-4 w-4" /></button>}
       </label>
-      {!text && <HairBrowser products={products} loading={loading} onPick={onPick} added={added} />}
       {shopify?.error && <p className="mt-2 text-[13px] text-rose">{shopify.error}</p>}
       {text && (
         <ul className="mt-2 max-h-64 divide-y divide-line overflow-y-auto rounded-lg border border-line">
@@ -408,57 +498,6 @@ function HairPicker({ shopify, loading, onPick, added }: { shopify?: { connected
           })}
         </ul>
       )}
-    </div>
-  );
-}
-
-/**
- * "High Ball - Classic Weft - 18 inch - 20g" → colour "High Ball", type "Classic Weft", details "18 inch · 20g".
- * "Product – 20\" / #60" (one level of options) is grouped by product. Single items (tools, beads) are listed under
- * Tools & accessories. "Default Title" is dropped.
- */
-const TOOLS = 'Tools & accessories';
-function parseHair(label: string) {
-  const parts = label.split(/\s+[-–]\s+/).map((x) => x.trim()).filter((x) => x && x.toLowerCase() !== 'default title');
-  if (parts.length >= 3) return { group: parts[0], type: parts[1], details: parts.slice(2).join(' · ') };
-  // "Signature Hand-Tied Weft – 20" / #60 Platinum": the product, then its options.
-  if (parts.length === 2) return { group: parts[0], type: '', details: parts[1].split(/\s+\/\s+/).join(' · ') };
-  return { group: TOOLS, type: '', details: parts[0] ?? label };
-}
-
-/**
- * Two short dropdowns instead of one long one: first a colour or a collection (Classic Weft, K-Tips…), then the length
- * and weight within it, as named in Shopify. Choosing one adds it; out of stock is listed but can't be chosen.
- */
-function HairBrowser({ products, loading, onPick, added }: { products: ShopifyOption[]; loading: boolean; onPick: (o: ShopifyOption) => void; added: Map<string, number> }) {
-  const [pick, setPick] = useState('');
-  const items = useMemo(() => products.map((p) => ({ p, ...parseHair(p.label) })), [products]);
-  const sort = (a: string, b: string) => (a === TOOLS ? 1 : b === TOOLS ? -1 : a.localeCompare(b));
-  const colours = useMemo(() => [...new Set(items.map((i) => i.group))].sort(sort), [items]);
-  const collections = useMemo(() => [...new Set(items.map((i) => i.type).filter(Boolean))].sort(sort), [items]);
-  // "c:High Ball" (a colour) or "t:K-Tips" (a collection).
-  const [kind, name] = [pick.slice(0, 1), pick.slice(2)];
-  const options = !pick ? [] : items
-    .filter((i) => (kind === 'c' ? i.group === name : i.type === name))
-    // The rest of the Shopify name, as it is: the collection and length for a colour, or the colour and length for a collection.
-    .map((i) => ({ p: i.p, text: (kind === 'c' ? [i.type, i.details] : [i.group, i.details]).filter(Boolean).join(' - ') }))
-    .sort((x, y) => x.text.localeCompare(y.text, undefined, { numeric: true }));
-  return (
-    <div className="mt-2 grid gap-2 sm:grid-cols-2">
-      <select className="field h-11" value={pick} onChange={(e) => setPick(e.target.value)} disabled={!products.length} aria-label="Colour or collection">
-        <option value="">{loading ? 'Loading inventory…' : 'Colour or collection…'}</option>
-        <optgroup label="Colours">{colours.map((c) => <option key={c} value={`c:${c}`}>{c}</option>)}</optgroup>
-        {collections.length > 0 && <optgroup label="Collections">{collections.map((t) => <option key={t} value={`t:${t}`}>{t}</option>)}</optgroup>}
-      </select>
-      <select className="field h-11" value="" disabled={!pick} aria-label="Length"
-        onChange={(e) => { const o = products.find((p) => p.sku === e.target.value); if (o) onPick(o); }}>
-        <option value="">{pick ? `Choose from ${name}…` : 'Then the length…'}</option>
-        {options.map(({ p, text }) => {
-          const n = added.get(p.sku) ?? 0;
-          const out = p.available <= 0;
-          return <option key={p.sku} value={p.sku} disabled={out || n >= p.available}>{text}{out ? ' — Out of stock' : n ? ` — added ×${n}` : ''}</option>;
-        })}
-      </select>
     </div>
   );
 }

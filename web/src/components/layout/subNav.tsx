@@ -1,4 +1,7 @@
+import { useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { ArrowDown, ArrowUp, ChevronDown } from 'lucide-react';
+import { useSidebarLayout } from './sidebarLayout';
 import type { SharedSettings } from '@addendum/shared';
 import { useSettings } from '../../api/hooks';
 import type { StoreNames } from '../../lib/storeNames';
@@ -8,7 +11,8 @@ import type { StoreNames } from '../../lib/storeNames';
  * link with its own query (`?view=…`); `params` are the query keys that pick the section. Pages use the same list for the
  * section picker shown on phones, where the sidebar is tucked away.
  */
-export type SubItem = { to: string; label: string | ((n: StoreNames) => string); anyOf?: string[]; group?: string };
+/** `menu`: similar sub-tabs folded under one dropdown in the sidebar (e.g. Ordering, Products). */
+export type SubItem = { to: string; label: string | ((n: StoreNames) => string); anyOf?: string[]; group?: string; menu?: string };
 export type SubNav = { params: string[]; items: SubItem[] };
 
 export const SUB_NAV: Record<string, SubNav> = {
@@ -17,13 +21,13 @@ export const SUB_NAV: Record<string, SubNav> = {
     params: ['view'],
     items: [
       { to: '/inventory-sync', label: 'Inventory' },
-      { to: '/inventory-sync?view=toorder', label: 'To order' },
-      { to: '/inventory-sync?view=orders', label: 'Purchase orders' },
-      { to: '/inventory-sync?view=stock', label: 'Stock counts / Reorder' },
-      { to: '/inventory-sync?view=products', label: 'Products' },
+      { to: '/inventory-sync?view=toorder', label: 'To order', menu: 'Ordering' },
+      { to: '/inventory-sync?view=orders', label: 'Purchase orders', menu: 'Ordering' },
+      { to: '/inventory-sync?view=suppliers', label: 'Suppliers', menu: 'Ordering' },
+      { to: '/inventory-sync?view=products', label: 'Products', menu: 'Products' },
       // Unit cost and each store's price (salon, stylist, retail), changed in one place.
-      { to: '/inventory-sync?view=pricing', label: 'Pricing' },
-      { to: '/inventory-sync?view=suppliers', label: 'Suppliers' },
+      { to: '/inventory-sync?view=pricing', label: 'Pricing', menu: 'Products' },
+      { to: '/inventory-sync?view=stock', label: 'Stock counts / Reorder', menu: 'Products' },
       { to: '/inventory-sync?view=sync', label: 'Sync' },
     ],
   },
@@ -126,23 +130,81 @@ export function SectionPicker({ path, names, can: canDo, className }: { path: st
 }
 
 /** The sub-menu under a sidebar item, while you're in that section (both sidebars use it). Nothing when there's only one part. */
+/**
+ * The sub-menu under a sidebar item, while you're in that section (both sidebars use it). Similar sub-tabs fold under a
+ * dropdown; each person can reorder the sub-tabs (Reorder, at the bottom — saved to their account).
+ */
 export function SubNavList({ path, names, can: canDo }: { path: string; names: StoreNames; can: (p: string) => boolean }) {
   const can = useCanOrShared(canDo);
   const loc = useLocation();
+  const { layout, save } = useSidebarLayout();
+  const [reordering, setReordering] = useState(false);
+  const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({});
   const sub = SUB_NAV[path];
   if (!sub || !(loc.pathname === path || loc.pathname.startsWith(`${path}/`))) return null;
-  const subs = sub.items.filter((i) => !i.anyOf || i.anyOf.some(can));
-  if (subs.length < 2) return null;
+  const allowed = sub.items.filter((i) => !i.anyOf || i.anyOf.some(can));
+  if (allowed.length < 2) return null;
+  // Their order (new sub-tabs keep their built-in place).
+  const saved = layout?.subOrder?.[path] ?? [];
+  const pos = (to: string) => { const i = saved.indexOf(to); return i < 0 ? 100 + allowed.findIndex((x) => x.to === to) : i; };
+  const subs = [...allowed].sort((a, b) => pos(a.to) - pos(b.to));
+  const active = (i: SubItem) => subActive(i, sub, loc.pathname, loc.search);
+  const link = (i: SubItem, indent = false) => (
+    <NavLink key={i.to} to={i.to} end className={() => `block rounded-md px-2 py-1.5 text-[15px] lg:text-[13.5px] ${indent ? 'ml-3' : ''} ${active(i) ? 'bg-white font-medium text-ink shadow-sm' : 'text-ink-soft hover:bg-white/60'}`}>
+      {subLabel(i, names)}
+    </NavLink>
+  );
+  const move = (to: string, d: -1 | 1) => {
+    const order = subs.map((x) => x.to);
+    const i = order.indexOf(to);
+    if (i + d < 0 || i + d >= order.length) return;
+    [order[i], order[i + d]] = [order[i + d], order[i]];
+    void save({ ...(layout ?? { order: [], hidden: [] }), subOrder: { ...(layout?.subOrder ?? {}), [path]: order } });
+  };
+  if (reordering) {
+    return (
+      <div className="mb-1 ml-[22px] border-l border-line pl-2">
+        {subs.map((i, k) => (
+          <div key={i.to} className="flex items-center gap-1 px-1 py-1 text-[13.5px] text-ink-soft">
+            <span className="min-w-0 flex-1 truncate">{subLabel(i, names)}{i.menu && <span className="text-[11px] text-stone"> · {i.menu}</span>}</span>
+            <button type="button" className="p-0.5 text-stone hover:text-ink disabled:opacity-30" disabled={k === 0} onClick={() => move(i.to, -1)} aria-label={`Move ${subLabel(i, names)} up`}><ArrowUp className="h-3.5 w-3.5" /></button>
+            <button type="button" className="p-0.5 text-stone hover:text-ink disabled:opacity-30" disabled={k === subs.length - 1} onClick={() => move(i.to, 1)} aria-label={`Move ${subLabel(i, names)} down`}><ArrowDown className="h-3.5 w-3.5" /></button>
+          </div>
+        ))}
+        <div className="flex gap-3 px-2 pt-1 text-[12px]">
+          <button type="button" className="font-medium text-plum hover:underline" onClick={() => setReordering(false)}>Done</button>
+          {saved.length > 0 && <button type="button" className="text-stone hover:text-ink" onClick={() => { const next = { ...(layout?.subOrder ?? {}) }; delete next[path]; void save({ ...(layout ?? { order: [], hidden: [] }), subOrder: next }); }}>Reset</button>}
+        </div>
+      </div>
+    );
+  }
+  // A dropdown shows where its first sub-tab is, with all of its sub-tabs; open while one of them is showing.
+  const shownMenus = new Set<string>();
   return (
     <div className="mb-1 ml-[22px] border-l border-line pl-2">
-      {subs.map((i, k) => (
-        <div key={i.to}>
-          {i.group && i.group !== subs[k - 1]?.group && <p className="px-2 pb-0.5 pt-2 text-[11px] font-semibold uppercase tracking-wide text-stone">{i.group}</p>}
-          <NavLink to={i.to} end className={() => `block rounded-md px-2 py-1.5 text-[15px] lg:text-[13.5px] ${subActive(i, sub, loc.pathname, loc.search) ? 'bg-white font-medium text-ink shadow-sm' : 'text-ink-soft hover:bg-white/60'}`}>
-            {subLabel(i, names)}
-          </NavLink>
-        </div>
-      ))}
+      {subs.map((i, k) => {
+        if (!i.menu) return (
+          <div key={i.to}>
+            {i.group && i.group !== subs[k - 1]?.group && <p className="px-2 pb-0.5 pt-2 text-[11px] font-semibold uppercase tracking-wide text-stone">{i.group}</p>}
+            {link(i)}
+          </div>
+        );
+        if (shownMenus.has(i.menu)) return null;
+        shownMenus.add(i.menu);
+        const members = subs.filter((x) => x.menu === i.menu);
+        const isActive = members.some(active);
+        const open = openMenus[i.menu] ?? isActive;
+        return (
+          <div key={`menu-${i.menu}`}>
+            <button type="button" onClick={() => setOpenMenus((m) => ({ ...m, [i.menu!]: !open }))} aria-expanded={open}
+              className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[15px] lg:text-[13.5px] ${isActive && !open ? 'bg-white font-medium text-ink shadow-sm' : 'text-ink-soft hover:bg-white/60'}`}>
+              {i.menu}<ChevronDown className={`h-3.5 w-3.5 text-stone transition-transform ${open ? 'rotate-180' : ''}`} />
+            </button>
+            {open && members.map((m) => link(m, true))}
+          </div>
+        );
+      })}
+      <button type="button" className="px-2 pt-1 text-[11px] text-stone hover:text-ink" onClick={() => setReordering(true)}>Reorder</button>
     </div>
   );
 }

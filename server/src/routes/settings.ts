@@ -100,6 +100,7 @@ const settingsPatch = z.object({
     orderFromAddress: z.union([z.literal(''), z.string().trim().email('must be an email address').max(200)]),
     sendAsSubmitter: z.boolean(),
     senderDomains: z.array(z.string().trim().toLowerCase().regex(/^[a-z0-9-]+(\.[a-z0-9-]+)+$/, 'must be a domain like addendumsalon.com')).max(20),
+    orderHair: z.object({ onlyListed: z.boolean(), listed: z.array(z.string().trim().min(1).max(120)).max(2000), collections: z.array(z.string().trim().min(1).max(120)).max(200) }),
   }).partial().optional(),
   appearance: z.object({
     accent: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'must be a colour like #6B3F55'),
