@@ -4,7 +4,7 @@ import {
   STOCK_REASONS, productSearchText, productSearchWords, type PurchaseOrderDTO, type StockApplyResultDTO, type SupplierDTO, type StockChangeInput, type StockForecastDTO, type StockForecastResponse,
   type StockProductDTO, type StockProductStatus, type StockTxnDTO,
 } from '@addendum/shared';
-import { AlertTriangle, ArrowLeftRight, ChevronDown, ChevronRight, Download, FileUp, ListPlus, PackageCheck, Plus, Replace, Search, Trash2, Pencil } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, Settings2, ChevronDown, ChevronRight, Download, FileUp, ListPlus, PackageCheck, Plus, Replace, Search, Trash2, Pencil } from 'lucide-react';
 import { api } from '../../api/client';
 import { useCanDo } from '../../api/hooks';
 import { downloadCsv, parseCsv } from '../../lib/csv';
@@ -823,6 +823,16 @@ const F_STATUS: Record<StockForecastDTO['status'], { label: string; tone: 'rose'
   watch: { label: 'Watch', tone: 'plum' }, healthy: { label: 'Healthy', tone: 'sage' }, no_sales: { label: 'No recent sales', tone: 'neutral' }, discontinued: { label: 'Discontinued', tone: 'neutral' },
 };
 
+/** A number of days with its label and an explanation (Forecast settings). */
+function DaysField({ label, hint, value, onChange }: { label: string; hint?: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <Field label={label} hint={hint}>
+      <span className="relative block"><input className="field num pr-12" inputMode="numeric" value={value} onChange={(e) => onChange(Number(e.target.value.replace(/\D/g, '')) || 0)} />
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[13px] text-stone">days</span></span>
+    </Field>
+  );
+}
+
 /** `store`: all products, or only those the salon (Square) or Addendum Hair (online) sells. */
 export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder' }: { onOrders: () => void; store?: 'all' | 'salon' | 'hair'; initialFilter?: 'reorder' | 'alerts' | 'all' }) {
   const toast = useToast();
@@ -905,29 +915,51 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
           <div key={l} className="rounded-xl2 border border-line bg-white px-3 py-2"><p className="text-[12px] text-stone">{l}</p><p className={cx('num font-display text-[24px] leading-tight', n > 0 && c)}>{n}</p></div>
         ))}
       </div>
-      <p className="mb-3 text-[12px] text-stone">
-        Sales from {[data.salesFrom.square && 'Square', data.salesFrom.shopify && 'Shopify'].filter(Boolean).join(' and ') || 'nowhere yet'}
-        {data.salesFrom.shopifyUpdatedAt ? ` · Shopify sales updated ${relative(data.salesFrom.shopifyUpdatedAt)}` : ''}.
-        {data.salesFrom.shopifyNote && <span className="text-amber"> {data.salesFrom.shopifyNote}</span>}
-        <button type="button" className="ml-2 text-plum underline" onClick={refreshSales} disabled={busy}>Update sales now</button>
-      </p>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
         <Segmented value={filter} onChange={setFilter} options={[{ value: 'reorder', label: 'To reorder' }, { value: 'alerts', label: `Alerts${outN + riskN ? ` (${outN + riskN})` : ''}` }, { value: 'all', label: 'All products' }]} />
-        <label className="flex items-center gap-2 text-[13px] text-ink-soft">View by
-          <select className="field h-9 w-auto py-1 text-sm" value={by} onChange={(e) => setBy(e.target.value as typeof by)} aria-label="View by">
-            <option value="product">Product</option><option value="collection">Collection</option><option value="supplier">Supplier</option>
-          </select>
-        </label>
-        <span className="ml-auto flex flex-wrap items-center gap-2 text-[13px] text-ink-soft">
-          Defaults: lead <input className="field num w-16" value={d.leadTimeDays} onChange={(e) => setDefaults({ ...d, leadTimeDays: Number(e.target.value) || 0 })} /> days ·
-          safety <input className="field num w-16" value={d.safetyDays} onChange={(e) => setDefaults({ ...d, safetyDays: Number(e.target.value) || 0 })} /> days ·
-          cover <input className="field num w-16" value={d.coverageDays} onChange={(e) => setDefaults({ ...d, coverageDays: Number(e.target.value) || 0 })} /> days ·
-          slow to use after <input className="field num w-16" value={d.slowToUseDays} onChange={(e) => setDefaults({ ...d, slowToUseDays: Number(e.target.value) || 0 })} /> days ·
-          <span title="Days until the order-by date, from how fast each product sells">reorder soon within <input className="field num w-16" value={d.soonDays} onChange={(e) => setDefaults({ ...d, soonDays: Number(e.target.value) || 0 })} /> days · watch within <input className="field num w-16" value={d.watchDays} onChange={(e) => setDefaults({ ...d, watchDays: Number(e.target.value) || 0 })} /> days</span>
-          <label className="flex items-center gap-1.5"><input type="checkbox" checked={showMoq} onChange={(e) => { setShowMoq(e.target.checked); try { localStorage.setItem('reorder-moq', e.target.checked ? '1' : '0'); } catch { /* private window */ } }} />Show MOQ timing</label>
-          {defaults && <Button size="sm" variant="primary" onClick={saveDefaults}>Save</Button>}
+        <select className="field h-9 w-auto py-1 text-sm" value={by} onChange={(e) => setBy(e.target.value as typeof by)} aria-label="View by">
+          <option value="product">View by product</option><option value="collection">View by collection</option><option value="supplier">View by supplier</option>
+        </select>
+        <span className="ml-auto flex items-center gap-2">
+          <Toggle checked={showMoq} onChange={(v) => { setShowMoq(v); try { localStorage.setItem('reorder-moq', v ? '1' : '0'); } catch { /* private window */ } }} label="MOQ timing" />
+          <Button size="sm" icon={<Settings2 className="h-4 w-4" />} onClick={() => setDefaults(data.settings)}>Forecast settings</Button>
         </span>
       </div>
+      <p className="mb-3 text-[12px] text-stone">
+        Sales from {[data.salesFrom.square && 'Square', data.salesFrom.shopify && 'Shopify'].filter(Boolean).join(' and ') || 'nowhere yet'}
+        {data.salesFrom.shopifyUpdatedAt ? ` · Shopify updated ${relative(data.salesFrom.shopifyUpdatedAt)}` : ''}
+        {data.salesFrom.shopifyNote && <span className="text-amber"> · {data.salesFrom.shopifyNote}</span>}
+        {' · '}<button type="button" className="text-plum hover:underline" onClick={refreshSales} disabled={busy}>Update now</button>
+      </p>
+      {defaults && (
+        <Modal open onClose={() => setDefaults(null)} title="Forecast settings"
+          footer={<><Button variant="ghost" onClick={() => setDefaults(null)}>Cancel</Button><Button variant="primary" onClick={saveDefaults}>Save</Button></>}>
+          <div className="space-y-5 text-[14px]">
+            <section>
+              <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-stone">When to order</h3>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <DaysField label="Lead time" hint="For products with no lead time of their own or from their supplier." value={d.leadTimeDays} onChange={(v) => setDefaults({ ...d, leadTimeDays: v })} />
+                <DaysField label="Safety stock" hint="Extra days of stock kept as a cushion." value={d.safetyDays} onChange={(v) => setDefaults({ ...d, safetyDays: v })} />
+                <DaysField label="Order enough for" hint="Days of sales each order should cover once it arrives." value={d.coverageDays} onChange={(v) => setDefaults({ ...d, coverageDays: v })} />
+              </div>
+            </section>
+            <section>
+              <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-stone">Status windows</h3>
+              <p className="mb-2 text-[13px] text-ink-soft">Days until a product’s order-by date — worked out from how fast it sells, so fast sellers show up sooner.</p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <DaysField label="Reorder soon within" value={d.soonDays} onChange={(v) => setDefaults({ ...d, soonDays: v })} />
+                <DaysField label="Watch within" hint="After that it’s Healthy." value={d.watchDays} onChange={(v) => setDefaults({ ...d, watchDays: v })} />
+              </div>
+            </section>
+            <section>
+              <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-stone">Minimum orders</h3>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <DaysField label="Slow to use after" hint="Flag a minimum order that takes longer than this to sell." value={d.slowToUseDays} onChange={(v) => setDefaults({ ...d, slowToUseDays: v })} />
+              </div>
+            </section>
+          </div>
+        </Modal>
+      )}
       {picked.size > 0 && (
         <div className="sticky top-0 z-10 mb-3 flex items-center gap-2 rounded-xl2 border border-line bg-white px-4 py-2 text-[13px] shadow-sm">
           <span className="text-ink">{picked.size} selected</span>
