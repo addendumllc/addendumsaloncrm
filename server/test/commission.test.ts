@@ -623,6 +623,22 @@ describe('Wages, hours and tips', () => {
     expect((await admin.get(`/api/commission/pay/${jenId}?${range}`)).body.pay.payType).toBe('none');
   });
 
+  it('a wage for certain dates only: the earlier wage carries on the day after', async () => {
+    const base = { salaryCents: null, salaryPeriod: 'year', tipEligible: true, taxes: NO_TAX };
+    await admin.put(`/api/commission/pay/${jenId}`, { ...base, payType: 'hourly', hourlyRateCents: 3000, effectiveFrom: null });
+    const r = await admin.post('/api/commission/pay-rates', { staffId: jenId, payType: 'hourly', hourlyRateCents: 2200, salaryCents: null, salaryPeriod: 'year', effectiveFrom: daysAgo(20), effectiveTo: daysAgo(15) });
+    expect(r.status).toBe(201);
+    expect(r.body.pay.rates.map((x: any) => [x.hourlyRateCents, x.effectiveFrom, x.effectiveTo])).toEqual([
+      [3000, daysAgo(14), null], [2200, daysAgo(20), daysAgo(15)], [3000, null, daysAgo(21)],
+    ]);
+    expect(r.body.pay.hourlyRateCents).toBe(3000);
+    // Another wage inside those dates, or an end before the start, is refused.
+    expect((await admin.post('/api/commission/pay-rates', { staffId: jenId, payType: 'hourly', hourlyRateCents: 1, salaryCents: null, salaryPeriod: 'year', effectiveFrom: daysAgo(30), effectiveTo: daysAgo(18) })).status).toBe(400);
+    expect((await admin.post('/api/commission/pay-rates', { staffId: jenId, payType: 'hourly', hourlyRateCents: 1, salaryCents: null, salaryPeriod: 'year', effectiveFrom: daysAgo(5), effectiveTo: daysAgo(8) })).status).toBe(400);
+    for (const x of r.body.pay.rates) await admin.del(`/api/commission/pay-rates/${x.id}`);
+    await admin.put(`/api/commission/pay/${jenId}`, { ...base, payType: 'none', hourlyRateCents: null });
+  });
+
   it('an Owner/Admin can send hours entered in the CRM to Square as a timecard, once', async () => {
     const day = daysAgo(4);
     // A day Square has no timecard for (the demo one removed).

@@ -272,15 +272,16 @@ const rateLabel = (r: Pick<PayRateDTO, 'payType' | 'hourlyRateCents' | 'salaryCe
   r.payType === 'hourly' ? `${usd(r.hourlyRateCents ?? 0)} / hour` : r.payType === 'salary' ? `${usd(r.salaryCents ?? 0)} ${PERIODS.find(([v]) => v === r.salaryPeriod)?.[1]}` : 'No wage';
 
 /** Wage history: each wage pays the hours worked from its start date until the next one starts. Past wages can be corrected. */
-type RateDraft = { payType: PayRateDTO['payType']; hourly: string; salary: string; period: SalaryPeriod; from: string };
+type RateDraft = { payType: PayRateDTO['payType']; hourly: string; salary: string; period: SalaryPeriod; from: string; to?: string };
 const rateBody = (d: RateDraft) => ({ payType: d.payType, hourlyRateCents: toCents(d.hourly), salaryCents: toCents(d.salary), salaryPeriod: d.period, effectiveFrom: d.from || null });
 
 /** Start date, pay type and amount — used to add a wage and to correct one. */
-function RateForm({ d, onChange, onSave, onCancel, saveLabel, fromRequired }: { d: RateDraft; onChange: (d: RateDraft) => void; onSave: () => void; onCancel: () => void; saveLabel: string; fromRequired?: boolean }) {
-  const missing = (fromRequired && !d.from) || (d.payType === 'hourly' && !d.hourly) || (d.payType === 'salary' && !d.salary);
+function RateForm({ d, onChange, onSave, onCancel, saveLabel, fromRequired, withEnd }: { d: RateDraft; onChange: (d: RateDraft) => void; onSave: () => void; onCancel: () => void; saveLabel: string; fromRequired?: boolean; withEnd?: boolean }) {
+  const missing = (fromRequired && !d.from) || (d.payType === 'hourly' && !d.hourly) || (d.payType === 'salary' && !d.salary) || (!!d.to && !!d.from && d.to < d.from);
   return (
     <div className="flex flex-wrap items-end gap-2">
       <Field label="Starts on"><input type="date" className="field h-9 w-auto" value={d.from} onChange={(e) => onChange({ ...d, from: e.target.value })} /></Field>
+      {withEnd && <Field label="Until (optional)"><input type="date" className="field h-9 w-auto" min={d.from || undefined} value={d.to ?? ''} onChange={(e) => onChange({ ...d, to: e.target.value })} /></Field>}
       <Field label="Pay">
         <select className="field h-9 w-auto" value={d.payType} onChange={(e) => onChange({ ...d, payType: e.target.value as PayRateDTO['payType'] })}>
           <option value="hourly">Hourly</option><option value="salary">Salary</option><option value="none">No wage</option>
@@ -343,9 +344,9 @@ function RateHistory({ staffId, rates, editable, onChanged }: { staffId: string;
       )}
       {editable && (adding ? (
         <div className="mt-2 rounded-xl border border-dashed border-line-strong p-3 text-[13px]">
-          <p className="mb-2 text-ink-soft">Add a wage — hours worked from its start date are paid at it, until the next wage starts.</p>
-          <RateForm d={adding} onChange={setAdding} saveLabel="Add wage" fromRequired onCancel={() => setAdding(null)}
-            onSave={() => call(api.post('/commission/pay-rates', { staffId, ...rateBody(adding) }), 'Wage added — wages for those dates were recalculated.', () => setAdding(null))} />
+          <p className="mb-2 text-ink-soft">Add a wage — hours worked from its start date are paid at it, until the next wage starts. Give an end date for a wage that applied only for certain dates (e.g. an earlier rate); the wage before it carries on afterwards.</p>
+          <RateForm d={adding} onChange={setAdding} saveLabel="Add wage" fromRequired withEnd onCancel={() => setAdding(null)}
+            onSave={() => call(api.post('/commission/pay-rates', { staffId, ...rateBody(adding), effectiveTo: adding.to || null }), 'Wage added — wages for those dates were recalculated.', () => setAdding(null))} />
         </div>
       ) : (
         <Button size="sm" variant="ghost" className="mt-2" icon={<Plus className="h-4 w-4" />}

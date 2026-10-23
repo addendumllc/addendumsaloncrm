@@ -102,12 +102,32 @@ async function upsertRate(staffId: string, from: string | null, p: RateInput, by
   await syncCurrentRate(staffId);
 }
 
-/** Adds a wage to the history from a date (a past raise, or one coming up). One wage per start date. */
-export async function addRate(staffId: string, p: RateInput & { effectiveFrom: string | null }, by: string | null) {
+/**
+ * Adds a wage to the history from a date (a past raise, or one coming up). One wage per start date. With `effectiveTo`,
+ * it covers only those dates: the wage that was in effect before it resumes the day after (e.g. an earlier wage for
+ * March–May).
+ */
+export async function addRate(staffId: string, p: RateInput & { effectiveFrom: string | null; effectiveTo?: string | null }, by: string | null) {
   if (!(await db().one('SELECT 1 FROM staff WHERE id = $1', [staffId]))) throw notFound('That team member');
   checkRate(p);
-  if (await db().one('SELECT 1 FROM staff_pay_rates WHERE staff_id = $1 AND effective_from = $2::date', [staffId, p.effectiveFrom ?? BEGINNING])) {
+  const from = p.effectiveFrom ?? BEGINNING;
+  if (await db().one('SELECT 1 FROM staff_pay_rates WHERE staff_id = $1 AND effective_from = $2::date', [staffId, from])) {
     throw badRequest('A wage already starts on that date. Edit that one instead.');
+  }
+  if (p.effectiveTo) {
+    if (p.effectiveTo < from) throw badRequest('The end date must be on or after the start date.');
+    if (await db().one('SELECT 1 FROM staff_pay_rates WHERE staff_id = $1 AND effective_from > $2::date AND effective_from <= $3::date', [staffId, from, p.effectiveTo])) {
+      throw badRequest('Another wage starts within those dates. Edit or remove it first.');
+    }
+    // What applied the day after the range (before this wage is added) carries on from then.
+    const after = addDaysToDate(p.effectiveTo, 1);
+    const next = await db().one<any>('SELECT * FROM staff_pay_rates WHERE staff_id = $1 AND effective_from <= $2::date ORDER BY effective_from DESC LIMIT 1', [staffId, after]);
+    const startsAfter = await db().one('SELECT 1 FROM staff_pay_rates WHERE staff_id = $1 AND effective_from = $2::date', [staffId, after]);
+    if (!startsAfter) {
+      await upsertRate(staffId, after, next
+        ? { payType: next.pay_type, hourlyRateCents: next.hourly_rate_cents, salaryCents: next.salary_cents, salaryPeriod: next.salary_period }
+        : { payType: 'none', hourlyRateCents: null, salaryCents: null, salaryPeriod: 'year' }, by);
+    }
   }
   await upsertRate(staffId, p.effectiveFrom, p, by);
 }

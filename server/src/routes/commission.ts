@@ -265,7 +265,7 @@ const rateInput = z.object({
   salaryCents: z.number().int().min(0).max(100_000_000).nullable(), salaryPeriod: z.enum(['week', 'biweekly', 'semimonthly', 'month', 'year']), effectiveFrom: ymd.nullable(),
 });
 commissionRouter.post('/pay-rates', requirePermission('commission:manage'), ah(async (req, res) => {
-  const b = parse(rateInput.extend({ staffId: z.string().uuid() }), req.body);
+  const b = parse(rateInput.extend({ staffId: z.string().uuid(), effectiveTo: ymd.nullable().optional() }), req.body);
   await addRate(b.staffId, b, req.user!.id);
   await logAction(req, 'commission.pay_rate_add', 'staff', b.staffId, { effectiveFrom: b.effectiveFrom, payType: b.payType });
   res.status(201).json({ pay: await getPay(b.staffId) });
