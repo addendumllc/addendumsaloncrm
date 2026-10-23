@@ -255,5 +255,18 @@ describe('Suppliers', () => {
     const all = (await api.get('/api/inventory-sync/stock/purchase-orders')).body.orders.filter((o: any) => o.name?.startsWith('Suggested · '));
     expect(all.length).toBe(again.length); // the earlier ones were replaced
   });
+
+  it('products in a discontinued collection (e.g. Classic) are never suggested, alerted or put on suggested orders', async () => {
+    const base = (await api.get('/api/inventory-sync/stock/forecast')).body.settings;
+    expect(base.discontinuedCollections).toEqual(['Classic']);
+    await api.put('/api/inventory-sync/stock/forecast/settings', { ...base, discontinuedCollections: ['Platinum'] });
+    forgetStockCache();
+    const items = (await api.post('/api/inventory-sync/stock/sales/refresh')).body.items;
+    const gone = items.filter((i: any) => /platinum/i.test(i.label));
+    expect(gone.length).toBeGreaterThan(0);
+    for (const i of gone) expect(i).toMatchObject({ status: 'discontinued', suggestedQty: 0, stockoutRisk: false });
+    expect((await api.get('/api/analytics/forecast')).body.items.some((i: any) => /platinum/i.test(i.label))).toBe(false);
+    await api.put('/api/inventory-sync/stock/forecast/settings', { ...base });
+  });
 });
 

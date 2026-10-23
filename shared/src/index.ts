@@ -2249,7 +2249,11 @@ export interface StockForecastDTO {
 }
 /** `soonDays` / `watchDays`: Reorder soon and Watch windows — days until the order-by date, worked out from how fast each product sells. */
 /** `defaultMoq`: minimum order for products with none of their own or from their supplier (0 = none). */
-export interface StockForecastSettings { leadTimeDays: number; safetyDays: number; coverageDays: number; slowToUseDays: number; soonDays: number; watchDays: number; defaultMoq: number }
+export interface StockForecastSettings {
+  leadTimeDays: number; safetyDays: number; coverageDays: number; slowToUseDays: number; soonDays: number; watchDays: number; defaultMoq: number;
+  /** Collections no longer reordered (a word in the collection or product name, e.g. "Classic"): treated as discontinued. */
+  discontinuedCollections: string[];
+}
 export interface StockForecastResponse {
   items: StockForecastDTO[];
   settings: StockForecastSettings;

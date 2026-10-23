@@ -970,6 +970,10 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
             <section>
               <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-stone">Minimum orders</h3>
               <div className="grid gap-3 sm:grid-cols-3">
+                <Field label="Discontinued collections" hint="Never reordered or alerted. Separate with commas; matches the collection or product name." className="sm:col-span-3">
+                  <input className="field" defaultValue={d.discontinuedCollections.join(', ')} placeholder="e.g. Classic"
+                    onChange={(e) => setDefaults({ ...d, discontinuedCollections: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) })} />
+                </Field>
                 <DaysField label="Default minimum order" unit="units" hint="For products with no MOQ of their own or from their supplier. 0 = none." value={d.defaultMoq} onChange={(v) => setDefaults({ ...d, defaultMoq: v })} />
                 <DaysField label="Slow to use after" hint="Flag a minimum order that takes longer than this to sell." value={d.slowToUseDays} onChange={(v) => setDefaults({ ...d, slowToUseDays: v })} />
               </div>

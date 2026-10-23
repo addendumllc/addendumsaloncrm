@@ -378,7 +378,7 @@ export async function stockHistory(f: { key?: string; kind?: string; q?: string;
 // ---------------- Sales and forecasts ----------------
 const SALES_KEY = 'stock.shopify-sales';
 const FORECAST_KEY = 'stock.forecast-settings';
-export const DEFAULT_FORECAST: StockForecastSettings = { leadTimeDays: 30, safetyDays: 14, coverageDays: 60, slowToUseDays: 120, soonDays: 7, watchDays: 21, defaultMoq: 0 };
+export const DEFAULT_FORECAST: StockForecastSettings = { leadTimeDays: 30, safetyDays: 14, coverageDays: 60, slowToUseDays: 120, soonDays: 7, watchDays: 21, defaultMoq: 0, discontinuedCollections: ['Classic'] };
 
 /**
  * What a product is counted in, from its name: "Prosecco Redefined Weft · 18\" Weft" → weft(s), "Black Magic Clip-Ins" →
@@ -515,6 +515,11 @@ export async function stockForecast(): Promise<StockForecastResponse> {
   const supRows = new Map((await db().query<any>('SELECT * FROM suppliers')).map((x) => [x.name as string, x]));
   const untracked = new Set([...supRows.values()].filter((x) => x.lead_untracked).map((x) => x.name as string));
   const fallback = await defaultSupplier();
+  const goneWords = settings.discontinuedCollections.map((w) => w.trim()).filter(Boolean);
+  const discontinuedWord = (r: (typeof L.rows)[number]) => goneWords.find((w) => {
+    const re = new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    return (r.collections ?? []).some((c) => re.test(c)) || re.test(r.label);
+  }) ?? null;
   for (const r of L.rows) {
     if (r.status === 'not_tracked') continue;
     const m = sales.get(r.key);
@@ -540,9 +545,12 @@ export async function stockForecast(): Promise<StockForecastResponse> {
     let orderBy: string | null = null;
     let suggested = 0;
     const daysOfStock = rate > 0 ? (stock + inc) / rate : null;
-    if (r.status === 'discontinued') {
+    // Discontinued: set on the product, or in a discontinued collection (Forecast settings, e.g. Classic).
+    const goneWith = discontinuedWord(r);
+    const discontinued = r.status === 'discontinued' || !!goneWith;
+    if (discontinued) {
       status = 'discontinued';
-      why.push('Discontinued: no reorders.');
+      why.push(goneWith ? `In a discontinued collection (${goneWith}): no reorders.` : 'Discontinued: no reorders.');
     } else if (rate <= 0) {
       status = stock <= 0 ? 'out' : 'no_sales';
       why.push('No sales in the last 90 days.');
@@ -562,7 +570,7 @@ export async function stockForecast(): Promise<StockForecastResponse> {
       }
     }
     // Pre-orders are owed to customers: always order at least enough to fill them (on top of what's on order).
-    if (preorders > 0 && r.status !== 'discontinued') {
+    if (preorders > 0 && !discontinued) {
       const owed = Math.max(0, preorders - inc);
       if (owed > 0) {
         status = 'out';
@@ -582,7 +590,7 @@ export async function stockForecast(): Promise<StockForecastResponse> {
     const moqLastsDays = moq && rate > 0 ? Math.round(moq / rate) : null;
     if (moqLastsDays != null && moqLastsDays > settings.slowToUseDays) why.push(`Slow to use: the minimum order of ${moq} lasts about ${moqLastsDays} days.`);
     // Runs out before an order placed today would arrive (what's on order counts as stock).
-    const stockoutRisk = r.status !== 'discontinued' && rate > 0 && stock > 0 && daysOfStock != null && daysOfStock < lead;
+    const stockoutRisk = !discontinued && rate > 0 && stock > 0 && daysOfStock != null && daysOfStock < lead;
     if (stockoutRisk) why.push(`Stock-out risk: about ${Math.round(daysOfStock!)} days of stock, but an order takes ${lead} days to arrive.`);
     items.push({
       key: r.key, label: r.label, sku: r.sku, supplier: r.supplier, collections: r.collections ?? [], stock, incoming: inc, ratePerDay: Math.round(rate * 100) / 100, units7: u7, units30: u30, units90: u90,
