@@ -9,7 +9,7 @@ import { api } from '../../api/client';
 import { useCanDo } from '../../api/hooks';
 import { downloadCsv, parseCsv } from '../../lib/csv';
 import { dateShort, dateTime, labelOfKey, relative } from '../../lib/format';
-import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, Segmented, cx, useToast } from '../ui';
+import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, Segmented, Toggle, cx, useToast } from '../ui';
 import { useStoreNames } from '../../lib/storeNames';
 import { ProductThumb } from './ProductThumb';
 
@@ -1263,7 +1263,7 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
   const [busy, setBusy] = useState<'draft' | 'order' | null>(null);
   const fc = useMemo(() => new Map((forecast?.items ?? []).map((i) => [i.key, i])), [forecast]);
   const sup = suppliers?.find((x) => x.name === chosen) ?? null;
-  const leadOf = (p: StockProductDTO) => p.leadTimeDays ?? sup?.leadTimeDays ?? null;
+  const leadOf = (p: StockProductDTO) => (sup?.leadUntracked ? null : p.leadTimeDays ?? sup?.leadTimeDays ?? null);
   const qtyOf = (p: StockProductDTO) => Math.max(fc.get(p.key)?.suggestedQty ?? 0, p.moq ?? 0, 1);
   const lineFor = (p: StockProductDTO): Line => ({ p, qty: String(qtyOf(p)), cost: p.costCents != null ? (p.costCents / 100).toFixed(2) : '', lead: leadOf(p) != null ? String(leadOf(p)) : '' });
   const add = (ps: StockProductDTO[]) => setLines((cur) => [...cur, ...ps.filter((p) => !cur.some((l) => l.p.key === p.key)).map(lineFor)]);
@@ -1412,7 +1412,7 @@ export function SuppliersView() {
       ) : (
         <ul className="space-y-2">
           {data.map((s) => {
-            const late = s.actualLeadDays != null && s.statedLeadDays != null && s.actualLeadDays > s.statedLeadDays;
+            const late = !s.leadUntracked && s.actualLeadDays != null && s.statedLeadDays != null && s.actualLeadDays > s.statedLeadDays;
             return (
               <li key={s.name} className="rounded-xl2 border border-line bg-white p-4">
                 <div className="flex flex-wrap items-start gap-2">
@@ -1438,11 +1438,11 @@ export function SuppliersView() {
                 </div>
                 <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[13px]">
                   <span><b className="num font-medium text-ink">{s.products}</b> <span className="text-stone">product{s.products === 1 ? '' : 's'}</span></span>
-                  <span className="text-stone">Lead time <b className="num font-medium text-ink">{s.statedLeadDays != null ? `${s.statedLeadDays} days` : '—'}</b></span>
-                  <span className={late ? 'text-rose' : 'text-stone'}>Actual <b className="num font-medium">{s.actualLeadDays != null ? `${s.actualLeadDays} days` : '—'}</b>{late && ` (${s.actualLeadDays! - s.statedLeadDays!} days late on average)`}</span>
+                  <span className="text-stone">Lead time <b className="num font-medium text-ink">{s.leadUntracked ? 'Not tracked' : s.statedLeadDays != null ? `${s.statedLeadDays} days` : '—'}</b></span>
+                  {!s.leadUntracked && <span className={late ? 'text-rose' : 'text-stone'}>Actual <b className="num font-medium">{s.actualLeadDays != null ? `${s.actualLeadDays} days` : '—'}</b>{late && ` (${s.actualLeadDays! - s.statedLeadDays!} days late on average)`}</span>}
                   <span className="text-stone">Orders <b className="num font-medium text-ink">{s.receivedOrders}</b> received · <b className="num font-medium text-ink">{s.openOrders}</b> open</span>
                   {s.spentCents > 0 && <span className="text-stone">Spent <b className="num font-medium text-ink">${(s.spentCents / 100).toFixed(2)}</b></span>}
-                  {s.actualLeadDays != null && s.actualLeadDays !== s.statedLeadDays && s.products > 0 && <Button size="sm" variant="ghost" onClick={() => applyActual(s)}>Use {s.actualLeadDays} days on its products</Button>}
+                  {!s.leadUntracked && s.actualLeadDays != null && s.actualLeadDays !== s.statedLeadDays && s.products > 0 && <Button size="sm" variant="ghost" onClick={() => applyActual(s)}>Use {s.actualLeadDays} days on its products</Button>}
                 </div>
               </li>
             );
@@ -1460,11 +1460,12 @@ function SupplierModal({ supplier, onClose, onSaved }: { supplier: SupplierDTO |
   const toast = useToast();
   const details = useCanDo()('suppliers:details');
   const [d, setD] = useState({ name: supplier?.name ?? '', company: supplier?.companyName ?? '', email: supplier?.email ?? '', phone: supplier?.phone ?? '', website: supplier?.website ?? '', notes: supplier?.notes ?? '', lead: supplier?.leadTimeDays != null ? String(supplier.leadTimeDays) : '' });
+  const [untracked, setUntracked] = useState(!!supplier?.leadUntracked);
   const [saving, setSaving] = useState(false);
   const save = async () => {
     setSaving(true);
     try {
-      const body = { name: d.name, ...(details ? { companyName: d.company || null } : {}), email: d.email || null, phone: d.phone || null, website: d.website || null, notes: d.notes || null, leadTimeDays: d.lead.trim() === '' ? null : Math.round(Number(d.lead)) };
+      const body = { name: d.name, ...(details ? { companyName: d.company || null } : {}), email: d.email || null, phone: d.phone || null, website: d.website || null, notes: d.notes || null, leadTimeDays: d.lead.trim() === '' ? null : Math.round(Number(d.lead)), leadUntracked: untracked };
       if (supplier) await api.put('/inventory-sync/stock/suppliers/details', { ...body, previous: supplier.name });
       else await api.post('/inventory-sync/stock/suppliers', body);
       toast(supplier ? 'Saved' : `${d.name.trim()} added — now give it products`);
@@ -1488,7 +1489,9 @@ function SupplierModal({ supplier, onClose, onSaved }: { supplier: SupplierDTO |
           <Field label="Phone"><input className="field" type="tel" {...f('phone')} /></Field>
           <Field label="Website"><input className="field" {...f('website')} /></Field>
         </>}
-        <Field label="Usual lead time (days)" hint="Given to its products that don’t have their own."><input className="field num" inputMode="numeric" {...f('lead')} /></Field>
+        <Field label="Usual lead time (days)" hint={untracked ? 'Not tracked for this supplier.' : 'Given to its products that don’t have their own.'}><input className="field num" inputMode="numeric" disabled={untracked} {...f('lead')} /></Field>
+        <div className="sm:col-span-2"><Toggle checked={untracked} onChange={setUntracked} label="Lead time not tracked"
+          description="For suppliers you buy from as needed: To order times reorders on safety stock alone (no lead time), and its orders get no expected date." /></div>
         {details && <Field label="Notes" className="sm:col-span-2"><textarea className="field min-h-[72px]" {...f('notes')} /></Field>}
       </div>
     </Modal>

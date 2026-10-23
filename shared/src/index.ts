@@ -2311,10 +2311,12 @@ export interface SupplierDTO {
   website: string | null;
   notes: string | null;
   leadTimeDays: number | null;
+  /** Lead time not tracked: reorder timing leaves it out for this supplier's products, and orders get no expected date. */
+  leadUntracked: boolean;
   /** Used for products and orders that don't name a supplier. */
   isDefault: boolean;
 }
-export interface SupplierInput { name: string; companyName?: string | null; email?: string | null; phone?: string | null; website?: string | null; notes?: string | null; leadTimeDays?: number | null }
+export interface SupplierInput { name: string; companyName?: string | null; email?: string | null; phone?: string | null; website?: string | null; notes?: string | null; leadTimeDays?: number | null; leadUntracked?: boolean }
 /** Which products to give a supplier: chosen products, or every product in a store. */
 export type SupplierAssign = { supplier: string; keys: string[] } | { supplier: string; store: 'square' | 'shopify' | 'shopify2' | 'all'; onlyWithout: boolean };
 

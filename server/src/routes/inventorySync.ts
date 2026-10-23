@@ -300,6 +300,7 @@ const supplierBody = z.object({
   email: z.string().trim().max(200).nullable().optional(),
   phone: z.string().trim().max(60).nullable().optional(), website: z.string().trim().max(300).nullable().optional(),
   notes: z.string().trim().max(2000).nullable().optional(), leadTimeDays: z.number().int().min(0).max(730).nullable().optional(),
+  leadUntracked: z.boolean().optional(),
 });
 inventorySyncRouter.post('/stock/suppliers', ah(async (req, res) => {
   const b = parse(supplierBody, req.body);

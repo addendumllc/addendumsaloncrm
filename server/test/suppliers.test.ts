@@ -152,4 +152,20 @@ describe('Suppliers', () => {
     const both = (await api.post('/api/inventory-sync/stock/purchase-orders', { lines: [{ productKey: sq.key, quantity: 1 }, { productKey: sh.key, quantity: 1 }] })).body.orders;
     expect(both.map((o: any) => o.store).sort()).toEqual(['salon', 'shopify']);
   });
+
+  it('lead time not tracked: reorder timing leaves it out and its orders get no lead time', async () => {
+    await api.post('/api/inventory-sync/stock/suppliers', { name: 'Beauty Supply', leadTimeDays: 20, leadUntracked: true });
+    expect((await api.get('/api/inventory-sync/stock/suppliers')).body.suppliers[0]).toMatchObject({ name: 'Beauty Supply', leadUntracked: true });
+    const key = (await api.get('/api/inventory-sync/stock/products')).body.products.find((p: any) => p.squareVariationId).key;
+    await api.put('/api/inventory-sync/stock/products/settings', { rows: [{ key, supplier: 'Beauty Supply', leadTimeDays: 45 }] });
+    forgetStockCache();
+    const item = (await api.get('/api/inventory-sync/stock/forecast')).body.items.find((i: any) => i.key === key);
+    expect(item.leadTimeDays).toBe(0);
+    const po = (await api.post('/api/inventory-sync/stock/purchase-orders', { lines: [{ productKey: key, quantity: 2 }] })).body.orders[0];
+    expect(po.lines[0].leadTimeDays).toBeNull();
+    // Tracked again: the product's own lead time is back.
+    await api.put('/api/inventory-sync/stock/suppliers/details', { previous: 'Beauty Supply', name: 'Beauty Supply', leadTimeDays: 20, leadUntracked: false });
+    forgetStockCache();
+    expect((await api.get('/api/inventory-sync/stock/forecast')).body.items.find((i: any) => i.key === key).leadTimeDays).toBe(45);
+  });
 });

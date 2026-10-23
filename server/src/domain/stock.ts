@@ -488,6 +488,9 @@ export async function stockForecast(): Promise<StockForecastResponse> {
     return Math.max(0, n);
   };
   const items: StockForecastDTO[] = [];
+  // Suppliers whose lead time isn't tracked (products without a supplier follow the default one).
+  const untracked = new Set((await db().query<{ name: string }>('SELECT name FROM suppliers WHERE lead_untracked')).map((x) => x.name));
+  const fallback = await defaultSupplier();
   for (const r of L.rows) {
     if (r.status === 'not_tracked') continue;
     const m = sales.get(r.key);
@@ -500,7 +503,8 @@ export async function stockForecast(): Promise<StockForecastResponse> {
     const first = firstSale(m);
     const since = first ? Math.max(7, Math.min(90, Math.round((Date.parse(today) - Date.parse(first)) / 86400_000) + 1)) : 90;
     const rate = 0.2 * (u7 / 7) + 0.5 * (u30 / 30) + 0.3 * (u90 / since);
-    const lead = r.leadTimeDays ?? settings.leadTimeDays;
+    const noLead = untracked.has(r.supplier ?? fallback ?? '');
+    const lead = noLead ? 0 : r.leadTimeDays ?? settings.leadTimeDays;
     const safety = r.safetyDays ?? settings.safetyDays;
     const why: string[] = [];
     let status: StockForecastDTO['status'];
@@ -520,7 +524,7 @@ export async function stockForecast(): Promise<StockForecastResponse> {
       status = stock <= 0 ? 'out' : daysUntil <= 0 ? 'order_now' : daysUntil <= 7 ? 'soon' : daysUntil <= 21 ? 'watch' : 'healthy';
       why.push(`Selling about ${rate.toFixed(2)} a day (${u7} in 7 days, ${u30} in 30, ${u90} in 90).`);
       why.push(`${stock} in stock${inc ? ` + ${inc} on order` : ''} lasts about ${Math.round(daysOfStock!)} days.`);
-      why.push(`Lead time ${lead} days + ${safety} days of safety stock = order when it’s down to ${Math.ceil(cover)}.`);
+      why.push(noLead ? `Lead time not tracked for ${r.supplier ?? fallback} · ${safety} days of safety stock = order when it’s down to ${Math.ceil(cover)}.` : `Lead time ${lead} days + ${safety} days of safety stock = order when it’s down to ${Math.ceil(cover)}.`);
       if (status !== 'healthy' && status !== 'watch') {
         const need = rate * (lead + settings.coverageDays + safety) - (stock + inc);
         suggested = Math.max(0, Math.ceil(need));
@@ -596,12 +600,15 @@ type PoLineInput = { productKey: string; quantity: number; costCents?: number | 
 async function lineRows(lines: PoLineInput[]) {
   const L = await live();
   const byKey = new Map(L.rows.map((r) => [r.key, r]));
+  // Suppliers whose lead time isn't tracked: their items get no lead time (so no expected date) unless one is entered.
+  const untracked = new Set((await db().query<{ name: string }>('SELECT name FROM suppliers WHERE lead_untracked')).map((x) => x.name));
+  const fallback = await defaultSupplier();
   return lines.map((l) => {
     const r = byKey.get(l.productKey);
     if (!r) throw badRequest('A product on this order wasn’t found. Refresh and try again.');
     if (!Number.isInteger(l.quantity) || l.quantity <= 0) throw badRequest(`Enter how many of ${r.label} to order.`);
     // Its own lead time: as entered, else the product's (which comes from its supplier when not set).
-    return { key: r.key, label: r.label, sku: r.sku, quantity: l.quantity, cost: l.costCents ?? r.costCents, lead: l.leadTimeDays === undefined ? r.leadTimeDays : l.leadTimeDays };
+    return { key: r.key, label: r.label, sku: r.sku, quantity: l.quantity, cost: l.costCents ?? r.costCents, lead: l.leadTimeDays === undefined ? (untracked.has(r.supplier ?? fallback ?? '') ? null : r.leadTimeDays) : l.leadTimeDays };
   });
 }
 const LINE_INSERT = 'INSERT INTO purchase_order_lines(po_id, product_key, label, sku, quantity, cost_cents, lead_time_days) VALUES ($1,$2,$3,$4,$5,$6,$7)';
@@ -971,7 +978,7 @@ export async function listSuppliers(): Promise<SupplierDTO[]> {
       name, products: p?.n ?? 0, statedLeadDays: p?.lead != null ? Math.round(p.lead) : s?.lead_time_days ?? null, actualLeadDays: o?.actual != null ? Math.round(o.actual) : null,
       receivedOrders: o?.received ?? 0, openOrders: o?.open ?? 0, spentCents: Number(o?.spent ?? 0),
       companyName: s?.company_name ?? null, email: s?.email ?? null, phone: s?.phone ?? null, website: s?.website ?? null, notes: s?.notes ?? null,
-      leadTimeDays: s?.lead_time_days ?? null, isDefault: !!s?.is_default,
+      leadTimeDays: s?.lead_time_days ?? null, leadUntracked: !!s?.lead_untracked, isDefault: !!s?.is_default,
     };
   });
 }
@@ -989,14 +996,15 @@ export async function saveSupplier(input: SupplierInput, previous: string | null
   else if (!previous && await db().one('SELECT 1 FROM suppliers WHERE lower(name) = lower($1)', [name])) throw badRequest(`${name} is already a supplier.`);
   if (!details) {
     await db().query(
-      `INSERT INTO suppliers(name, lead_time_days) VALUES ($1,$2) ON CONFLICT (name) DO UPDATE SET lead_time_days = $2, updated_at = now()`,
-      [name, input.leadTimeDays ?? null]);
+      `INSERT INTO suppliers(name, lead_time_days, lead_untracked) VALUES ($1,$2,$3) ON CONFLICT (name) DO UPDATE SET lead_time_days = $2, lead_untracked = $3, updated_at = now()`,
+      [name, input.leadTimeDays ?? null, !!input.leadUntracked]);
     return;
   }
   await db().query(
-    `INSERT INTO suppliers(name, company_name, email, phone, website, notes, lead_time_days) VALUES ($1,$7,$2,$3,$4,$5,$6)
-     ON CONFLICT (name) DO UPDATE SET company_name = $7, email = $2, phone = $3, website = $4, notes = $5, lead_time_days = $6, updated_at = now()`,
-    [name, clean(input.email), clean(input.phone), clean(input.website), clean(input.notes), input.leadTimeDays ?? null, clean(input.companyName)]);
+    `INSERT INTO suppliers(name, company_name, email, phone, website, notes, lead_time_days, lead_untracked) VALUES ($1,$7,$2,$3,$4,$5,$6,$8)
+     ON CONFLICT (name) DO UPDATE SET company_name = $7, email = $2, phone = $3, website = $4, notes = $5, lead_time_days = $6, lead_untracked = $8, updated_at = now()`,
+    [name, clean(input.email), clean(input.phone), clean(input.website), clean(input.notes), input.leadTimeDays ?? null, clean(input.companyName), !!input.leadUntracked]);
+  forgetStockCache();
 }
 
 /** The default supplier's name (used where a product or order doesn't name one), or null. */
