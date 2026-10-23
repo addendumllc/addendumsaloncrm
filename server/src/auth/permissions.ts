@@ -102,6 +102,7 @@ export const API_RULES: { method: string; path: RegExp; anyOf: string[] }[] = [
   { method: 'GET', path: /^\/projections(\/appointments)?$/, anyOf: ['revenue:projections'] },
   { method: 'GET', path: /^\/analytics\/new-clients$/, anyOf: ['analytics:read'] },
   { method: 'GET', path: /^\/analytics\/products$/, anyOf: ['analytics:read'] },
+  { method: 'GET', path: /^\/analytics\/forecast$/, anyOf: ['analytics:read'] },
   { method: 'GET', path: /^\/search$/, anyOf: ['clients:read', 'clients:read_assigned', 'leads:read'] },
   { method: 'GET', path: /^\/services$/, anyOf: ['services:read'] },
 

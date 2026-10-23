@@ -2209,6 +2209,8 @@ export interface StockForecastDTO {
   supplier: string | null;
   /** Shopify collections / product type and Square categories (To order can be grouped by them). */
   collections: string[];
+  /** Its supplier's lead time isn't tracked (Suppliers): timed on safety stock alone, and left out of Analytics → Forecast. */
+  leadUntracked: boolean;
   stock: number;
   /** On open purchase orders (ordered or shipped), not yet received. */
   incoming: number;

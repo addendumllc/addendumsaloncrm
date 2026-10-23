@@ -168,4 +168,20 @@ describe('Suppliers', () => {
     forgetStockCache();
     expect((await api.get('/api/inventory-sync/stock/forecast')).body.items.find((i: any) => i.key === key).leadTimeDays).toBe(45);
   });
+
+  it('Analytics → Forecast groups what to order by urgency and leaves out suppliers whose lead time isn’t tracked', async () => {
+    await api.post('/api/inventory-sync/stock/sales/refresh');
+    forgetStockCache();
+    const before = (await api.get('/api/analytics/forecast')).body.items;
+    expect(before.length).toBeGreaterThan(0);
+    expect(before.every((i: any) => ['order_now', 'soon', 'watch', 'healthy'].includes(i.status))).toBe(true);
+    const key = before[0].key;
+    await api.post('/api/inventory-sync/stock/suppliers', { name: 'As Needed Co', leadUntracked: true });
+    await api.put('/api/inventory-sync/stock/products/settings', { rows: [{ key, supplier: 'As Needed Co' }] });
+    forgetStockCache();
+    const after = (await api.get('/api/analytics/forecast')).body.items;
+    expect(after.some((i: any) => i.key === key)).toBe(false);
+    expect(after.length).toBe(before.length - 1);
+  });
 });
+

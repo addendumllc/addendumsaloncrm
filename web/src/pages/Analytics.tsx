@@ -6,6 +6,7 @@ import { api } from '../api/client';
 import { useCanDo, useIntegrations } from '../api/hooks';
 import { ProjectionsSection } from '../components/domain/Projections';
 import { ProductSales } from '../components/domain/ProductSales';
+import { ForecastWidget } from '../components/domain/Forecast';
 import { useSearchParams } from 'react-router-dom';
 import { SectionPicker } from '../components/layout/subNav';
 import { useStoreNames } from '../lib/storeNames';
@@ -64,6 +65,7 @@ export function AnalyticsPage() {
     defs.push({ id: 'leads_by_week', title: 'New clients by week', size: 'm', node: w((d) => <LeadsByWeek weekly={d.weekly} />) });
     defs.push({ id: 'popular_services', title: 'Popular services', size: 'm', node: w((d) => <PopularServices d={d} />) });
   }
+  if (canDo('analytics:read')) defs.push({ id: 'forecast', title: 'Forecast: what to order', size: 'full', node: <ForecastWidget key={scope} scope={scope} /> });
   if (canDo('analytics:read')) defs.push({ id: 'product_sales', title: 'Product sales', size: 'full', ownHeading: true, node: <div className="[&>section]:mt-0"><ProductSales key={scope} scope={scope} /></div> });
 
   return (

@@ -4,7 +4,7 @@ import { can } from '../auth/permissions.js';
 import { requirePermission } from '../auth/session.js';
 import { db } from '../db/index.js';
 import { analytics } from '../domain/analytics.js';
-import { productAnalytics } from '../domain/stock.js';
+import { analyticsForecast, productAnalytics } from '../domain/stock.js';
 import { dashboard } from '../domain/dashboard.js';
 import { newClientStats } from '../domain/newClients.js';
 import { globalSearch } from '../domain/search.js';
@@ -166,6 +166,9 @@ miscRouter.get('/analytics/products', requirePermission('analytics:read'), ah(as
   const store = (['square', 'shopify', 'shopify2', 'online'] as const).find((s) => s === req.query.store) ?? 'all';
   res.json(await productAnalytics(p === 'year' ? 'year' : Math.min(Math.max(Number(p) || 30, 7), 365), store));
 }));
+
+/** Forecast: what to order by urgency (products of suppliers whose lead time isn't tracked are left out). */
+miscRouter.get('/analytics/forecast', requirePermission('analytics:read'), ah(async (_req, res) => res.json(await analyticsForecast())));
 
 const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be a date (YYYY-MM-DD)').refine((x) => !Number.isNaN(Date.parse(x)), 'must be a valid date');
 const newClientQuery = z.object({ from: ymd, to: ymd, staffId: z.string().uuid().optional() })

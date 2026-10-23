@@ -549,7 +549,7 @@ export async function stockForecast(): Promise<StockForecastResponse> {
     if (moqLastsDays != null && moqLastsDays > settings.slowToUseDays) why.push(`Slow to use: the minimum order of ${r.moq} lasts about ${moqLastsDays} days.`);
     items.push({
       key: r.key, label: r.label, sku: r.sku, supplier: r.supplier, collections: r.collections ?? [], stock, incoming: inc, ratePerDay: Math.round(rate * 100) / 100, units7: u7, units30: u30, units90: u90,
-      leadTimeDays: lead, safetyDays: safety, daysOfStock: daysOfStock == null ? null : Math.round(daysOfStock), orderBy, status, suggestedQty: suggested,
+      leadTimeDays: lead, leadUntracked: noLead, safetyDays: safety, daysOfStock: daysOfStock == null ? null : Math.round(daysOfStock), orderBy, status, suggestedQty: suggested,
       moq: r.moq, caseSize: r.caseSize, costCents: r.costCents,
       moqCostCents: r.moq && r.costCents != null ? r.moq * r.costCents : null, moqArrivesOn: r.moq ? addDays(today, lead) : null, moqLastsDays,
       slowToUse: moqLastsDays != null && moqLastsDays > settings.slowToUseDays, why, preorders,
@@ -958,6 +958,23 @@ export async function productAnalytics(period: number | 'year', store: ProductAn
 }
 
 // ---------------- Suppliers ----------------
+/**
+ * Analytics → Forecast: what to order, by urgency (order now, reorder soon, watch, healthy). Products whose supplier's
+ * lead time isn't tracked are left out, as are products without sales (nothing to forecast). Out of stock with sales
+ * counts as order now.
+ */
+export async function analyticsForecast() {
+  const f = await stockForecast();
+  const bucket = (i: StockForecastDTO) => (i.status === 'out' ? (i.ratePerDay > 0 ? 'order_now' : null) : (['order_now', 'soon', 'watch', 'healthy'] as const).find((s) => s === i.status) ?? null);
+  return {
+    items: f.items.filter((i) => !i.leadUntracked).flatMap((i) => {
+      const b = bucket(i);
+      return b ? [{ key: i.key, label: i.label, sku: i.sku, status: b, stock: i.stock, incoming: i.incoming, ratePerDay: i.ratePerDay, daysOfStock: i.daysOfStock, orderBy: i.orderBy,
+        suggestedQty: i.suggestedQty, costCents: i.costCents, supplier: i.supplier, collections: i.collections, stores: i.stores }] : [];
+    }),
+  };
+}
+
 /** Each supplier: products, the lead time set on them vs the real time from ordered to received, open and received orders. */
 export async function listSuppliers(): Promise<SupplierDTO[]> {
   const prods = await db().query<any>(`SELECT supplier, count(*)::int AS n, avg(lead_time_days)::float AS lead FROM stock_products WHERE supplier IS NOT NULL GROUP BY supplier`);
