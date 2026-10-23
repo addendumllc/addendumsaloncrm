@@ -12,7 +12,8 @@ import type { StoreNames } from '../../lib/storeNames';
  * section picker shown on phones, where the sidebar is tucked away.
  */
 /** `menu`: similar sub-tabs folded under one dropdown in the sidebar (e.g. Ordering, Products). */
-export type SubItem = { to: string; label: string | ((n: StoreNames) => string); anyOf?: string[]; group?: string; menu?: string };
+/** `also`: other pages of this sub-tab (picked with a toggle on the page) — it's highlighted on those too. */
+export type SubItem = { to: string; label: string | ((n: StoreNames) => string); anyOf?: string[]; group?: string; menu?: string; also?: string[] };
 export type SubNav = { params: string[]; items: SubItem[] };
 
 export const SUB_NAV: Record<string, SubNav> = {
@@ -20,14 +21,10 @@ export const SUB_NAV: Record<string, SubNav> = {
   '/inventory-sync': {
     params: ['view'],
     items: [
-      { to: '/inventory-sync', label: 'Inventory' },
-      { to: '/inventory-sync?view=toorder', label: 'To order', menu: 'Ordering' },
-      { to: '/inventory-sync?view=orders', label: 'Purchase orders', menu: 'Ordering' },
-      { to: '/inventory-sync?view=suppliers', label: 'Suppliers', menu: 'Ordering' },
-      { to: '/inventory-sync?view=products', label: 'Products', menu: 'Products' },
-      // Unit cost and each store's price (salon, stylist, retail), changed in one place.
-      { to: '/inventory-sync?view=pricing', label: 'Pricing', menu: 'Products' },
-      { to: '/inventory-sync?view=stock', label: 'Stock counts / Reorder', menu: 'Products' },
+      // Each has a toggle across the top for its pages: Products · Stock counts · Reorder · Pricing, and
+      // To order · Purchase orders · Suppliers.
+      { to: '/inventory-sync', label: 'Inventory', also: ['/inventory-sync?view=products', '/inventory-sync?view=stock', '/inventory-sync?view=reorder', '/inventory-sync?view=pricing'] },
+      { to: '/inventory-sync?view=toorder', label: 'Ordering', also: ['/inventory-sync?view=orders', '/inventory-sync?view=suppliers'] },
       { to: '/inventory-sync?view=sync', label: 'Sync' },
     ],
   },
@@ -105,7 +102,8 @@ function useCanOrShared(can: (p: string) => boolean) {
 export const subLabel = (i: SubItem, n: StoreNames) => (typeof i.label === 'function' ? i.label(n) : i.label);
 
 /** Whether a sub-menu item is the one showing: same page, and the same value for each of the section's query keys. */
-export function subActive(i: SubItem, nav: SubNav, pathname: string, search: string) {
+export function subActive(i: SubItem, nav: SubNav, pathname: string, search: string): boolean {
+  if (i.also?.some((to) => subActive({ to, label: '' }, nav, pathname, search))) return true;
   const [path, query = ''] = i.to.split('?');
   if (path !== pathname) return false;
   const want = new URLSearchParams(query);

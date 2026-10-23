@@ -27,10 +27,13 @@ const result = (N: StoreNames): Record<InventorySyncRunDTO['details'][number]['r
 
 const SECTION_TITLE: Record<string, (store: string) => string> = {
   inventory: (s) => `Inventory · ${s}`, toorder: (s) => `To order · ${s}`, pricing: () => 'Pricing', orders: (s) => `Purchase orders · ${s}`,
-  sync: () => 'Inventory sync', products: () => 'Products', stock: () => 'Stock counts / Reorder', suppliers: () => 'Suppliers',
+  sync: () => 'Inventory sync', products: () => 'Products · All stores', stock: () => 'Stock counts', reorder: () => 'Reorder', suppliers: () => 'Suppliers',
 };
 /** Pages that are per store: they start with Addendum Salon (Square) / Addendum Hair (Shopify), like Tasks. */
-const PER_STORE = new Set(['inventory', 'toorder', 'orders']);
+const PER_STORE = new Set(['toorder', 'orders']);
+/** The pages behind each sub-tab's toggle (Inventory and Ordering in the side menu). */
+const INVENTORY_PAGES = [{ value: 'inventory', label: 'Products' }, { value: 'stock', label: 'Stock counts' }, { value: 'reorder', label: 'Reorder' }, { value: 'pricing', label: 'Pricing' }];
+const ORDERING_PAGES = [{ value: 'toorder', label: 'To order' }, { value: 'orders', label: 'Purchase orders' }, { value: 'suppliers', label: 'Suppliers' }];
 
 /** Inventory: each store's stock, the Square ↔ Shopify sync, and the stock tools (products, counts, reorder, orders, suppliers). */
 export function InventorySyncPage() {
@@ -48,16 +51,19 @@ export function InventorySyncPage() {
   // Inventory opens first. Per-store pages pick the store with ?for=hair (Addendum Hair = Shopify); older links
   // (?view=square / shopify / orders-online / all / reorder) still land in the right place.
   const raw = params.get('view') ?? '';
-  const view = ({ all: 'inventory', square: 'inventory', shopify: 'inventory', 'orders-online': 'orders', reorder: 'stock', preorders: 'toorder' } as Record<string, string>)[raw]
-    ?? (['toorder', 'pricing', 'orders', 'stock', 'products', 'suppliers', 'sync'].includes(raw) ? raw : 'inventory');
+  const view = raw === 'stock' && params.get('part') === 'reorder' ? 'reorder'
+    : ({ all: 'inventory', square: 'inventory', shopify: 'inventory', 'orders-online': 'orders', preorders: 'toorder' } as Record<string, string>)[raw]
+    ?? (['toorder', 'pricing', 'orders', 'stock', 'reorder', 'products', 'suppliers', 'sync'].includes(raw) ? raw : 'inventory');
+  const togglePages = ['inventory', 'products', 'stock', 'reorder', 'pricing'].includes(view) ? INVENTORY_PAGES : ORDERING_PAGES.some((o) => o.value === view) ? ORDERING_PAGES : null;
   // The page's own choice (?for=), else the business workspace they're in.
   const ws = useWorkspace();
   const forHair = raw === 'shopify' || raw === 'orders-online' || raw === 'preorders' || pageBusiness(params, 'for', ws.current?.id ?? 'salon') === 'hair';
   const storeLabel = forHair ? 'Addendum Hair' : 'Addendum Salon';
-  const part = raw === 'reorder' || params.get('part') === 'reorder' ? 'reorder' : 'counts';
   const setView = (v: string) => setParams((p) => { const n = new URLSearchParams(p); n.delete('part'); if (v === 'inventory') n.delete('view'); else n.set('view', v); return n; });
   const setStore = (hair: boolean) => setParams((p) => { const n = new URLSearchParams(p); if (['square', 'shopify', 'all'].includes(n.get('view') ?? '')) n.delete('view'); if (n.get('view') === 'orders-online') n.set('view', 'orders'); n.set('for', hair ? 'hair' : 'salon'); return n; });
-  const setPart = (v: 'counts' | 'reorder') => setParams((p) => { const n = new URLSearchParams(p); n.set('view', 'stock'); if (v === 'reorder') n.set('part', 'reorder'); else n.delete('part'); return n; });
+  // Products: each store's own list, or every product across the stores (pairing, SKUs, Add to Square).
+  const productsStore = view === 'products' ? 'all' : forHair ? 'hair' : 'salon';
+  const setProductsStore = (v: string) => (v === 'all' ? setView('products') : setParams((p) => { const n = new URLSearchParams(p); n.delete('view'); n.delete('part'); n.set('for', v); return n; }));
   const { data: me } = useMe();
   const can = (p: string) => !!me?.permissions.includes(p);
   const [starting, setStarting] = useState(false);
@@ -85,28 +91,31 @@ export function InventorySyncPage() {
 
   return (
     <div>
+      {togglePages && <Segmented className="mb-4" value={view === 'products' ? 'inventory' : view} onChange={setView} options={togglePages} />}
       {PER_STORE.has(view) && (
         <Segmented className="mb-4" value={forHair ? 'hair' : 'salon'} onChange={(v) => setStore(v === 'hair')}
           options={[{ value: 'salon', label: 'Addendum Salon' }, { value: 'hair', label: 'Addendum Hair' }]} />
       )}
       <PageHeader
         title={SECTION_TITLE[view](storeLabel)}
-        subtitle={<>{PER_STORE.has(view) ? <span className="mr-1 font-medium text-ink">Source: {forHair ? `Shopify (${N.shopify}${N.shopify2 ? ` + ${N.shopify2}` : ''})` : `Square (${N.square})`} ·</span> : null}{N.square} ↔ {N.shopify}{N.shopify2 ? ` ↔ ${N.shopify2}` : ''}{data.lastSuccessfulSyncAt ? ` · last successful sync ${relative(data.lastSuccessfulSyncAt)}` : ' · never synced'}</>}
+        subtitle={<>{PER_STORE.has(view) || view === 'inventory' ? <span className="mr-1 font-medium text-ink">Source: {forHair ? `Shopify (${N.shopify}${N.shopify2 ? ` + ${N.shopify2}` : ''})` : `Square (${N.square})`} ·</span> : null}{N.square} ↔ {N.shopify}{N.shopify2 ? ` ↔ ${N.shopify2}` : ''}{data.lastSuccessfulSyncAt ? ` · last successful sync ${relative(data.lastSuccessfulSyncAt)}` : ' · never synced'}</>}
         actions={<Button variant="primary" icon={<RefreshCw className={cx('h-4 w-4', data.running && 'animate-spin')} />} loading={starting} disabled={data.running || !bothConnected} onClick={() => start()}>{data.running ? 'Syncing…' : 'Sync Inventory'}</Button>}
       />
       {data.demoMode && <p className="mb-4 rounded-xl2 border border-line bg-mist/50 px-4 py-2 text-[13px] text-ink-soft">Demo Mode: this syncs the demo Square and Shopify catalogs. Nothing is sent to a real store.</p>}
       {/* Sections are in the side menu; on phones (no sidebar) a dropdown. */}
       <SectionPicker path="/inventory-sync" names={N} can={can} className="mb-4" />
+      {(view === 'inventory' || view === 'products') && (
+        <Segmented className="mb-4" value={productsStore} onChange={setProductsStore}
+          options={[{ value: 'salon', label: 'Addendum Salon' }, { value: 'hair', label: 'Addendum Hair' }, { value: 'all', label: 'All stores' }]} />
+      )}
       {view === 'inventory' && (forHair ? <ProductsView key="online" only="shopify" /> : <SquareInventoryView />)}
       {view !== 'toorder' && <PreorderBanner />}
       {view === 'pricing' && <PricingView />}
       {view === 'toorder' && <ToOrderView key={forHair ? 'online' : 'salon'} store={forHair ? 'online' : 'salon'} />}
       {view === 'products' && <div className="mb-3 flex justify-end"><AddToSquareButton /></div>}
       {view === 'products' && <ProductsView setup />}
-      {view === 'stock' && <>
-        <Segmented className="mb-4" value={part} onChange={setPart} options={[{ value: 'counts', label: 'Stock counts' }, { value: 'reorder', label: 'Reorder' }]} />
-        {part === 'reorder' ? <ReorderView onOrders={() => setView('orders')} /> : <StockView />}
-      </>}
+      {view === 'stock' && <StockView />}
+      {view === 'reorder' && <ReorderView onOrders={() => setView('orders')} />}
       {view === 'orders' && (forHair ? <PurchaseOrdersView key="shopify" store="shopify" /> : <PurchaseOrdersView key="salon" store="salon" />)}
       {view === 'suppliers' && <SuppliersView />}
       {view === 'sync' && <>

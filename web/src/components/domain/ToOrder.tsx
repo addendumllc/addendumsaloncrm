@@ -12,7 +12,7 @@ const NEEDS: StockForecastDTO['status'][] = ['out', 'order_now', 'soon'];
 
 /**
  * Inventory → To order: what one store needs ordered, out of stock first, then by the day it sells out. "Coming up"
- * adds the ones to watch (about three weeks out). Purchase orders are made from Stock counts / Reorder.
+ * adds the ones to watch (about three weeks out). Purchase orders are made from Inventory → Reorder.
  */
 export function ToOrderView({ store }: { store: 'salon' | 'online' }) {
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['stock-forecast'], queryFn: () => api.get<StockForecastResponse>('/inventory-sync/stock/forecast') });
@@ -37,7 +37,7 @@ export function ToOrderView({ store }: { store: 'salon' | 'online' }) {
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <Segmented value={range} onChange={setRange} options={[{ value: 'now', label: 'Order now' }, { value: 'soon', label: 'Include coming up' }]} />
         <span className="text-[13px] text-stone">{items.length} product{items.length === 1 ? '' : 's'}{out ? ` · ${out} out of stock` : ''}{waiting ? ` · ${waiting} pre-order${waiting === 1 ? '' : 's'} waiting` : ''} · by when they sell out</span>
-        <Link to="/inventory-sync?view=stock&part=reorder" className="ml-auto text-sm text-plum hover:underline">Make a purchase order</Link>
+        <Link to="/inventory-sync?view=reorder" className="ml-auto text-sm text-plum hover:underline">Make a purchase order</Link>
       </div>
       {!items.length ? (
         <div className="panel"><EmptyState icon={<PackageCheck className="h-8 w-8" />} title="Nothing to order">Nothing is out of stock or due to sell out before more could arrive.</EmptyState></div>
