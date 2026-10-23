@@ -157,7 +157,7 @@ function StoreTasks({ business, can, seesHair }: { business: TaskBusiness; can: 
   if (sync) {
     const reorder = forecast.data?.items.filter((i) => i.stores?.[store === 'shopify' ? 'online' : 'salon'] && (i.status === 'out' || i.status === 'order_now')).length;
     const open = pos.data?.filter((o) => o.store === store && ['draft', 'ordered', 'shipped'].includes(o.status));
-    tiles.push({ label: 'To order', n: reorder, sub: 'out of stock or order now', to: `/inventory-sync?view=toorder${store === 'shopify' ? '&for=hair' : ''}`, warn: !!reorder });
+    tiles.push({ label: 'To order', n: reorder, sub: 'out of stock or order now', to: `/inventory-sync?view=reorder${store === 'shopify' ? '&for=hair' : ''}`, warn: !!reorder });
     tiles.push({ label: business === 'hair' ? 'Shopify purchase orders' : 'Square purchase orders', n: open?.length, sub: open?.some((o) => o.expectedOn && o.expectedOn <= today) ? 'some due to arrive' : 'open', to: `/inventory-sync?view=orders${store === 'shopify' ? '&for=hair' : ''}` });
     const att = overview.data ? overview.data.counts.attention + overview.data.counts.errors : undefined;
     tiles.push({ label: 'Sync needs attention', n: att, sub: 'Square ↔ Shopify', to: '/inventory-sync?view=sync', warn: !!att });

@@ -23,8 +23,8 @@ export const SUB_NAV: Record<string, SubNav> = {
     items: [
       // Each has a toggle across the top for its pages: Products · Stock counts · Reorder · Pricing, and
       // To order · Purchase orders · Suppliers.
-      { to: '/inventory-sync', label: 'Inventory', also: ['/inventory-sync?view=products', '/inventory-sync?view=stock', '/inventory-sync?view=reorder', '/inventory-sync?view=pricing'] },
-      { to: '/inventory-sync?view=toorder', label: 'Ordering', also: ['/inventory-sync?view=orders', '/inventory-sync?view=suppliers'] },
+      { to: '/inventory-sync', label: 'Inventory', also: ['/inventory-sync?view=products', '/inventory-sync?view=stock', '/inventory-sync?view=pricing'] },
+      { to: '/inventory-sync?view=reorder', label: 'Ordering', also: ['/inventory-sync?view=toorder', '/inventory-sync?view=orders', '/inventory-sync?view=suppliers'] },
       { to: '/inventory-sync?view=sync', label: 'Sync' },
     ],
   },

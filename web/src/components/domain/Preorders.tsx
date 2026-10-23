@@ -20,7 +20,7 @@ export function PreorderBanner() {
   const { data } = usePreorders();
   if (!data?.items.length) return null;
   return (
-    <Link to="/inventory-sync?view=toorder&for=hair" className="mb-4 flex flex-wrap items-center gap-2 border border-amber/40 bg-amber-tint px-4 py-2.5 text-[14px] text-ink hover:border-amber">
+    <Link to="/inventory-sync?view=reorder&for=hair" className="mb-4 flex flex-wrap items-center gap-2 border border-amber/40 bg-amber-tint px-4 py-2.5 text-[14px] text-ink hover:border-amber">
       <AlertTriangle className="h-4 w-4 shrink-0 text-amber" />
       <span><b className="font-medium">{data.waiting} pre-order{data.waiting === 1 ? '' : 's'}</b> waiting across {data.items.length} product{data.items.length === 1 ? '' : 's'}
         {data.toOrder ? <> · <b className="font-medium">{data.toOrder} still to order</b></> : ' · all on order'}</span>
