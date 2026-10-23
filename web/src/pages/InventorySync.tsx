@@ -28,12 +28,12 @@ const result = (N: StoreNames): Record<InventorySyncRunDTO['details'][number]['r
 
 const SECTION_TITLE: Record<string, (store: string) => string> = {
   inventory: (s) => `Inventory · ${s}`, toorder: (s) => `To order · ${s}`, pricing: () => 'Pricing', orders: (s) => `Purchase orders · ${s}`,
-  sync: () => 'Inventory sync', products: () => 'Products · All stores', stock: () => 'Stock counts', reorder: () => 'Reorder', suppliers: () => 'Suppliers',
+  sync: () => 'Inventory sync', products: () => 'Products · All stores', stock: () => 'Stock counts', reorder: () => 'To order', suppliers: () => 'Suppliers',
 };
 /** Pages that are per store: they start with Addendum Salon (Square) / Addendum Hair (Shopify), like Tasks. */
 const PER_STORE = new Set(['toorder', 'orders']);
 /** The pages behind each sub-tab's toggle (Inventory and Ordering in the side menu). */
-const INVENTORY_PAGES = [{ value: 'inventory', label: 'Products' }, { value: 'stock', label: 'Stock counts' }, { value: 'reorder', label: 'Reorder' }, { value: 'pricing', label: 'Pricing' }];
+const INVENTORY_PAGES = [{ value: 'inventory', label: 'Products' }, { value: 'stock', label: 'Stock counts' }, { value: 'reorder', label: 'To order' }, { value: 'pricing', label: 'Pricing' }];
 const ORDERING_PAGES = [{ value: 'toorder', label: 'To order' }, { value: 'orders', label: 'Purchase orders' }, { value: 'suppliers', label: 'Suppliers' }];
 
 /** Inventory: each store's stock, the Square ↔ Shopify sync, and the stock tools (products, counts, reorder, orders, suppliers). */
@@ -63,6 +63,8 @@ export function InventorySyncPage() {
   const setView = (v: string) => setParams((p) => { const n = new URLSearchParams(p); n.delete('part'); if (v === 'inventory') n.delete('view'); else n.set('view', v); return n; });
   const setStore = (hair: boolean) => setParams((p) => { const n = new URLSearchParams(p); if (['square', 'shopify', 'all'].includes(n.get('view') ?? '')) n.delete('view'); if (n.get('view') === 'orders-online') n.set('view', 'orders'); n.set('for', hair ? 'hair' : 'salon'); return n; });
   // Products: each store's own list, or every product across the stores (pairing, SKUs, Add to Square).
+  // To order (forecasts): every store unless one is picked.
+  const reorderStore = (['salon', 'hair'] as const).find((s) => s === params.get('for')) ?? 'all';
   const productsStore = view === 'products' ? 'all' : forHair ? 'hair' : 'salon';
   const setProductsStore = (v: string) => (v === 'all' ? setView('products') : setParams((p) => { const n = new URLSearchParams(p); n.delete('view'); n.delete('part'); n.set('for', v); return n; }));
   const { data: me } = useMe();
@@ -96,6 +98,8 @@ export function InventorySyncPage() {
       {togglePages && <PageTabs value={view === 'products' ? 'inventory' : view} onChange={setView} options={togglePages} aside={
         view === 'inventory' || view === 'products'
           ? <Segmented size="sm" value={productsStore} onChange={setProductsStore} options={[{ value: 'all', label: 'All stores' }, { value: 'salon', label: 'Addendum Salon' }, { value: 'hair', label: 'Addendum Hair' }]} />
+          : view === 'reorder'
+            ? <Segmented size="sm" value={reorderStore} onChange={(v) => setParams((p) => { const n = new URLSearchParams(p); n.set('for', v); return n; })} options={[{ value: 'all', label: 'All stores' }, { value: 'salon', label: 'Addendum Salon' }, { value: 'hair', label: 'Addendum Hair' }]} />
           : PER_STORE.has(view) && <Segmented size="sm" value={forHair ? 'hair' : 'salon'} onChange={(v) => setStore(v === 'hair')} options={[{ value: 'salon', label: 'Addendum Salon' }, { value: 'hair', label: 'Addendum Hair' }]} />
       } />}
       <PageHeader
@@ -113,7 +117,7 @@ export function InventorySyncPage() {
       {view === 'products' && <div className="mb-3 flex flex-wrap justify-end gap-2"><AddLengthButton /><AddToSquareButton /></div>}
       {view === 'products' && <ProductsView setup />}
       {view === 'stock' && <StockView />}
-      {view === 'reorder' && <ReorderView onOrders={() => setView('orders')} />}
+      {view === 'reorder' && <ReorderView key={reorderStore} store={reorderStore} onOrders={() => setView('orders')} />}
       {view === 'orders' && (forHair ? <PurchaseOrdersView key="shopify" store="shopify" /> : <PurchaseOrdersView key="salon" store="salon" />)}
       {view === 'suppliers' && <SuppliersView />}
       {view === 'sync' && <>

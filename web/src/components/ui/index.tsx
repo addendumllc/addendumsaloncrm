@@ -161,7 +161,7 @@ export function PageTabs<T extends string>({ value, onChange, options, aside, cl
       <div className="-mb-px flex max-w-full gap-5 overflow-x-auto scrollbar-none font-button" role="tablist">
         {options.map((o) => (
           <button key={o.value} type="button" role="tab" aria-selected={value === o.value} onClick={() => onChange(o.value)}
-            className={cx('whitespace-nowrap border-b-2 pb-2.5 pt-1 text-[14px] font-medium transition-colors', value === o.value ? 'border-plum text-ink' : 'border-transparent text-stone hover:text-ink')}>
+            className={cx('whitespace-nowrap border-b-2 pb-2.5 pt-1 text-[14px] font-medium transition-colors focus:outline-none focus-visible:text-plum', value === o.value ? 'border-plum text-ink' : 'border-transparent text-stone hover:text-ink')}>
             {tc(o.label)}
           </button>
         ))}

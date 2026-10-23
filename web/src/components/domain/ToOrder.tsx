@@ -12,7 +12,7 @@ const NEEDS: StockForecastDTO['status'][] = ['out', 'order_now', 'soon'];
 
 /**
  * Inventory → To order: what one store needs ordered, out of stock first, then by the day it sells out. "Coming up"
- * adds the ones to watch (about three weeks out). Purchase orders are made from Inventory → Reorder.
+ * adds the ones to watch (about three weeks out). Purchase orders are made from Inventory → To order.
  */
 export function ToOrderView({ store }: { store: 'salon' | 'online' }) {
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['stock-forecast'], queryFn: () => api.get<StockForecastResponse>('/inventory-sync/stock/forecast') });

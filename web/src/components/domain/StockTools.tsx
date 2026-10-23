@@ -823,7 +823,8 @@ const F_STATUS: Record<StockForecastDTO['status'], { label: string; tone: 'rose'
   watch: { label: 'Watch', tone: 'plum' }, healthy: { label: 'Healthy', tone: 'sage' }, no_sales: { label: 'No recent sales', tone: 'neutral' }, discontinued: { label: 'Discontinued', tone: 'neutral' },
 };
 
-export function ReorderView({ onOrders }: { onOrders: () => void }) {
+/** `store`: all products, or only those the salon (Square) or Addendum Hair (online) sells. */
+export function ReorderView({ onOrders, store = 'all' }: { onOrders: () => void; store?: 'all' | 'salon' | 'hair' }) {
   const toast = useToast();
   const fallbackSupplier = useDefaultSupplier();
   const refresh = useRefresh();
@@ -837,9 +838,10 @@ export function ReorderView({ onOrders }: { onOrders: () => void }) {
   const [showMoq, setShowMoq] = useState(() => { try { return localStorage.getItem('reorder-moq') !== '0'; } catch { return true; } });
   if (isLoading) return <PageLoading />;
   if (error || !data) return <ErrorNote error={error} onRetry={refetch} />;
-  const items = data.items.filter((i) => filter === 'all' || ['out', 'order_now', 'soon'].includes(i.status));
+  const inStore = data.items.filter((i) => store === 'all' || (store === 'salon' ? i.stores.salon : i.stores.online));
+  const items = inStore.filter((i) => filter === 'all' || ['out', 'order_now', 'soon'].includes(i.status));
   const counts = { out: 0, order_now: 0, soon: 0, watch: 0 } as Record<string, number>;
-  for (const i of data.items) counts[i.status] = (counts[i.status] ?? 0) + 1;
+  for (const i of inStore) counts[i.status] = (counts[i.status] ?? 0) + 1;
   const toggle = (k: string) => setPicked((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const qOf = (i: StockForecastDTO) => Number(qty[i.key] ?? i.suggestedQty);
   const createPOs = async () => {
@@ -1044,7 +1046,7 @@ export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'sho
         <Button size="sm" variant="primary" icon={<Plus className="h-4 w-4" />} className="ml-auto" onClick={() => setCreating(true)}>New purchase order</Button>
       </div>
       <p className="mb-3 text-[13px] text-stone">Orders for {store === 'salon' ? `the salon (${N.square})` : `online (${N.shopify})`}. Receiving adds the stock to {store === 'salon' ? N.square : N.shopify}; for products whose stock is shared, the next sync carries it across.</p>
-      {!list.length && <EmptyState title="No purchase orders" >Make them from Reorder, or with New purchase order.</EmptyState>}
+      {!list.length && <EmptyState title="No purchase orders" >Make them from Inventory → To order, or with New purchase order.</EmptyState>}
       <div className="space-y-3">
         {list.map((p) => {
           const remaining = p.lines.reduce((a, l) => a + Math.max(0, l.quantity - l.received), 0);
