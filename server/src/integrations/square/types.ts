@@ -183,6 +183,9 @@ export interface SquarePaymentInfo {
   amount_money?: SquareMoney;
 }
 
+/** A new retail product for Square: one item (by name) can get several variations. */
+export interface NewSquareItem { itemName: string; variationName: string; sku: string; priceCents: number; categoryName: string | null }
+
 export interface SquareService {
   readonly mode: 'live' | 'demo';
   /** Lists bookings with start times in [min, max). Implementations handle Square's 31-day window + paging. */
@@ -203,6 +206,8 @@ export interface SquareService {
   setVariationSku(variationId: string, sku: string, idempotencyKey: string): Promise<void>;
   /** Sets a variation's price (fixed pricing, in the store's currency). Needs ITEMS_WRITE. */
   setVariationPrice(variationId: string, priceCents: number, idempotencyKey: string): Promise<void>;
+  /** Creates retail items (stock tracked, at every location), grouping variations by item name; a missing category is created. Needs ITEMS_WRITE. */
+  createItems(items: NewSquareItem[], idempotencyKey: string): Promise<{ sku: string; variationId: string }[]>;
   /** The permissions of the access token in use (null when Square doesn't list them). */
   tokenScopes(): Promise<{ scopes: string[] | null; expiresAt: string | null }>;
   /** Orders at these locations updated in [from, to], oldest first (POST /v2/orders/search; ORDERS_READ). */

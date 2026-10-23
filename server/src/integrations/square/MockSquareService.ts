@@ -63,6 +63,13 @@ export class MockSquareService implements SquareService {
   async listProducts() {
     return DEMO_PRODUCTS.map((p) => ({ ...p, ...(demoSquareSkus.has(p.variationId) ? { sku: demoSquareSkus.get(p.variationId)! } : {}), ...(demoSquarePrices.has(p.variationId) ? { priceCents: demoSquarePrices.get(p.variationId)! } : {}) }));
   }
+  async createItems(items: { itemName: string; variationName: string; sku: string; priceCents: number; categoryName: string | null }[]) {
+    return items.map((it, i) => {
+      const id = `demo-new-${Date.now().toString(36)}-${i}`;
+      DEMO_PRODUCTS.push({ variationId: id, itemId: `item-${id}`, itemName: it.itemName, variationName: it.variationName, sku: it.sku, upc: null, priceCents: it.priceCents, trackInventory: true, categories: it.categoryName ? [it.categoryName] : [] });
+      return { sku: it.sku, variationId: id };
+    });
+  }
   async setVariationPrice(variationId: string, priceCents: number) {
     if (!DEMO_PRODUCTS.some((p) => p.variationId === variationId)) throw new Error('not found');
     demoSquarePrices.set(variationId, priceCents);

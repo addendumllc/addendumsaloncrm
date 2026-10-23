@@ -242,3 +242,34 @@ describe('Pro prices in the retail store', () => {
     }
   });
 });
+
+describe('Add online products to Square', () => {
+  it('creates them with the salon’s naming and the chosen price, starts at the online count, pairs them — and the next sync changes nothing', async () => {
+    const { DEMO_PRODUCTS } = await import('../src/integrations/square/MockSquareService.js');
+    const CLIP = { sku: '18-BMCI-120g', inventoryItemId: 'gid://shopify/InventoryItem/88', label: 'Black Magic - Clip-Ins - 18 inch - 120g', tracked: true };
+    MockShopifyService.catalog.push(CLIP);
+    MockShopifyService.stock.set(CLIP.inventoryItemId, 5);
+    const before = DEMO_PRODUCTS.length;
+    try {
+      await sync();
+      forgetStockCache();
+      const c = (await api.get('/api/inventory-sync/stock/to-square')).body.products.find((p: any) => p.sku === '18-BMCI-120g');
+      expect(c).toMatchObject({ itemName: 'Black Magic Clip-Ins', variationName: '18" Clip-Ins', categoryName: 'Addendum Hair Clip-Ins' });
+      const r = await api.post('/api/inventory-sync/stock/to-square', { items: [{ key: c.key, itemName: c.itemName, variationName: c.variationName, categoryName: c.categoryName, priceCents: 55000 }] });
+      expect(r.body).toMatchObject({ created: 1, skipped: [] });
+      const made = DEMO_PRODUCTS.find((p) => p.sku === '18-BMCI-120g')!;
+      expect(made).toMatchObject({ itemName: 'Black Magic Clip-Ins', variationName: '18" Clip-Ins', priceCents: 55000, trackInventory: true });
+      expect(demoSquareStock.get(made.variationId)).toBe(5);
+      // Already in Square now: not offered again, and adding it twice is refused.
+      forgetStockCache();
+      expect((await api.get('/api/inventory-sync/stock/to-square')).body.products.some((p: any) => p.sku === '18-BMCI-120g')).toBe(false);
+      await sync();
+      expect(MockShopifyService.stock.get(CLIP.inventoryItemId)).toBe(5); // never copied a 0 across
+      const link = await db().one<any>('SELECT * FROM inventory_sync_links WHERE square_variation_id = $1', [made.variationId]);
+      expect(link).toMatchObject({ status: 'in_sync', baseline_quantity: 5 });
+    } finally {
+      MockShopifyService.catalog.splice(MockShopifyService.catalog.indexOf(CLIP), 1);
+      DEMO_PRODUCTS.splice(before);
+    }
+  });
+});

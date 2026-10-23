@@ -1,7 +1,7 @@
 import { config, squareBaseUrl } from '../../config.js';
 import { IntegrationError } from '../../lib/errors.js';
 import { DAY } from '../../lib/time.js';
-import type {
+import type { NewSquareItem,
   SquareBooking, SquareCustomer, SquareInventoryCount, SquareOrder, SquarePaymentInfo, SquareTimecard, SquareJob, TimecardBreakInput, SquareLocation, SquareProductVariation, SquareService, SquareServiceVariation, SquareTeamMember, SquareSetCount,
 } from './types.js';
 
@@ -236,6 +236,49 @@ export class SquareApiService implements SquareService {
     const currency = obj.item_variation_data?.price_money?.currency ?? 'USD';
     obj.item_variation_data = { ...obj.item_variation_data, pricing_type: 'FIXED_PRICING', price_money: { amount: priceCents, currency } };
     await this.call('POST', '/v2/catalog/object', { idempotency_key: idempotencyKey.slice(0, 128), object: obj });
+  }
+
+  async createItems(items: NewSquareItem[], idempotencyKey: string) {
+    // Existing categories by name, so new items join them (one is created when missing).
+    const cats = new Map<string, string>();
+    let cursor: string | undefined;
+    do {
+      const qs = new URLSearchParams({ types: 'CATEGORY' });
+      if (cursor) qs.set('cursor', cursor);
+      const res = await this.call<{ objects?: any[]; cursor?: string }>('GET', `/v2/catalog/list?${qs}`);
+      for (const o of res?.objects ?? []) if (!o.is_deleted && o.category_data?.name) cats.set(o.category_data.name.trim().toLowerCase(), o.id);
+      cursor = res?.cursor || undefined;
+    } while (cursor);
+    const objects: any[] = [];
+    const catId = (name: string | null) => {
+      if (!name) return null;
+      const k = name.trim().toLowerCase();
+      if (!cats.has(k)) { const id = `#cat-${cats.size}`; cats.set(k, id); objects.push({ type: 'CATEGORY', id, category_data: { name: name.trim() } }); }
+      return cats.get(k)!;
+    };
+    const byItem = new Map<string, NewSquareItem[]>();
+    for (const it of items) byItem.set(it.itemName, [...(byItem.get(it.itemName) ?? []), it]);
+    const varIds = new Map<string, string>();
+    let n = 0;
+    for (const [name, vars] of byItem) {
+      const itemId = `#item-${n++}`;
+      const cat = catId(vars[0].categoryName);
+      objects.push({
+        type: 'ITEM', id: itemId, present_at_all_locations: true,
+        item_data: {
+          name, product_type: 'REGULAR', ...(cat ? { categories: [{ id: cat }], reporting_category: { id: cat } } : {}),
+          variations: vars.map((v, i) => {
+            const id = `${itemId}-v${i}`;
+            varIds.set(id, v.sku);
+            return { type: 'ITEM_VARIATION', id, present_at_all_locations: true, item_variation_data: {
+              item_id: itemId, name: v.variationName, sku: v.sku, pricing_type: 'FIXED_PRICING', price_money: { amount: v.priceCents, currency: 'USD' }, track_inventory: true,
+            } };
+          }),
+        },
+      });
+    }
+    const res = await this.call<{ id_mappings?: { client_object_id: string; object_id: string }[] }>('POST', '/v2/catalog/batch-upsert', { idempotency_key: idempotencyKey.slice(0, 128), batches: [{ objects }] });
+    return (res?.id_mappings ?? []).filter((m) => varIds.has(m.client_object_id)).map((m) => ({ sku: varIds.get(m.client_object_id)!, variationId: m.object_id }));
   }
 
   async setInventoryCounts(counts: SquareSetCount[], idempotencyKey: string) {

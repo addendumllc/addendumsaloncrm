@@ -1337,3 +1337,84 @@ export async function applyProPrices() {
   }
   return { saved, failed, skipped: plan.skipped, alreadyMatching: plan.alreadyMatching };
 }
+
+// ---------------- Add online products to Square (Inventory → Products → Add to Square) ----------------
+/**
+ * "Black Magic - Clip-Ins - 18 inch - 120g" → item "Black Magic Clip-Ins", variation `18" Clip-Ins`, category
+ * "Addendum Hair Clip-Ins" — the way the salon's hair is set up in Square (e.g. "Aperol Spritz Redefined Weft" / 18" Weft).
+ */
+export function squareNamesFor(label: string) {
+  const parts = label.split(/\s+[-–]\s+/).map((x) => x.trim()).filter((x) => x && x.toLowerCase() !== 'default title');
+  if (parts.length < 2) return { itemName: parts[0] ?? label, variationName: 'Regular', categoryName: null as string | null };
+  const collection = parts[1].replace(/\bpro\b/i, '').trim();
+  const inches = parts.slice(2).join(' ').match(/(\d+(?:\.\d+)?)\s*(?:inch|in\b|"|”)/i)?.[1];
+  return {
+    itemName: `${parts[0]} ${collection}`,
+    variationName: inches ? `${inches}" ${collection}` : parts.slice(2).join(' ') || 'Regular',
+    categoryName: `Addendum Hair ${collection}`,
+  };
+}
+
+/** Online products not in Square yet, with suggested Square names and the retail price (the retail store's non-Pro listing). */
+export async function squareCandidates() {
+  const L = await live(true);
+  const retail = shopifyService2();
+  const retailPrices = retail ? await retail.listPrices().catch(() => []) : [];
+  const own = shopifyService() ? await shopifyService()!.listPrices().catch(() => []) : [];
+  const retailBySku = new Map<string, number>();
+  for (const p of retailPrices) if (norm(p.sku) && p.priceCents != null && !isProListing(p) && !retailBySku.has(norm(p.sku))) retailBySku.set(norm(p.sku), p.priceCents);
+  const ownByItem = new Map(own.map((p) => [p.inventoryItemId, p.priceCents]));
+  const inSquare = new Set(L.products.map((p) => norm(p.sku)).filter(Boolean));
+  return L.rows.filter((r) => !r.squareVariationId && r.shopifyInventoryItemId && norm(r.sku) && !inSquare.has(norm(r.sku))).map((r) => ({
+    key: r.key, label: r.label, sku: r.sku!, onlineQty: r.shopifyQty,
+    ...squareNamesFor(r.label),
+    priceCents: retailBySku.get(norm(r.sku)) ?? ownByItem.get(r.shopifyInventoryItemId!) ?? null,
+  }));
+}
+
+/**
+ * Creates the chosen online products in Square (stock tracked), starts each at the online count and pairs it with its
+ * Shopify product right away — so the first sync sees them in step and never copies a 0 across.
+ */
+export async function addToSquare(items: { key: string; itemName: string; variationName: string; categoryName: string | null; priceCents: number }[], staffId: string | null) {
+  const sq = await squareService();
+  const shop = shopifyService();
+  if (!sq || !shop) throw badRequest('Square and Shopify both need to be connected.');
+  const L = await live(true);
+  if (!L.sqLoc || !L.shLoc) throw badRequest('The Square or Shopify location isn’t set up yet.');
+  const byKey = new Map(L.rows.map((r) => [r.key, r]));
+  const inSquare = new Set(L.products.map((p) => norm(p.sku)).filter(Boolean));
+  const skipped: { label: string; reason: string }[] = [];
+  const todo = items.flatMap((it) => {
+    const r = byKey.get(it.key);
+    if (!r?.shopifyInventoryItemId || !norm(r.sku)) { skipped.push({ label: r?.label ?? it.key, reason: 'Not found online, or no SKU' }); return []; }
+    if (r.squareVariationId || inSquare.has(norm(r.sku))) { skipped.push({ label: r.label, reason: 'Already in Square' }); return []; }
+    return [{ ...it, row: r }];
+  });
+  if (!todo.length) return { created: 0, skipped };
+  let made: { sku: string; variationId: string }[];
+  try {
+    made = await sq.createItems(todo.map((t) => ({ itemName: t.itemName.trim(), variationName: t.variationName.trim(), sku: t.row.sku!, priceCents: t.priceCents, categoryName: t.categoryName?.trim() || null })), `add-sq-${Date.now().toString(36)}`);
+  } catch (e) {
+    throw e instanceof IntegrationError && e.authProblem ? new IntegrationError('square', 'Square needs the ITEMS_WRITE permission to add products.', false, true, e.technical) : e;
+  }
+  const idBySku = new Map(made.map((m) => [norm(m.sku), m.variationId]));
+  const ready = todo.filter((t) => idBySku.has(norm(t.row.sku)));
+  // Start at the online count (never below 0), then pair them with that count as the agreed one.
+  const counts = ready.map((t) => ({ variationId: idBySku.get(norm(t.row.sku))!, locationId: L.sqLoc!, quantity: Math.max(0, t.row.shopifyQty ?? 0), occurredAt: new Date().toISOString(), referenceId: 'addendum-add-to-square' }));
+  if (counts.length) await sq.setInventoryCounts(counts, `add-sq-count-${Date.now().toString(36)}`);
+  for (const t of ready) {
+    const vid = idBySku.get(norm(t.row.sku))!;
+    const qty = t.row.shopifyQty ?? 0;
+    await db().query(
+      `INSERT INTO inventory_sync_links(sku, match_method, label, square_variation_id, square_location_id, shopify_inventory_item_id, shopify_location_id, baseline_quantity, status, last_square_quantity, last_shopify_quantity)
+       VALUES ($1,'sku',$2,$3,$4,$5,$6,$7,'in_sync',$8,$9) ON CONFLICT DO NOTHING`,
+      [t.row.sku, `${t.itemName} · ${t.variationName}`, vid, L.sqLoc, t.row.shopifyInventoryItemId, L.shLoc, qty >= 0 ? qty : null, Math.max(0, qty), qty]);
+    await db().query(
+      `INSERT INTO stock_txns(product_key, label, sku, kind, reason, note, square_after, shopify_before, shopify_after, staff_id) VALUES ($1,$2,$3,'import',$4,$5,$6,$7,$7,$8)`,
+      [vid, `${t.itemName} · ${t.variationName}`, t.row.sku, 'Added to Square', `$${(t.priceCents / 100).toFixed(2)}${t.categoryName ? ` · ${t.categoryName}` : ''}`, Math.max(0, qty), t.row.shopifyQty, staffId]);
+  }
+  for (const t of todo) if (!idBySku.has(norm(t.row.sku))) skipped.push({ label: t.row.label, reason: 'Square didn’t confirm it' });
+  forgetStockCache();
+  return { created: ready.length, skipped };
+}
