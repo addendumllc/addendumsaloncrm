@@ -156,7 +156,7 @@ export function TaskCard({ task, compact }: { task: TaskDTO; compact?: boolean }
             )}
             <Badge tone={task.kind === 'task' ? 'neutral' : 'plum'}>{TASK_TYPE_LABELS[task.type]}</Badge>
             {task.kind === 'task' && <Badge tone={task.business === 'hair' ? 'amber' : 'neutral'}>{TASK_BUSINESS_LABELS[task.business ?? 'salon']}</Badge>}
-            {task.leadId && !task.clientId && <Badge>Lead</Badge>}
+            {task.leadId && !task.clientId && <Badge>New client</Badge>}
           </div>
           {/* Quick status updates, small and out of the way at the top right. */}
           {!done && (

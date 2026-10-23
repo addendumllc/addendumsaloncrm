@@ -22,7 +22,7 @@ const ICONS: Record<string, typeof Bell> = {
 
 const TILES: { key: keyof DashboardSummary; label: string; link: string; alert?: boolean }[] = [
   { key: 'appointmentsToday', label: 'Appointments today', link: '/appointments?view=day' },
-  { key: 'newLeads', label: 'New leads', link: '/leads?status=new' },
+  { key: 'newLeads', label: 'New clients', link: '/leads?status=new' },
   { key: 'followUpsDue', label: 'Follow-ups due', link: '/follow-ups' },
   { key: 'overdueFollowUps', label: 'Overdue follow-ups', link: '/follow-ups?due=overdue', alert: true },
   { key: 'unreadMessages', label: 'Unread messages', link: '/messages?filter=unread', alert: true },
@@ -104,7 +104,7 @@ export function DashboardPage() {
   if (showWork) defs.push({ id: 'actions', title: 'Recommended actions', size: canSchedule ? 'l' : 'full', node: (
     <div className="flex flex-col">
       {nothingToDo ? (
-        <div className="panel flex flex-1 items-center justify-center"><EmptyState icon={<Check className="h-8 w-8" />} title="You're all caught up">No follow-ups need attention right now. New leads, texts and Square changes will appear here.</EmptyState></div>
+        <div className="panel flex flex-1 items-center justify-center"><EmptyState icon={<Check className="h-8 w-8" />} title="You're all caught up">No follow-ups need attention right now. New clients, texts and Square changes will appear here.</EmptyState></div>
       ) : (
         <ol className="flex-1 divide-y divide-line overflow-hidden rounded-xl2 border border-line bg-white">
           {actions.map((a) => {

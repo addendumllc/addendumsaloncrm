@@ -45,10 +45,10 @@ export function LeadsPage({ embedded = false }: { embedded?: boolean }) {
     <div>
       {embedded
         ? leads && <p className="-mt-2 mb-3 text-[14px] text-stone">{leads.filter((l) => !['won', 'lost'].includes(l.status)).length} open inquiries</p>
-        : <PageHeader title="New client inquiries" subtitle={leads ? `${leads.filter((l) => !['won', 'lost'].includes(l.status)).length} open` : undefined} actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={newLead}>New lead</Button>} />}
+        : <PageHeader title="New client inquiries" subtitle={leads ? `${leads.filter((l) => !['won', 'lost'].includes(l.status)).length} open` : undefined} actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={newLead}>New client</Button>} />}
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <Segmented value={view} onChange={(v) => set('view', v === 'pipeline' ? '' : v)} options={[{ value: 'pipeline', label: 'Pipeline' }, { value: 'list', label: 'List' }]} />
-        <input className="field h-9 w-full py-1 text-sm sm:w-56" placeholder="Search leads" value={f.q} onChange={(e) => set('q', e.target.value)} />
+        <input className="field h-9 w-full py-1 text-sm sm:w-56" placeholder="Search clients" value={f.q} onChange={(e) => set('q', e.target.value)} />
         <select className="field h-9 w-auto py-1 text-sm" value={f.source} onChange={(e) => set('source', e.target.value)} aria-label="Source"><option value="">All sources</option>{LEAD_SOURCES.map((s) => <option key={s}>{s}</option>)}</select>
         <select className="field h-9 w-auto py-1 text-sm" value={f.staffId} onChange={(e) => set('staff', e.target.value)} aria-label="Assigned to"><option value="">Anyone</option>{staff?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
         {view === 'list' && <select className="field h-9 w-auto py-1 text-sm" value={f.status} onChange={(e) => set('status', e.target.value)} aria-label="Status"><option value="">All statuses</option>{LEAD_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}</select>}
@@ -56,7 +56,7 @@ export function LeadsPage({ embedded = false }: { embedded?: boolean }) {
 
       {isLoading && <PageLoading />}
       {error && <ErrorNote error={error} onRetry={refetch} />}
-      {leads && leads.length === 0 && <div className="panel"><EmptyState icon={<Sparkles className="h-9 w-9" />} title="No leads yet" action={<Button variant="primary" onClick={newLead}>Add a lead</Button>}>Leads from texts are added automatically. Add Instagram or walk-in inquiries here.</EmptyState></div>}
+      {leads && leads.length === 0 && <div className="panel"><EmptyState icon={<Sparkles className="h-9 w-9" />} title="No new clients yet" action={<Button variant="primary" onClick={newLead}>Add a client</Button>}>New clients from texts are added automatically. Add Instagram or walk-in inquiries here.</EmptyState></div>}
 
       {leads && leads.length > 0 && view === 'pipeline' && (
         <div className="-mx-4 overflow-x-auto px-4 pb-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
@@ -145,7 +145,7 @@ function LeadDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   };
   const lead = data?.lead;
   return (
-    <Modal open side onClose={onClose} title={lead?.name ?? 'Lead'}>
+    <Modal open side onClose={onClose} title={lead?.name ?? 'Client'}>
       {isLoading || !data || !lead ? <PageLoading /> : (
         <div className="space-y-6">
           <div>
@@ -160,7 +160,7 @@ function LeadDrawer({ id, onClose }: { id: string; onClose: () => void }) {
               ) : (
                 <Button size="sm" icon={<UserCheck className="h-4 w-4" />} onClick={async () => { const r = await api.post<{ clientId: string }>(`/leads/${id}/convert`); toast('Converted to a client'); refresh(); nav(`/clients/${r.clientId}`); }}>Convert to client</Button>
               )}
-              <Button size="sm" variant="ghost" icon={<Archive className="h-4 w-4" />} onClick={async () => { await api.post(`/leads/${id}/archive`); toast('Lead archived'); refresh(); onClose(); }}>Archive</Button>
+              <Button size="sm" variant="ghost" icon={<Archive className="h-4 w-4" />} onClick={async () => { await api.post(`/leads/${id}/archive`); toast('Client archived'); refresh(); onClose(); }}>Archive</Button>
             </div>
           </div>
 

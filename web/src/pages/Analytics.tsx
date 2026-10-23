@@ -61,7 +61,7 @@ export function AnalyticsPage() {
     defs.push({ id: 'booked_value', title: 'Booked service value', size: 'full', node: w((d) => <BookedValue d={d} />) });
     defs.push({ id: 'weekly', title: 'Appointments by week', size: 'l', ownHeading: true, node: w((d) => <WeeklyChart weekly={d.weekly} />) });
     defs.push({ id: 'new_vs_returning', title: 'New vs returning', size: 's', node: w((d) => <NewVsReturning n={d.newClients} r={d.returningClients} />) });
-    defs.push({ id: 'leads_by_week', title: 'New leads by week', size: 'm', node: w((d) => <LeadsByWeek weekly={d.weekly} />) });
+    defs.push({ id: 'leads_by_week', title: 'New clients by week', size: 'm', node: w((d) => <LeadsByWeek weekly={d.weekly} />) });
     defs.push({ id: 'popular_services', title: 'Popular services', size: 'm', node: w((d) => <PopularServices d={d} />) });
   }
   if (canDo('analytics:read')) defs.push({ id: 'product_sales', title: 'Product sales', size: 'full', ownHeading: true, node: <div className="[&>section]:mt-0"><ProductSales key={scope} scope={scope} /></div> });
@@ -74,7 +74,7 @@ export function AnalyticsPage() {
         actions={bookings && <Segmented value={days} onChange={setDays} options={[{ value: '30', label: '30 days' }, { value: '90', label: '90 days' }, { value: '365', label: '12 months' }]} />}
       />
       <SectionPicker path="/analytics" names={N} can={canDo} className="mb-4" />
-      {bookings && <p className="text-[13px] text-stone">Bookings & clients: {integ?.demoMode ? 'calculated from demo data' : 'calculated from Square appointments, leads and follow-ups'}, for the last {days === '365' ? '12 months' : `${days} days`}.</p>}
+      {bookings && <p className="text-[13px] text-stone">Bookings & clients: {integ?.demoMode ? 'calculated from demo data' : 'calculated from Square appointments, new clients and follow-ups'}, for the last {days === '365' ? '12 months' : `${days} days`}.</p>}
       <WidgetGrid page="analytics" defs={defs} />
     </div>
   );
@@ -82,8 +82,8 @@ export function AnalyticsPage() {
 
 function Tiles({ d }: { d: Analytics }) {
   const tiles: { label: string; value: string; sub?: string; warn?: boolean }[] = [
-    { label: 'New leads', value: String(d.newLeads), sub: `${d.leadsConverted} converted` },
-    { label: 'Lead conversion', value: pct(d.conversionRate), sub: 'booked or became a client' },
+    { label: 'New clients', value: String(d.newLeads), sub: `${d.leadsConverted} converted` },
+    { label: 'New client conversion', value: pct(d.conversionRate), sub: 'booked or became a client' },
     { label: 'Appointments', value: String(d.appointments), sub: `${d.completed} completed` },
     { label: 'Rebooking rate', value: pct(d.rebookingRate), sub: 'visited and booked again' },
     { label: 'Cancellations', value: String(d.cancellations), sub: d.appointments ? `${Math.round((d.cancellations / d.appointments) * 100)}% of bookings` : undefined },
@@ -124,12 +124,12 @@ function LeadsByWeek({ weekly }: { weekly: Analytics['weekly'] }) {
               <CartesianGrid vertical={false} stroke="rgb(var(--line))" />
               <XAxis dataKey="week" tickFormatter={(w) => dateShort(w)} tick={AXIS} axisLine={false} tickLine={false} minTickGap={16} />
               <YAxis allowDecimals={false} tick={AXIS} axisLine={false} tickLine={false} />
-              <Tooltip cursor={{ fill: 'rgb(var(--mist))' }} content={<Tip names={{ leads: 'New leads' }} />} />
+              <Tooltip cursor={{ fill: 'rgb(var(--mist))' }} content={<Tip names={{ leads: 'New clients' }} />} />
               <Bar dataKey="leads" fill="#93527A" radius={[4, 4, 0, 0]} maxBarSize={28} />
             </BarChart>
           </ResponsiveContainer>
         </div>
-      ) : <p className="py-8 text-center text-sm text-stone">No new leads in this period.</p>}
+      ) : <p className="py-8 text-center text-sm text-stone">No new clients in this period.</p>}
     </div>
   );
 }

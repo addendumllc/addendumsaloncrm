@@ -42,7 +42,7 @@ async function doRun(now: Date): Promise<RulesResult> {
   );
   resolved += (await autoResolve(
     `lead_id IN (SELECT id FROM leads WHERE status IN ('booked','won','lost') OR archived_at IS NOT NULL) AND type IN ('new_lead','follow_up')`,
-    [], 'Auto-closed: lead booked or closed.',
+    [], 'Auto-closed: client booked or closed.',
   )).length;
   // Cancellation / no-show follow-ups close themselves once the client has a new booking. Per-service rebooking
   // follow-ups are handled by the rebooking schedule below (they close when that service is booked or visited).
@@ -67,8 +67,8 @@ async function doRun(now: Date): Promise<RulesResult> {
   for (const l of newLeads) {
     bump('new_lead', await createTask({
       type: 'new_lead',
-      title: `Contact new lead ${l.name}`,
-      reason: `New lead${l.source ? ` from ${l.source}` : ''}${l.service_interest ? ` — interested in ${l.service_interest}` : ''}.`,
+      title: `Contact new client ${l.name}`,
+      reason: `New client${l.source ? ` from ${l.source}` : ''}${l.service_interest ? ` — interested in ${l.service_interest}` : ''}.`,
       priority: 'high',
       dueAt: addHours(new Date(l.created_at), r.newLeadHours),
       leadId: l.id,

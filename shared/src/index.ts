@@ -21,7 +21,7 @@ export const ROLE_LABELS: Record<BuiltinRole, string> = {
 
 export const ROLE_DESCRIPTIONS: Record<BuiltinRole, string> = {
   admin: 'Business administrators: settings, team, integrations, reports.',
-  receptionist: 'Front desk: calendar, clients, leads, texting and follow-ups.',
+  receptionist: 'Front desk: calendar, clients, texting and follow-ups.',
   stylist: 'Service providers: their own calendar, hair orders and commission.',
   assistant: 'Default for new accounts: limited, day-to-day help with clients and follow-ups.',
 };
@@ -412,7 +412,7 @@ export const TASK_TYPE_LABELS: Record<TaskType, string> = {
   no_show: 'No-Show Follow-Up',
   cancellation: 'Cancellation Follow-Up',
   review_request: 'Review Request',
-  new_lead: 'New Lead',
+  new_lead: 'New Client',
   reply: 'Reply to Message',
   internal: 'Internal Task',
 };
@@ -1810,8 +1810,8 @@ export type HighLevelAutomationKey =
   | 'follow_up_overdue';
 
 export const HIGHLEVEL_AUTOMATION_LABELS: Record<HighLevelAutomationKey, string> = {
-  new_lead: 'New lead',
-  lead_no_response: "Lead hasn't responded",
+  new_lead: 'New client',
+  lead_no_response: "New client hasn't responded",
   cancelled: 'Square appointment cancelled',
   no_show: 'Square no-show',
   overdue_rebook: 'Client overdue for rebooking',
@@ -1954,7 +1954,7 @@ export type ReplySituation =
   | 'no_show' | 'reschedule' | 'reminder' | 'confirmed' | 'review' | 'thanks' | 'general';
 
 export const REPLY_SITUATIONS: { value: ReplySituation; label: string }[] = [
-  { value: 'new_lead', label: 'New lead' },
+  { value: 'new_lead', label: 'New client' },
   { value: 'no_reply', label: "Hasn't replied" },
   { value: 'booking', label: 'Wants to book' },
   { value: 'pricing', label: 'Asking about price' },

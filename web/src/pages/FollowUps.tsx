@@ -103,7 +103,7 @@ export function FollowUpsPage() {
       {tasks && list.length === 0 && (
         <div className="panel">
           <EmptyState icon={<CheckCircle2 className="h-9 w-9" />} title={due === 'done' ? 'Nothing completed yet' : 'All clear'}>
-            {due === 'today' ? 'No follow-ups due today. New leads, cancellations and rebooking opportunities appear here automatically.' : 'No follow-ups match these filters.'}
+            {due === 'today' ? 'No follow-ups due today. New clients, cancellations and rebooking opportunities appear here automatically.' : 'No follow-ups match these filters.'}
           </EmptyState>
         </div>
       )}

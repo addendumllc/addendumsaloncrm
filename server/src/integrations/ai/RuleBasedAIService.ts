@@ -40,7 +40,7 @@ export function ruleBasedInsight(text: string): MessageInsight {
   else if (/\b(book|appointment|availability|available|looking to get|want to get|interested|openings?|schedule)\b/i.test(t) || service) intent = 'booking_request';
   else if (/\b(thank|thanks|love it|obsessed)\b/i.test(t)) intent = 'thanks';
   const isPotentialLead = intent === 'booking_request' || intent === 'pricing_question';
-  const parts = [isPotentialLead ? 'Potential lead' : intent.replace('_', ' ')];
+  const parts = [isPotentialLead ? 'Potential client' : intent.replace('_', ' ')];
   if (service) parts.push(`Service: ${service}`);
   if (timeframe) parts.push(`Timeframe: ${timeframe}`);
   return { intent, isPotentialLead, service, timeframe, summary: parts.join(' · ') };

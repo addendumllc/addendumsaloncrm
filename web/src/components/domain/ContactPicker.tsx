@@ -25,7 +25,7 @@ export function ContactPicker({ value, onChange }: { value: PickedContact | null
   if (value) {
     return (
       <div className="flex items-center justify-between rounded-lg border border-line-strong bg-mist/50 px-3 py-2">
-        <span className="text-sm"><span className="font-medium">{value.name}</span> <Badge tone={value.kind === 'lead' ? 'plum' : 'neutral'}>{value.kind === 'lead' ? 'Lead' : 'Client'}</Badge></span>
+        <span className="text-sm"><span className="font-medium">{value.name}</span> <Badge tone={value.kind === 'lead' ? 'plum' : 'neutral'}>{value.kind === 'lead' ? 'New client' : 'Client'}</Badge></span>
         <button onClick={() => onChange(null)} className="text-stone hover:text-ink" aria-label="Clear"><X className="h-4 w-4" /></button>
       </div>
     );
@@ -33,13 +33,13 @@ export function ContactPicker({ value, onChange }: { value: PickedContact | null
   return (
     <div className="relative">
       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-light" />
-      <input className="field pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a client or lead" />
+      <input className="field pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a client" />
       {results.length > 0 && (
         <div className="absolute z-10 mt-1 max-h-64 w-full overflow-y-auto rounded-xl border border-line bg-white py-1 shadow-pop">
           {results.map((r) => (
             <button key={`${r.kind}-${r.id}`} onClick={() => { onChange(r); setQ(''); }} className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-mist">
               <span>{r.name} <span className="text-stone">{phone(r.phone)}</span></span>
-              <Badge tone={r.kind === 'lead' ? 'plum' : 'neutral'}>{r.kind === 'lead' ? 'Lead' : 'Client'}</Badge>
+              <Badge tone={r.kind === 'lead' ? 'plum' : 'neutral'}>{r.kind === 'lead' ? 'New client' : 'Client'}</Badge>
             </button>
           ))}
         </div>

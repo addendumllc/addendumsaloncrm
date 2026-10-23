@@ -153,7 +153,7 @@ export function SmsSettings({ compact }: { compact?: boolean }) {
       <Card title="Texting" description="Texts are sent from Apple Messages on your own Mac or iPhone — no texting service or subscription needed.">
         <StatusLine state="ok">Ready · uses Apple Messages on this device</StatusLine>
         <ol className="mt-3 list-decimal space-y-1 pl-5 text-sm text-ink-soft">
-          <li>Click <b>Text</b> on a client, lead or follow-up. Write the message or let the CRM draft it.</li>
+          <li>Click <b>Text</b> on a client or follow-up. Write the message or let the CRM draft it.</li>
           <li><b>Open in Messages</b> opens a conversation with the number and text filled in. Edit it if you like, and send it there.</li>
           <li>Come back and tap <b>I sent it</b> (or <b>I didn't send it</b>). The CRM can't see Messages, so it only records what you tell it.</li>
         </ol>

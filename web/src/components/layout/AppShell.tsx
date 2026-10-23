@@ -116,7 +116,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <Button variant="primary" onClick={open} icon={<Plus className="h-4 w-4" />} aria-label="New"><span className="hidden sm:inline">New</span></Button>
       )}
       items={[
-        { label: 'New lead', onClick: actions.newLead, hidden: !can('leads:write') },
+        { label: 'New client', onClick: actions.newLead, hidden: !can('leads:write') },
         { label: 'Add client', onClick: actions.addClient, hidden: !can('clients:write') },
         { label: 'Follow-up', onClick: () => actions.newFollowUp(), hidden: !can('tasks:write') },
         { label: 'Send message', onClick: () => nav('/messages?compose=1'), hidden: !can('messages:send') },

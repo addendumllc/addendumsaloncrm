@@ -59,9 +59,9 @@ export async function dashboard(staffId: string | null, now = new Date()) {
   const push = (a: Omit<RecommendedAction, 'count'> & { count: number }) => a.count > 0 && actions.push(a);
   const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
   push({ key: 'unread', count: unread.convos, priority: 'high', icon: 'message', title: `Reply to ${plural(unread.convos, 'unread conversation')}`,
-    description: 'Clients and leads are waiting on a text back.', actionLabel: 'Open messages', link: '/messages?filter=unread' });
-  push({ key: 'new_lead', count: count(['new_lead']), priority: 'high', icon: 'sparkles', title: `Follow up with ${plural(count(['new_lead']), 'new lead')}`,
-    description: "New inquiries that haven't been contacted yet.", actionLabel: 'Contact leads', link: '/follow-ups?type=new_lead' });
+    description: 'Clients are waiting on a text back.', actionLabel: 'Open messages', link: '/messages?filter=unread' });
+  push({ key: 'new_lead', count: count(['new_lead']), priority: 'high', icon: 'sparkles', title: `Follow up with ${plural(count(['new_lead']), 'new client')}`,
+    description: "New inquiries that haven't been contacted yet.", actionLabel: 'Contact new clients', link: '/follow-ups?type=new_lead' });
   push({ key: 'no_show', count: count(['no_show']), priority: 'high', icon: 'alert', title: `Follow up with ${plural(count(['no_show']), 'no-show')}`,
     description: 'Check in kindly and offer a new time.', actionLabel: 'Review', link: '/follow-ups?type=no_show' });
   push({ key: 'lead_no_response', count: count(['follow_up']), priority: 'medium', icon: 'clock', title: `Nudge ${plural(count(['follow_up']), 'lead')} waiting for a response`,

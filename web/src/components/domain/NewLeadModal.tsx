@@ -18,7 +18,7 @@ export function NewLeadModal({ onClose }: { onClose: () => void }) {
     setSaving(true);
     try {
       const r = await api.post<{ id: string }>('/leads', { ...f, assignedStaffId: f.assignedStaffId || null });
-      toast('Lead added · follow-up created');
+      toast('Client added · follow-up created');
       refresh();
       onClose();
       nav(`/leads?open=${r.id}`);
@@ -30,7 +30,7 @@ export function NewLeadModal({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Modal open onClose={onClose} title="New lead" footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={save} loading={saving} disabled={!f.name.trim()}>Add lead</Button></>}>
+    <Modal open onClose={onClose} title="New client" footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={save} loading={saving} disabled={!f.name.trim()}>Add client</Button></>}>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Name" className="sm:col-span-2"><input className="field" value={f.name} onChange={set('name')} autoComplete="off" /></Field>
         <Field label="Mobile"><input className="field" value={f.phone} onChange={set('phone')} inputMode="tel" /></Field>

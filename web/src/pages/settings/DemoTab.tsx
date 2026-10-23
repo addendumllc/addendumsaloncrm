@@ -105,7 +105,7 @@ export function DemoTools() {
       </Card>
 
       <Modal open={confirmReset} onClose={() => setConfirmReset(false)} title="Reset demo data?" footer={<><Button variant="ghost" onClick={() => setConfirmReset(false)}>Cancel</Button><Button variant="danger" loading={busy === 'reset'} onClick={() => run('reset', () => api.post('/demo/reset').then(() => qc.invalidateQueries()), 'Demo data reset').then(() => setConfirmReset(false))}>Reset</Button></>}>
-        <p className="text-sm text-ink-soft">All demo clients, leads, texts and follow-ups will be replaced. You'll be asked to sign in again.</p>
+        <p className="text-sm text-ink-soft">All demo clients, texts and follow-ups will be replaced. You'll be asked to sign in again.</p>
       </Modal>
     </div>
   );

@@ -132,8 +132,8 @@ function ConversationRow({ c, active, onClick }: { c: ConversationDTO; active: b
           </span>
           <span className="mt-1 flex flex-wrap gap-1">
             {c.clientId && <Badge>Client</Badge>}
-            {!c.clientId && c.leadId && <Badge tone="plum">Lead</Badge>}
-            {!c.clientId && !c.leadId && c.insight?.isPotentialLead && <Badge tone="amber">Potential lead</Badge>}
+            {!c.clientId && c.leadId && <Badge tone="plum">New client</Badge>}
+            {!c.clientId && !c.leadId && c.insight?.isPotentialLead && <Badge tone="amber">Potential client</Badge>}
             {c.optedOut && <Badge tone="rose">Opted out</Badge>}
           </span>
         </span>
@@ -234,7 +234,7 @@ function Thread({ id }: { id: string }) {
               {c.clientId ? <Link to={`/clients/${c.clientId}`} className="hover:underline">{c.displayName}</Link>
                 : c.leadId ? <Link to={`/leads?open=${c.leadId}`} className="hover:underline">{c.displayName}</Link> : c.displayName}
             </p>
-            <p className="text-[13px] text-stone">{fmtPhone(c.phone)}{contactKind ? ` · ${contactKind === 'client' ? 'Client' : 'Lead'}` : ' · Unknown number'}</p>
+            <p className="text-[13px] text-stone">{fmtPhone(c.phone)}{contactKind ? ` · ${contactKind === 'client' ? 'Client' : 'New client'}` : ' · Unknown number'}</p>
           </div>
           <a href={`tel:${c.phone}`} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line-strong bg-white px-2.5 text-[13px] font-medium hover:bg-mist"><Phone className="h-4 w-4" /><span className="hidden sm:inline">Call</span></a>
           <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => newFollowUp({
@@ -245,11 +245,11 @@ function Thread({ id }: { id: string }) {
 
         {insight && (insight.isPotentialLead || insight.service || insight.timeframe) && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line bg-plum-tint/50 px-4 py-2.5 text-[13px]">
-            <span className="inline-flex items-center gap-1.5 font-medium text-plum"><Sparkles className="h-4 w-4" />{insight.isPotentialLead ? 'Potential lead' : 'Request'}</span>
+            <span className="inline-flex items-center gap-1.5 font-medium text-plum"><Sparkles className="h-4 w-4" />{insight.isPotentialLead ? 'Potential client' : 'Request'}</span>
             {insight.service && <span className="text-ink-soft"><span className="text-stone">Service:</span> {insight.service}</span>}
             {insight.timeframe && <span className="text-ink-soft"><span className="text-stone">Timeframe:</span> {insight.timeframe}</span>}
             <span className="ml-auto flex gap-2">
-              {!contactKind && <Button size="sm" variant="secondary" icon={<UserPlus className="h-4 w-4" />} onClick={() => setLeadOpen(true)}>Save as lead</Button>}
+              {!contactKind && <Button size="sm" variant="secondary" icon={<UserPlus className="h-4 w-4" />} onClick={() => setLeadOpen(true)}>Save as client</Button>}
               {aiEnabled && <Button size="sm" variant="primary" icon={<Sparkles className="h-4 w-4" />} onClick={draft} loading={drafting}>Generate reply</Button>}
             </span>
           </div>
@@ -331,13 +331,13 @@ function Thread({ id }: { id: string }) {
         {contactKind ? (
           <div className="mt-2">
             <p className="font-display text-xl">{c.displayName}</p>
-            <Badge tone={contactKind === 'lead' ? 'plum' : 'neutral'} className="mt-1">{contactKind === 'client' ? 'Client' : 'Lead'}</Badge>
-            <Button size="sm" className="mt-3 w-full" onClick={() => nav(contactKind === 'client' ? `/clients/${c.clientId}` : `/leads?open=${c.leadId}`)}>Open {contactKind === 'client' ? 'client profile' : 'lead'}</Button>
+            <Badge tone={contactKind === 'lead' ? 'plum' : 'neutral'} className="mt-1">{contactKind === 'client' ? 'Client' : 'New client'}</Badge>
+            <Button size="sm" className="mt-3 w-full" onClick={() => nav(contactKind === 'client' ? `/clients/${c.clientId}` : `/leads?open=${c.leadId}`)}>Open {contactKind === 'client' ? 'client profile' : 'client'}</Button>
           </div>
         ) : (
           <div className="mt-2 text-sm text-stone">
-            Not matched to a client or lead yet.
-            <Button size="sm" className="mt-3 w-full" icon={<UserPlus className="h-4 w-4" />} onClick={() => setLeadOpen(true)}>Save as lead</Button>
+            Not matched to a client yet.
+            <Button size="sm" className="mt-3 w-full" icon={<UserPlus className="h-4 w-4" />} onClick={() => setLeadOpen(true)}>Save as client</Button>
           </div>
         )}
         <p className="mt-6 text-[11px] font-semibold uppercase tracking-wider text-stone">Next appointment</p>
@@ -363,7 +363,7 @@ function Thread({ id }: { id: string }) {
 }
 
 function SaveLeadModal({ convo, onClose }: { convo: ConversationDTO; onClose: () => void }) {
-  const [name, setName] = useState(convo.displayName.startsWith('Text lead') || convo.displayName.startsWith('+') ? '' : convo.displayName);
+  const [name, setName] = useState(/^Text (lead|client)\b/.test(convo.displayName) || convo.displayName.startsWith('+') ? '' : convo.displayName);
   const [saving, setSaving] = useState(false);
   const toast = useToast();
   const refresh = useRefreshAll();
@@ -371,7 +371,7 @@ function SaveLeadModal({ convo, onClose }: { convo: ConversationDTO; onClose: ()
     setSaving(true);
     try {
       await api.post(`/messages/conversations/${convo.id}/create-lead`, { name });
-      toast('Saved as a lead · follow-up created');
+      toast('Saved as a client · follow-up created');
       refresh();
       onClose();
     } catch (e) {
@@ -381,7 +381,7 @@ function SaveLeadModal({ convo, onClose }: { convo: ConversationDTO; onClose: ()
     }
   };
   return (
-    <Modal open onClose={onClose} title="Save as lead" footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={save} loading={saving} disabled={!name.trim()}>Save lead</Button></>}>
+    <Modal open onClose={onClose} title="Save as client" footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={save} loading={saving} disabled={!name.trim()}>Save client</Button></>}>
       <Field label="Their name" hint={`${fmtPhone(convo.phone)}${convo.insight?.service ? ` · interested in ${convo.insight.service}` : ''}`}>
         <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Jordan Lee" />
       </Field>
@@ -400,7 +400,7 @@ function NewMessageModal({ onClose }: { onClose: () => void }) {
   };
   return (
     <Modal open onClose={onClose} title="New message" footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={go} disabled={!picked && rawPhone.replace(/\D/g, '').length < 10}>Continue</Button></>}>
-      <Field label="To a client or lead"><ContactPicker value={picked} onChange={setPicked} /></Field>
+      <Field label="To a client"><ContactPicker value={picked} onChange={setPicked} /></Field>
       {!picked && (
         <Field label="Or a phone number" className="mt-4" hint="Only text people who have given you permission to text them.">
           <input className="field" inputMode="tel" value={rawPhone} onChange={(e) => setRawPhone(e.target.value)} placeholder="(619) 555-0123" />

@@ -122,7 +122,7 @@ export async function handleInboundSms(input: { from: string; body: string; prov
     const lead = await db().one<{ id: string }>(
       `INSERT INTO leads(name, phone, source, service_interest, status, last_inbound_at, notes)
        VALUES ($1,$2,'Text message',$3,'new', now(), $4) RETURNING id`,
-      [`Text lead ${phone.slice(-4)}`, phone, insight.service, insight.timeframe ? `Timeframe: ${insight.timeframe}` : null],
+      [`Text client ${phone.slice(-4)}`, phone, insight.service, insight.timeframe ? `Timeframe: ${insight.timeframe}` : null],
     );
     await db().query('UPDATE conversations SET lead_id = $2 WHERE id = $1', [convo.id, lead!.id]);
     convo = { ...convo, lead_id: lead!.id };
@@ -351,7 +351,7 @@ async function messageContext(input: DraftInput) {
     }
   } else if (leadId) {
     const l = await db().one<any>('SELECT name, service_interest FROM leads WHERE id = $1', [leadId]);
-    firstName = l?.name?.startsWith('Text lead') ? '' : (l?.name?.split(' ')[0] ?? '');
+    firstName = /^Text (lead|client)\b/.test(l?.name ?? '') ? '' : (l?.name?.split(' ')[0] ?? '');
     service ??= l?.service_interest ?? null;
     if (!input.kind && kind === 'general_reply') kind = 'lead_reply';
   }

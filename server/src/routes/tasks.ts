@@ -75,7 +75,7 @@ const taskInput = z.object({
 
 tasksRouter.post('/', requirePermission('tasks:write'), ah(async (req, res) => {
   const b = parse(taskInput, req.body);
-  if (b.kind === 'follow_up' && !b.clientId && !b.leadId) throw badRequest('Choose the client or lead this follow-up is for.');
+  if (b.kind === 'follow_up' && !b.clientId && !b.leadId) throw badRequest('Choose the client this follow-up is for.');
   // Internal tasks may have no due date (just a priority); client follow-ups need one.
   if (!b.dueAt && b.kind !== 'task') throw badRequest('Choose when this follow-up is due.');
   if (req.away && (b.kind !== 'task' || b.clientId || b.leadId)) throw forbidden('Away from the salon you can add internal tasks only. Client follow-ups are added at the salon.');

@@ -331,7 +331,7 @@ async function seedLeadsAndMessages(now: Date, staff: Record<string, string>) {
 
   let c = await convo('+16195552001', { leadId: leadIds['Jane Smith'] });
   await msg(c, 'inbound', "Hi! Do you do sewn-in weft extensions? I have pretty fine hair and want more volume. I'm free most weekends.", 26);
-  await finish(c, 1, { intent: 'booking_request', isPotentialLead: true, service: 'Extensions', timeframe: 'This week', summary: 'Potential lead · Service: Extensions' });
+  await finish(c, 1, { intent: 'booking_request', isPotentialLead: true, service: 'Extensions', timeframe: 'This week', summary: 'Potential client · Service: Extensions' });
 
   c = await convo('+16195552003', { leadId: leadIds['Megan Torres'] });
   await msg(c, 'outbound', "Hi Megan! Thank you for reaching out about our Hair Botox Treatment — it's perfect for frizz and shine. Would you like to come in this week or next? — Addendum Salon", 30, 'desk');
@@ -345,7 +345,7 @@ async function seedLeadsAndMessages(now: Date, staff: Record<string, string>) {
   c = await convo('+16195552005', { leadId: leadIds['Priya Shah'] });
   await msg(c, 'outbound', 'Hi Priya! Kristoff would love to help with your color transformation. Can you send a current photo and your inspiration?', 30, 'desk');
   await msg(c, 'inbound', 'Yes!! Sending now. Do you have anything Saturday?', 24);
-  await finish(c, 0, { intent: 'booking_request', isPotentialLead: true, service: 'Hair Color', timeframe: 'Saturday', summary: 'Potential lead · Service: Hair Color · Timeframe: Saturday' });
+  await finish(c, 0, { intent: 'booking_request', isPotentialLead: true, service: 'Hair Color', timeframe: 'Saturday', summary: 'Potential client · Service: Hair Color · Timeframe: Saturday' });
 
   const sarah = await clientByName('Sarah');
   c = await convo(sarah.phone, { clientId: sarah.id });

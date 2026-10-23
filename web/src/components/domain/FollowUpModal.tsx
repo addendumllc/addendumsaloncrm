@@ -70,7 +70,7 @@ export function FollowUpModal({ prefill, onClose }: { prefill: FollowUpPrefill; 
       title={kind === 'task' ? 'New task' : 'New follow-up'}
       footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={save} loading={saving} disabled={kind === 'follow_up' ? !contact || !due : !title.trim()}>{kind === 'task' ? 'Create task' : 'Create follow-up'}</Button></>}
     >
-      <Segmented className="mb-4" value={kind} onChange={(k) => { setKind(k); if (k === 'follow_up' && !due) setDue(toInputValue(new Date(Date.now() + 2 * 3600_000))); }} options={[{ value: 'follow_up', label: 'Client or lead follow-up' }, { value: 'task', label: 'Internal task' }]} />
+      <Segmented className="mb-4" value={kind} onChange={(k) => { setKind(k); if (k === 'follow_up' && !due) setDue(toInputValue(new Date(Date.now() + 2 * 3600_000))); }} options={[{ value: 'follow_up', label: 'Client follow-up' }, { value: 'task', label: 'Internal task' }]} />
       {kind === 'task' && (
         <div className="mb-4">
           <span className="label">For</span>

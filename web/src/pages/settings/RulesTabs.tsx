@@ -49,8 +49,8 @@ export function RulesSettings({ onSaved }: { onSaved?: () => void }) {
       description="When the app should create a follow-up for you. Follow-ups are internal reminders — they are never shown as booked appointments."
       footer={<SaveBar dirty={r.dirty} saving={r.saving} onSave={async () => { if (await r.save()) onSaved?.(); }} onReset={r.reset} disabled={locked} />}
     >
-      <RuleGroup title="New leads">
-        <NumberField label="Contact a new lead within" unit="hours" value={d.newLeadHours} min={0} max={168} onChange={(v) => r.set('newLeadHours', v)} disabled={locked} hint="0 = right away" />
+      <RuleGroup title="New clients">
+        <NumberField label="Contact a new client within" unit="hours" value={d.newLeadHours} min={0} max={168} onChange={(v) => r.set('newLeadHours', v)} disabled={locked} hint="0 = right away" />
         <NumberField label="If they don't reply, follow up after" unit="hours" value={d.leadNoResponseHours} min={1} max={720} onChange={(v) => r.set('leadNoResponseHours', v)} disabled={locked} />
         <NumberField label="Second follow-up after" unit="hours" value={d.leadSecondNoResponseHours} min={1} max={1440} onChange={(v) => r.set('leadSecondNoResponseHours', v)} disabled={locked} />
       </RuleGroup>
@@ -136,7 +136,7 @@ export function NotificationSettings() {
   if (!n.draft) return null;
   const browserPerm = typeof Notification !== 'undefined' ? Notification.permission : 'unsupported';
   return (
-    <Card title="Notifications" description="How the team hears about new texts, new leads and Square changes." footer={<SaveBar dirty={n.dirty} saving={n.saving} onSave={() => n.save()} onReset={n.reset} />}>
+    <Card title="Notifications" description="How the team hears about new texts, new clients and Square changes." footer={<SaveBar dirty={n.dirty} saving={n.saving} onSave={() => n.save()} onReset={n.reset} />}>
       <Toggle
         label="Browser notifications"
         description={browserPerm === 'denied' ? 'Blocked in this browser — allow notifications in browser settings.' : browserPerm === 'unsupported' ? 'Not supported in this browser.' : 'Pop-up alerts while the app is open.'}
