@@ -16,7 +16,8 @@ const label = (s: LeadStatus) => LEAD_STATUSES.find((x) => x.value === s)!.label
 /** New-client inquiries (leads). Shown inside Clients → New client inquiries (`embedded`). */
 export function LeadsPage({ embedded = false }: { embedded?: boolean }) {
   const [params, setParams] = useSearchParams();
-  const view = params.get('view') ?? 'pipeline';
+  // `layout`, not `view`: the page this sits in (Tasks) already uses ?view=.
+  const view = params.get('layout') === 'list' || params.get('view') === 'list' ? 'list' : 'pipeline';
   const openId = params.get('open');
   const f = { status: params.get('status') ?? '', source: params.get('source') ?? '', staffId: params.get('staff') ?? '', q: params.get('q') ?? '' };
   const { data: leads, isLoading, error, refetch } = useLeads({ source: f.source || undefined, staffId: f.staffId || undefined, q: f.q || undefined, status: view === 'list' ? f.status || undefined : undefined });
@@ -44,14 +45,15 @@ export function LeadsPage({ embedded = false }: { embedded?: boolean }) {
   return (
     <div>
       {embedded
-        ? leads && <p className="-mt-2 mb-3 text-[14px] text-stone">{leads.filter((l) => !['won', 'lost'].includes(l.status)).length} open inquiries</p>
+        ? null
         : <PageHeader title="New client inquiries" subtitle={leads ? `${leads.filter((l) => !['won', 'lost'].includes(l.status)).length} open` : undefined} actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={newLead}>New client</Button>} />}
       <div className="mb-5 flex flex-wrap items-center gap-2">
-        <Segmented value={view} onChange={(v) => set('view', v === 'pipeline' ? '' : v)} options={[{ value: 'pipeline', label: 'Pipeline' }, { value: 'list', label: 'List' }]} />
+        <Segmented value={view} onChange={(v) => set('layout', v === 'pipeline' ? '' : v)} options={[{ value: 'pipeline', label: 'Pipeline' }, { value: 'list', label: 'List' }]} />
         <input className="field h-9 w-full py-1 text-sm sm:w-56" placeholder="Search clients" value={f.q} onChange={(e) => set('q', e.target.value)} />
         <select className="field h-9 w-auto py-1 text-sm" value={f.source} onChange={(e) => set('source', e.target.value)} aria-label="Source"><option value="">All sources</option>{LEAD_SOURCES.map((s) => <option key={s}>{s}</option>)}</select>
         <select className="field h-9 w-auto py-1 text-sm" value={f.staffId} onChange={(e) => set('staff', e.target.value)} aria-label="Assigned to"><option value="">Anyone</option>{staff?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
         {view === 'list' && <select className="field h-9 w-auto py-1 text-sm" value={f.status} onChange={(e) => set('status', e.target.value)} aria-label="Status"><option value="">All statuses</option>{LEAD_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}</select>}
+        {embedded && leads && <span className="ml-auto text-[13px] text-stone">{leads.filter((l) => !['won', 'lost'].includes(l.status)).length} open</span>}
       </div>
 
       {isLoading && <PageLoading />}

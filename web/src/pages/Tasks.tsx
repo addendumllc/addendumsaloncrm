@@ -6,7 +6,7 @@ import { TASK_BUSINESS_LABELS, TASK_TYPE_LABELS, type HairTaskDTO, type Inventor
 import { useIntegrations, useInventory, useMe, useRefreshAll, useStaff, useTasks } from '../api/hooks';
 import { dayKey } from '../lib/format';
 import { api } from '../api/client';
-import { Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, Segmented, Toggle, cx, useToast } from '../components/ui';
+import { Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, PageTabs, Segmented, Toggle, cx, useToast } from '../components/ui';
 import { TaskCard } from '../components/domain/TaskCard';
 import { useActions } from '../components/domain/ActionsProvider';
 import { useAccessStatus } from '../components/layout/NetworkBlocked';
@@ -53,10 +53,13 @@ export function TasksPage() {
   // The page's own choice (?for=), else the business workspace they're in.
   const forB: TaskBusiness = hairAllowed && (pageBusiness(params, 'for', ws.current?.id ?? 'salon') === 'hair' || (!seesTasks && seesHair)) ? 'hair' : 'salon';
   const setParam = (k: string, v: string | null) => { const n = new URLSearchParams(params); if (v) n.set(k, v); else n.delete(k); setParams(n, { replace: true }); };
-  const picker = view !== 'list' && hairAllowed && (seesTasks || view !== 'todo') && (
-    <Segmented className="mb-4" value={forB} onChange={(b) => setParam('for', b)}
+  const showPicker = view !== 'list' && hairAllowed && (seesTasks || view !== 'todo');
+  const switcher = showPicker && (
+    <Segmented size="sm" value={forB} onChange={(b) => setParam('for', b)}
       options={[{ value: 'salon', label: TASK_BUSINESS_LABELS.salon }, { value: 'hair', label: TASK_BUSINESS_LABELS.hair }]} />
   );
+  // Follow-ups puts the switch in its tab bar; the other pages show it on its own, top right.
+  const picker = view !== 'followups' && switcher && <div className="mb-4 flex justify-end">{switcher}</div>;
   const label = TASK_BUSINESS_LABELS[forB];
   let body: ReactNode;
   if (view === 'list') {
@@ -80,19 +83,17 @@ export function TasksPage() {
       <Segmented value={done ? 'done' : 'open'} onChange={(v) => setParam('show', v === 'done' ? 'done' : null)}
         options={[{ value: 'open', label: 'Open' }, { value: 'done', label: 'Done (last 6 months)' }]} />
     );
+    const tabs = [{ value: 'followups' as const, label: 'Follow-ups' }, ...(forB === 'salon' && can('leads:read') ? [{ value: 'new' as const, label: 'New client inquiries' }] : [])];
+    const bar = <PageTabs value={forB === 'hair' ? 'followups' : tab} onChange={(t) => setParam('tab', t === 'new' ? 'new' : null)} options={tabs} aside={switcher} />;
     body = forB === 'hair'
       ? <>
+        {bar}
         <div className="mb-4">{openDone}</div>
         <HairTasks status={done ? 'done' : 'waiting'} since={done ? since : undefined} title={done ? 'Done follow-ups · Addendum Hair' : 'Follow-ups · Addendum Hair'} />
       </>
       : <>
-        <div className="mb-4 flex flex-wrap gap-2">
-          {can('leads:read') && (
-            <Segmented value={tab} onChange={(t) => setParam('tab', t === 'new' ? 'new' : null)}
-              options={[{ value: 'followups', label: 'Follow-ups' }, { value: 'new', label: 'New client inquiries' }]} />
-          )}
-          {tab === 'followups' && openDone}
-        </div>
+        {bar}
+        {tab === 'followups' && <div className="mb-4">{openDone}</div>}
         {tab === 'new' ? <LeadsPage embedded /> : seesTasks && (done
           ? <TaskList preset={{ kind: 'follow_up', status: 'completed', since, title: 'Done follow-ups · Addendum Salon', subtitle: 'Follow-ups completed in the last 6 months.' }} />
           : <TaskList preset={{ kind: 'follow_up', title: 'Follow-ups · Addendum Salon', subtitle: 'Client and new-client follow-ups.' }} />)}

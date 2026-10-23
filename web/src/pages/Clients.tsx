@@ -35,8 +35,8 @@ export function ClientsPage() {
   const ws = useWorkspace();
   const business = seesHair && (!(seesClients || seesNew) || pageBusiness(params, 'business', ws.current?.id ?? 'salon') === 'hair') ? 'hair' : 'salon';
   const picker = seesHair && (seesClients || seesNew) && (
-    <Segmented className="mb-4" value={business} onChange={(b) => setParams({ business: b })}
-      options={[{ value: 'salon', label: ws.names.salon.name }, { value: 'hair', label: ws.names.hair.name }]} />
+    <div className="mb-4 flex justify-end"><Segmented size="sm" value={business} onChange={(b) => setParams({ business: b })}
+      options={[{ value: 'salon', label: ws.names.salon.name }, { value: 'hair', label: ws.names.hair.name }]} /></div>
   );
   if (business === 'hair') return <div>{picker}<HairClientsView /></div>;
   return (

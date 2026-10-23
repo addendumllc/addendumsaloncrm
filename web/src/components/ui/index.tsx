@@ -132,7 +132,7 @@ export function Toggle({ checked, onChange, label, description, disabled }: { ch
   );
 }
 
-export function Segmented<T extends string>({ value, onChange, options, className }: { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode }[]; className?: string }) {
+export function Segmented<T extends string>({ value, onChange, options, className, size }: { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode }[]; className?: string; size?: 'sm' }) {
   return (
     // Never wider than the screen: on a phone, a long row of choices scrolls sideways instead of running off the edge.
     <div className={cx('inline-flex max-w-full overflow-x-auto scrollbar-none rounded-lg bg-mist p-0.5 font-button', className)} role="tablist">
@@ -142,11 +142,31 @@ export function Segmented<T extends string>({ value, onChange, options, classNam
           role="tab"
           aria-selected={value === o.value}
           onClick={() => onChange(o.value)}
-          className={cx('whitespace-nowrap rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors', value === o.value ? 'bg-white text-plum shadow-sm' : 'text-stone hover:text-plum')}
+          className={cx('whitespace-nowrap rounded-md font-medium transition-colors', size === 'sm' ? 'px-2.5 py-1 text-[12.5px]' : 'px-3 py-1.5 text-[13px]', value === o.value ? 'bg-white text-plum shadow-sm' : 'text-stone hover:text-plum')}
         >
           {tc(o.label)}
         </button>
       ))}
+    </div>
+  );
+}
+
+/**
+ * A page's sections as underlined tabs on one line, with `aside` (e.g. the Addendum Salon / Addendum Hair switch) at
+ * its right — one bar across the top instead of stacked toggles.
+ */
+export function PageTabs<T extends string>({ value, onChange, options, aside, className }: { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode }[]; aside?: ReactNode; className?: string }) {
+  return (
+    <div className={cx('mb-5 flex flex-wrap-reverse items-end justify-between gap-x-4 gap-y-2 border-b border-line', className)}>
+      <div className="-mb-px flex max-w-full gap-5 overflow-x-auto scrollbar-none font-button" role="tablist">
+        {options.map((o) => (
+          <button key={o.value} type="button" role="tab" aria-selected={value === o.value} onClick={() => onChange(o.value)}
+            className={cx('whitespace-nowrap border-b-2 pb-2.5 pt-1 text-[14px] font-medium transition-colors', value === o.value ? 'border-plum text-ink' : 'border-transparent text-stone hover:text-ink')}>
+            {tc(o.label)}
+          </button>
+        ))}
+      </div>
+      {aside && <div className="ml-auto pb-2">{aside}</div>}
     </div>
   );
 }

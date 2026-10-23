@@ -13,7 +13,7 @@ import { PreorderBanner } from '../components/domain/Preorders';
 import { PricingView } from '../components/domain/Pricing';
 import { AddToSquareButton } from '../components/domain/AddToSquare';
 import { pageBusiness, useWorkspace } from '../lib/workspace';
-import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, Segmented, Spinner, Toggle, cx, useToast } from '../components/ui';
+import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, PageTabs, Segmented, Spinner, Toggle, cx, useToast } from '../components/ui';
 import { NumberField } from './settings/shared';
 import { Tc } from '../lib/titleCase';
 import { useStoreNames, type StoreNames } from '../lib/storeNames';
@@ -91,15 +91,12 @@ export function InventorySyncPage() {
 
   return (
     <div>
-      {(view === 'inventory' || view === 'products') && (
-        <Segmented className="mb-4" value={productsStore} onChange={setProductsStore}
-          options={[{ value: 'all', label: 'All stores' }, { value: 'salon', label: 'Addendum Salon' }, { value: 'hair', label: 'Addendum Hair' }]} />
-      )}
-      {PER_STORE.has(view) && (
-        <Segmented className="mb-4" value={forHair ? 'hair' : 'salon'} onChange={(v) => setStore(v === 'hair')}
-          options={[{ value: 'salon', label: 'Addendum Salon' }, { value: 'hair', label: 'Addendum Hair' }]} />
-      )}
-      {togglePages && <Segmented className="mb-4" value={view === 'products' ? 'inventory' : view} onChange={setView} options={togglePages} />}
+      {/* One bar: the section's pages as tabs, and the store switch (where the page is per store) at the right. */}
+      {togglePages && <PageTabs value={view === 'products' ? 'inventory' : view} onChange={setView} options={togglePages} aside={
+        view === 'inventory' || view === 'products'
+          ? <Segmented size="sm" value={productsStore} onChange={setProductsStore} options={[{ value: 'all', label: 'All stores' }, { value: 'salon', label: 'Addendum Salon' }, { value: 'hair', label: 'Addendum Hair' }]} />
+          : PER_STORE.has(view) && <Segmented size="sm" value={forHair ? 'hair' : 'salon'} onChange={(v) => setStore(v === 'hair')} options={[{ value: 'salon', label: 'Addendum Salon' }, { value: 'hair', label: 'Addendum Hair' }]} />
+      } />}
       <PageHeader
         title={SECTION_TITLE[view](storeLabel)}
         subtitle={<>{PER_STORE.has(view) || view === 'inventory' ? <span className="mr-1 font-medium text-ink">Source: {forHair ? `Shopify (${N.shopify}${N.shopify2 ? ` + ${N.shopify2}` : ''})` : `Square (${N.square})`} ·</span> : null}{N.square} ↔ {N.shopify}{N.shopify2 ? ` ↔ ${N.shopify2}` : ''}{data.lastSuccessfulSyncAt ? ` · last successful sync ${relative(data.lastSuccessfulSyncAt)}` : ' · never synced'}</>}

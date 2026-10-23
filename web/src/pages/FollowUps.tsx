@@ -58,8 +58,8 @@ export function FollowUpsPage() {
   const seesHair = !!me?.permissions.includes('hair:manage');
   const business = seesHair ? pageBusiness(params, 'for', ws.current?.id ?? 'salon') : 'salon';
   const picker = seesHair && (
-    <Segmented className="mb-4" value={business} onChange={(b) => { const p = new URLSearchParams(params); p.set('for', b); setParams(p, { replace: true }); }}
-      options={[{ value: 'salon', label: ws.names.salon.name }, { value: 'hair', label: ws.names.hair.name }]} />
+    <div className="mb-4 flex justify-end"><Segmented size="sm" value={business} onChange={(b) => { const p = new URLSearchParams(params); p.set('for', b); setParams(p, { replace: true }); }}
+      options={[{ value: 'salon', label: ws.names.salon.name }, { value: 'hair', label: ws.names.hair.name }]} /></div>
   );
   if (business === 'hair') {
     const since = (() => { const d = new Date(); d.setMonth(d.getMonth() - 6); return dayKey(d); })();
