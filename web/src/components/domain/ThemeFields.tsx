@@ -143,6 +143,23 @@ export function SidebarOpacityField({ value, onChange, disabled, fromTheme }: { 
 const scaleOptions = FONT_SCALES.map((s) => ({ value: s.value, label: s.label }));
 
 /** Fonts and sizes: interface font, heading font, base text, headings, small text and labels, weight. */
+/**
+ * Opacity for any colour: how much of it shows (100 = as chosen; lower blends it into what it sits on — the page for
+ * cards, borders, accents and text; white for the page itself). Text always stays readable.
+ */
+export function OpacityField({ label, value, onChange, disabled, fromTheme }: { label: string; value: number; onChange: (v: number | undefined) => void; disabled?: boolean; fromTheme?: number }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 pt-1">
+      <span className="text-[12px] text-ink-soft">Opacity</span>
+      <input type="range" min={10} max={100} step={5} value={value} disabled={disabled} onChange={(e) => onChange(Number(e.target.value))} className="w-40 accent-plum" aria-label={`${label} opacity`} />
+      <span className="num w-10 text-[13px] text-ink">{value}%</span>
+      {[40, 70, 100].map((v) => <button key={v} type="button" disabled={disabled} onClick={() => onChange(v)} aria-pressed={value === v}
+        className={cx('border px-2 py-0.5 text-[12px]', value === v ? 'border-plum bg-plum text-white' : 'border-line-strong bg-white text-ink hover:border-ink/40')}>{v}%</button>)}
+      {fromTheme != null && value !== fromTheme && !disabled && <button type="button" className="text-[12px] text-plum hover:underline" onClick={() => onChange(undefined)}>Use the theme’s</button>}
+    </div>
+  );
+}
+
 export function TypeFields({ value, onChange, disabled, customFonts }: { value: ThemeType; onChange: (patch: Partial<ThemeType>) => void; disabled?: boolean; customFonts?: { heading?: string | null; body?: string | null } }) {
   return (
     <div className="space-y-4">
@@ -181,7 +198,16 @@ export function ButtonFields({ value, onChange, disabled }: { value: ThemeButton
     <div className={cx('space-y-4', disabled && 'pointer-events-none opacity-60')}>
       <div>
         <span className="label">Button size</span>
-        <Segmented value={value.size} onChange={(size) => onChange({ size })} options={[{ value: 'small', label: 'Small' }, { value: 'default', label: 'Default' }, { value: 'large', label: 'Large' }]} />
+        <Segmented value={value.size} onChange={(size) => onChange({ size })} options={[{ value: 'xsmall', label: 'Extra small' }, { value: 'small', label: 'Small' }, { value: 'default', label: 'Default' }, { value: 'large', label: 'Large' }]} />
+      </div>
+      <div>
+        <span className="label">Button height</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <input type="range" min={24} max={56} step={2} value={value.height ?? 40} onChange={(e) => onChange({ height: Number(e.target.value) })} className="w-44 accent-plum" aria-label="Button height" />
+          <span className="num w-14 text-[13px] text-ink">{value.height ? `${value.height}px` : 'Auto'}</span>
+          {value.height ? <button type="button" className="text-[12px] text-plum hover:underline" onClick={() => onChange({ height: null })}>Auto (from the size)</button>
+            : <span className="text-[12px] text-stone">Auto: set by the size. Drag to fix one height for every button.</span>}
+        </div>
       </div>
       <div>
         <span className="label">Button corners</span>

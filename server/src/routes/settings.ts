@@ -50,14 +50,14 @@ const menuSection = z.string().regex(/^[a-z0-9-]{1,30}$/);
 const menuExtras = { sectionList: z.array(z.object({ key: menuSection, label: z.string().trim().min(1).max(30) })).max(15).optional(), labels: z.record(navPath, z.string().trim().min(1).max(30)).optional() };
 const sidebarDefaults = z.object({ order: z.array(navPath).max(40), hidden: z.array(navPath).max(40), required: z.array(navPath).max(40), sections: z.record(navPath, menuSection).optional(), ...menuExtras });
 const colorChoice = z.object({ theme: z.string().regex(/^[a-z]{1,20}$/).nullable(), accent: hexColor.nullable(), accent2: hexColor.nullable(), highlight: hexColor.nullable() });
-const fontScale = z.enum(['small', 'default', 'large', 'xlarge']);
+const fontScale = z.enum(['xsmall', 'small', 'default', 'large', 'xlarge']);
 const fontId = z.string().regex(/^[a-z0-9-]{1,40}$/);
 const themeColors = z.object({ accent: hexColor, accent2: hexColor, background: hexColor, sidebar: hexColor, surface: hexColor, text: hexColor, line: hexColor });
 const themeType = z.object({ font: fontId, headingFont: fontId, base: fontScale, heading: fontScale, small: fontScale, weight: z.union([z.literal(400), z.literal(500)]) });
-const themeButtons = z.object({ size: z.enum(['small', 'default', 'large']), radius: z.enum(['square', 'soft', 'rounded']) });
+const themeButtons = z.object({ size: z.enum(['xsmall', 'small', 'default', 'large']), radius: z.enum(['square', 'soft', 'rounded']), height: z.number().int().min(24).max(64).nullable().optional() });
 const crmTheme = z.object({
   id: z.string().regex(/^[a-z0-9-]{1,40}$/), name: z.string().trim().min(1, 'give the theme a name').max(40), description: z.string().trim().max(160),
-  colors: themeColors, type: themeType, buttons: themeButtons, sidebarOpacity: z.number().int().min(0).max(100).optional(), status: z.enum(['draft', 'published', 'retired']),
+  colors: themeColors, type: themeType, buttons: themeButtons, sidebarOpacity: z.number().int().min(0).max(100).optional(), opacity: z.object({ accent: z.number().int().min(0).max(100), accent2: z.number().int().min(0).max(100), background: z.number().int().min(0).max(100), surface: z.number().int().min(0).max(100), text: z.number().int().min(0).max(100), line: z.number().int().min(0).max(100) }).partial().optional(), status: z.enum(['draft', 'published', 'retired']),
   roles: z.array(z.enum(['admin', 'receptionist', 'stylist', 'assistant'])).max(4),
 });
 const business = z.object({ name: z.string().trim().min(1, 'enter a name').max(40), tagline: z.string().trim().max(60) });

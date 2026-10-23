@@ -53,3 +53,17 @@ describe('Personal themes', () => {
     expect((await api.put('/api/user-themes/mine', { ...theme(false), colors: { ...theme(false).colors, accent: 'red' } })).status).toBe(400);
   });
 });
+
+describe('Opacity for every colour, extra small sizes and button height', () => {
+  it('are accepted in a person’s own adjustments and their theme, and limited to sensible values', async () => {
+    const custom = { opacity: { accent: 70, background: 60, surface: 90, text: 85, line: 50, accent2: 40 }, type: { base: 'xsmall', small: 'xsmall' }, buttons: { size: 'xsmall', height: 30 } };
+    const r = await api.put('/api/look', { custom });
+    expect(r.status).toBe(200);
+    expect(r.body.look.custom).toMatchObject(custom);
+    expect((await api.put('/api/look', { custom: { buttons: { height: 90 } } })).status).toBe(400);
+    expect((await api.put('/api/look', { custom: { opacity: { text: 150 } } })).status).toBe(400);
+    const t = await api.put('/api/user-themes/mine', { ...theme(false), opacity: { accent: 80 }, buttons: { size: 'xsmall', radius: 'square', height: 28 }, type: { ...theme(false).type, base: 'xsmall' } });
+    expect(t.status).toBe(200);
+    expect(t.body.themes.find((x: any) => x.mine).theme).toMatchObject({ opacity: { accent: 80 }, buttons: { size: 'xsmall', height: 28 } });
+  });
+});

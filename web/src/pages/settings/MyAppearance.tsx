@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { DEFAULT_APPEARANCE, DEFAULT_THEME_SETTINGS, fontFile, resolveTheme, themesFor, withUserThemes, type ColorMode, type CrmTheme, type PersonalLook, type ThemeColors, type ThemeCustom, type UserThemeDTO } from '@addendum/shared';
+import { DEFAULT_APPEARANCE, DEFAULT_THEME_SETTINGS, fontFile, resolveTheme, themesFor, withUserThemes, type ColorMode, type CrmTheme, type PersonalLook, type ThemeColors, type ThemeCustom, type ThemeOpacity, type UserThemeDTO } from '@addendum/shared';
 import { api } from '../../api/client';
 import { useLook, useMe, useSettings, useUserThemes } from '../../api/hooks';
 import { USER_COLORS, applyPersonalLook } from '../../lib/theme';
-import { ButtonFields, COLOR_FIELDS, ColorField, LivePreview, ThemeCard, ThemePreviewLarge, TypeFields, suggestColors, SidebarOpacityField } from '../../components/domain/ThemeFields';
+import { ButtonFields, COLOR_FIELDS, ColorField, LivePreview, ThemeCard, ThemePreviewLarge, TypeFields, suggestColors, SidebarOpacityField, OpacityField } from '../../components/domain/ThemeFields';
 import { Button, Field, Modal, Segmented, Toggle, cx, useToast } from '../../components/ui';
 import { Pencil, Plus } from 'lucide-react';
 
@@ -50,6 +50,8 @@ export function MyAppearance() {
   const theme = resolveTheme(ts, { themeId: d.themeId }, me?.role); // the theme alone (the "theme's" values)
   const custom: ThemeCustom = d.custom ?? {};
   const setCustom = (c: ThemeCustom) => setDraft({ ...d, custom: c });
+  // Opacity of each colour (the sidebar has its own): their own over the theme's.
+  const setOpacity = (k: Exclude<keyof ThemeColors, 'sidebar'>, v: number | undefined) => { const o = { ...(custom.opacity ?? {}) }; if (v == null) delete o[k]; else o[k] = v; setCustom({ ...custom, opacity: o }); };
   const setColor = (k: keyof ThemeColors, v: string | undefined) => { const colors = { ...(custom.colors ?? {}) }; if (v) colors[k] = v; else delete colors[k]; setCustom({ ...custom, colors }); };
   const [more, setMore] = useState(() => !!Object.keys(start.custom?.colors ?? {}).some((k) => k !== 'accent' && k !== 'accent2'));
   // Their calendar colour (Calendar color, below): offered as an accent.
@@ -119,19 +121,23 @@ export function MyAppearance() {
               <ColorField key={f.key} field={f.key} label={f.label} hint={f.hint} value={custom.colors?.[f.key]} fallback={theme.colors[f.key]} swatches={USER_COLORS}
                 suggestions={suggestColors(f.key, r.colors)}
                 action={profile?.color ? { label: 'Use my calendar color', color: profile.color } : undefined}
-                onChange={(v) => setColor(f.key, v)} />
+                onChange={(v) => setColor(f.key, v)}>
+                <OpacityField label={f.label} value={r.opacity?.[f.key as 'accent'] ?? 100} fromTheme={theme.opacity?.[f.key as 'accent'] ?? 100} onChange={(v) => setOpacity(f.key as 'accent', v)} />
+              </ColorField>
             ))}
           </div>
           <button type="button" onClick={() => setMore((v) => !v)} aria-expanded={more} className="mt-3 text-[13px] font-medium text-plum hover:underline">
-            {more ? 'Hide' : 'Show'} background, sidebar (and its opacity), cards, text and borders
+            {more ? 'Hide' : 'Show'} background, sidebar, cards, text and borders (each with its opacity)
           </button>
           {more && (
             <div className="mt-2 border border-line px-4 py-1">
               {COLOR_FIELDS.filter((f) => f.key !== 'accent' && f.key !== 'accent2').map((f) => (
                 <ColorField key={f.key} field={f.key} label={f.label} hint={f.hint} value={custom.colors?.[f.key]} fallback={theme.colors[f.key]} suggestions={suggestColors(f.key, r.colors)} onChange={(v) => setColor(f.key, v)}>
-                  {f.key === 'sidebar' && (
+                  {f.key === 'sidebar' ? (
                     <SidebarOpacityField value={r.sidebarOpacity} fromTheme={theme.sidebarOpacity}
                       onChange={(v) => { const next = { ...custom }; if (v == null) delete next.sidebarOpacity; else next.sidebarOpacity = v; setCustom(next); }} />
+                  ) : (
+                    <OpacityField label={f.label} value={r.opacity?.[f.key] ?? 100} fromTheme={theme.opacity?.[f.key] ?? 100} onChange={(v) => setOpacity(f.key as Exclude<keyof ThemeColors, 'sidebar'>, v)} />
                   )}
                 </ColorField>
               ))}
@@ -168,7 +174,7 @@ export function MyAppearance() {
  * see it unless you publish it — then everyone can choose it in their Appearance.
  */
 function MyThemeEditor({ mine, start, onClose, onSaved }: {
-  mine: UserThemeDTO | null; start: Pick<CrmTheme, 'colors' | 'type' | 'buttons'> & { sidebarOpacity?: number }; onClose: () => void; onSaved: (id: string) => void;
+  mine: UserThemeDTO | null; start: Pick<CrmTheme, 'colors' | 'type' | 'buttons'> & { sidebarOpacity?: number; opacity?: ThemeOpacity }; onClose: () => void; onSaved: (id: string) => void;
 }) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -176,6 +182,7 @@ function MyThemeEditor({ mine, start, onClose, onSaved }: {
     name: mine?.theme.name ?? 'My theme', description: mine?.theme.description ?? '',
     colors: { ...(mine?.theme.colors ?? start.colors) }, type: { ...(mine?.theme.type ?? start.type) }, buttons: { ...(mine?.theme.buttons ?? start.buttons) },
     sidebarOpacity: mine?.theme.sidebarOpacity ?? start.sidebarOpacity ?? 100,
+    opacity: { ...(mine?.theme.opacity ?? start.opacity ?? {}) } as ThemeOpacity,
     published: mine?.published ?? false,
   }));
   const [busy, setBusy] = useState(false);
@@ -224,7 +231,8 @@ function MyThemeEditor({ mine, start, onClose, onSaved }: {
           {COLOR_FIELDS.map((f) => (
             <ColorField key={f.key} field={f.key} label={f.label} hint={f.hint} value={t.colors[f.key]} fallback={start.colors[f.key]} suggestions={suggestColors(f.key, t.colors)}
               onChange={(v) => setT({ ...t, colors: { ...t.colors, [f.key]: v ?? start.colors[f.key] } })}>
-              {f.key === 'sidebar' && <SidebarOpacityField value={t.sidebarOpacity} onChange={(v) => setT({ ...t, sidebarOpacity: v ?? 100 })} />}
+              {f.key === 'sidebar' ? <SidebarOpacityField value={t.sidebarOpacity} onChange={(v) => setT({ ...t, sidebarOpacity: v ?? 100 })} />
+                : <OpacityField label={f.label} value={t.opacity[f.key] ?? 100} onChange={(v) => setT({ ...t, opacity: { ...t.opacity, [f.key]: v ?? 100 } })} />}
             </ColorField>
           ))}
         </div>

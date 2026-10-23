@@ -1450,18 +1450,23 @@ export const ALWAYS_SHOWN: string[] = [];
  * and corners. Administrators create and publish themes; each person picks one (or the default) and, if allowed,
  * adjusts colours, fonts or buttons for themselves only.
  */
-export type FontScale = 'small' | 'default' | 'large' | 'xlarge';
+export type FontScale = 'xsmall' | 'small' | 'default' | 'large' | 'xlarge';
 export const FONT_SCALES: { value: FontScale; label: string; factor: number }[] = [
-  { value: 'small', label: 'Small', factor: 0.92 }, { value: 'default', label: 'Default', factor: 1 }, { value: 'large', label: 'Large', factor: 1.1 }, { value: 'xlarge', label: 'Extra large', factor: 1.2 },
+  { value: 'xsmall', label: 'Extra small', factor: 0.85 }, { value: 'small', label: 'Small', factor: 0.92 }, { value: 'default', label: 'Default', factor: 1 }, { value: 'large', label: 'Large', factor: 1.1 }, { value: 'xlarge', label: 'Extra large', factor: 1.2 },
 ];
 export interface ThemeColors { accent: string; accent2: string; background: string; sidebar: string; surface: string; text: string; line: string }
 export interface ThemeType { font: string; headingFont: string; base: FontScale; heading: FontScale; small: FontScale; weight: 400 | 500 }
-export interface ThemeButtons { size: 'small' | 'default' | 'large'; radius: 'square' | 'soft' | 'rounded' }
+/** Button size and corners; `height` (px) sets one exact height for every button (smaller buttons 8px less). */
+export interface ThemeButtons { size: 'xsmall' | 'small' | 'default' | 'large'; radius: 'square' | 'soft' | 'rounded'; height?: number | null }
+/** How much of each colour shows (100 = as chosen; lower blends it into what it sits on). The sidebar uses sidebarOpacity. */
+export type ThemeOpacity = Partial<Record<Exclude<keyof ThemeColors, 'sidebar'>, number>>;
 export interface CrmTheme {
   id: string; name: string; description: string;
   colors: ThemeColors; type: ThemeType; buttons: ThemeButtons;
   /** How much of the sidebar colour shows over the main background (0 = same as the background, 100 = the full colour). */
   sidebarOpacity?: number;
+  /** Opacity of the other colours (see ThemeOpacity). */
+  opacity?: ThemeOpacity;
   /** Draft (admins only), published (team can choose it) or retired (no longer offered; anyone using it moves to the default). */
   status: 'draft' | 'published' | 'retired';
   /** Who can choose it (roles); empty = everyone. */
@@ -1502,7 +1507,7 @@ export const withUserThemes = (t: Partial<ThemeSettings> | undefined, extra: Crm
   ({ ...(t ?? {}), themes: [...(t?.themes ?? DEFAULT_THEME_SETTINGS.themes), ...extra] });
 
 /** A person's own adjustments over their theme (only the parts their organization allows). */
-export interface ThemeCustom { colors?: Partial<ThemeColors>; type?: Partial<ThemeType>; buttons?: Partial<ThemeButtons>; sidebarOpacity?: number }
+export interface ThemeCustom { colors?: Partial<ThemeColors>; type?: Partial<ThemeType>; buttons?: Partial<ThemeButtons>; sidebarOpacity?: number; opacity?: ThemeOpacity }
 /** Themes a person may choose: published, and open to their role. */
 export const themesFor = (t: ThemeSettings, role: string | null | undefined) =>
   t.themes.filter((x) => x.status === 'published' && (!x.roles.length || (role ? x.roles.includes(role as BuiltinRole) : false)));
@@ -1520,6 +1525,7 @@ export function resolveTheme(settings: Partial<ThemeSettings> | undefined, perso
     type: { ...base.type, ...(t.allow.type ? c.type : {}) } as ThemeType,
     buttons: { ...base.buttons, ...(t.allow.buttons ? c.buttons : {}) } as ThemeButtons,
     sidebarOpacity: (t.allow.colors ? c.sidebarOpacity : undefined) ?? base.sidebarOpacity ?? 100,
+    opacity: { ...(base.opacity ?? {}), ...(t.allow.colors ? c.opacity : {}) } as ThemeOpacity,
     allow: t.allow,
   };
 }

@@ -3,7 +3,7 @@ import { Copy, Pencil, Plus, Star, Trash2 } from 'lucide-react';
 import { DEFAULT_APPEARANCE, DEFAULT_THEME_SETTINGS, ROLES, fontFile, type BuiltinRole, type CrmTheme, type ThemeSettings } from '@addendum/shared';
 import { useLook, useSettings } from '../../api/hooks';
 import { applyAppearance } from '../../lib/theme';
-import { ButtonFields, COLOR_FIELDS, ColorField, LivePreview, ThemeCard, TypeFields, suggestColors, SidebarOpacityField, ThemePreviewLarge } from '../../components/domain/ThemeFields';
+import { ButtonFields, COLOR_FIELDS, ColorField, LivePreview, ThemeCard, TypeFields, suggestColors, SidebarOpacityField, OpacityField, ThemePreviewLarge } from '../../components/domain/ThemeFields';
 import { Badge, Button, Field, Modal, Segmented, Toggle } from '../../components/ui';
 import { Card, SaveBar, useCan, useSection } from './shared';
 
@@ -137,7 +137,8 @@ function ThemeEditor({ theme, isDefault, onClose, onDone }: { theme: CrmTheme; i
             {COLOR_FIELDS.map((f) => (
               <ColorField key={f.key} field={f.key} label={f.label} hint={f.hint} value={t.colors[f.key]} fallback={t.colors[f.key]} suggestions={suggestColors(f.key, t.colors)}
                 onChange={(v) => v && setT({ ...t, colors: { ...t.colors, [f.key]: v } })}>
-                {f.key === 'sidebar' && <SidebarOpacityField value={t.sidebarOpacity ?? 100} onChange={(v) => setT({ ...t, sidebarOpacity: v ?? 100 })} />}
+                {f.key === 'sidebar' ? <SidebarOpacityField value={t.sidebarOpacity ?? 100} onChange={(v) => setT({ ...t, sidebarOpacity: v ?? 100 })} />
+                  : <OpacityField label={f.label} value={t.opacity?.[f.key] ?? 100} onChange={(v) => setT({ ...t, opacity: { ...(t.opacity ?? {}), [f.key]: v ?? 100 } })} />}
               </ColorField>
             ))}
           </div>

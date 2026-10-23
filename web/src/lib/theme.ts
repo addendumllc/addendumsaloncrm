@@ -156,16 +156,19 @@ export function applyAppearance(input: Partial<Appearance> | undefined | null, p
   if (dark) {
     pal = { paper: DARK.paper, sidebar: DARK.sidebar, surface: DARK.surface, mist: DARK.mist, line: DARK.line, strong: DARK.strong, ink: DARK.ink, inkSoft: DARK.inkSoft, stone: readableOn(DARK.stone, DARK.surface, 4.5), stoneLight: readableOn(DARK.stoneLight, DARK.surface, 4.5), sage: DARK.sage, sageTint: DARK.sageTint, rose: DARK.rose, roseTint: DARK.roseTint, amber: DARK.amber, amberTint: DARK.amberTint };
   } else {
-    const paper = hex(c.background, [247, 245, 242]);
-    const surface = hex(c.surface, WHITE);
-    const line = hex(c.line, [229, 224, 216]);
+    // Each colour at its opacity: the page background over white; cards and borders over the page.
+    const op = (k: keyof NonNullable<typeof t.opacity>) => Math.max(0, Math.min(100, t.opacity?.[k] ?? 100)) / 100;
+    const paper = mix(WHITE, hex(c.background, [247, 245, 242]), op('background'));
+    const surface = mix(paper, hex(c.surface, WHITE), op('surface'));
+    const line = mix(surface, hex(c.line, [229, 224, 216]), op('line'));
     // Text as chosen, kept readable on everything it sits on (page, cards and fills), whatever the colours — light or
     // dark. Softer tones keep the hierarchy but never drop below readable contrast.
     const mist = mix(paper, lightOn(paper) ? WHITE : BLACK, 0.035);
     // Page text: readable on the page background (and its light fills).
     const onAll = (x: RGB, min: number) => [paper, mist].reduce((acc, g) => readableOn(acc, g, min), x);
     // If the chosen text can't reach contrast on this page (e.g. dark text on a dark page), start from light or dark.
-    const chosen = hex(c.text, LIGHT_TEXT.ink);
+    // Text at its opacity over the page (still kept readable below).
+    const chosen = mix(paper, hex(c.text, LIGHT_TEXT.ink), op('text'));
     const ink = onAll(contrastRatio(rgbToHex(chosen), rgbToHex(paper)) >= 4.5 ? chosen : lightOn(paper) ? WHITE : LIGHT_TEXT.ink, 7);
     // Text on cards, panels and dialogs: worked out for the card colour itself (a dark page can have light cards).
     const cardInk = readableOn(contrastRatio(rgbToHex(chosen), rgbToHex(surface)) >= 4.5 ? chosen : lightOn(surface) ? WHITE : LIGHT_TEXT.ink, surface, 7);
@@ -200,7 +203,9 @@ export function applyAppearance(input: Partial<Appearance> | undefined | null, p
   root.setProperty('--card-mist', ch(dark ? pal.mist : mix(pal.surface, luminance(pal.surface) < 0.3 ? WHITE : BLACK, 0.045)));
 
   // Accent (primary): fills buttons, toggles and selected states as chosen; secondary: the active menu marker.
-  const fill = hex(c.accent, hexToRgb(DEFAULT_ACCENT));
+  // Accents at their opacity (over cards, and over the sidebar for the menu marker); light/dark mode keeps them solid.
+  const opk = (k: 'accent' | 'accent2') => (dark ? 1 : Math.max(0, Math.min(100, t.opacity?.[k] ?? 100)) / 100);
+  const fill = mix(pal.surface, hex(c.accent, hexToRgb(DEFAULT_ACCENT)), opk('accent'));
   const onAccent = contrastRatio(rgbToHex(fill), '#FFFFFF') >= contrastRatio(rgbToHex(fill), '#111111') ? WHITE : [17, 17, 17] as RGB;
   root.setProperty('--accent', ch(fill));
   root.setProperty('--accent-dark', ch(mix(fill, luminance(fill) < 0.2 ? WHITE : BLACK, 0.15)));
@@ -208,7 +213,7 @@ export function applyAppearance(input: Partial<Appearance> | undefined | null, p
   root.setProperty('--accent-soft', ch(mix(fill, pal.surface, dark ? 0.62 : 0.7)));
   root.setProperty('--on-accent', ch(onAccent));
   root.setProperty('--accent-ink', ch(readableOn(fill, pal.surface, 4.5)));
-  root.setProperty('--accent2', ch(readableOn(hex(c.accent2, fill), pal.sidebar, 3)));
+  root.setProperty('--accent2', ch(readableOn(mix(pal.sidebar, hex(c.accent2, fill), opk('accent2')), pal.sidebar, 3)));
   root.setProperty('color-scheme', dark ? 'dark' : 'light');
   html.dataset.mode = dark ? 'dark' : 'light';
   for (const k of ['badges', 'badgeCase', 'headingCase']) delete html.dataset[k];
@@ -238,7 +243,9 @@ export function applyAppearance(input: Partial<Appearance> | undefined | null, p
 
   // Buttons: one size and corner style for every button (the theme's, or theirs).
   const b = t.buttons;
-  if (b.size === 'default') html.removeAttribute('data-buttons'); else html.setAttribute('data-buttons', b.size === 'small' ? 'compact' : 'large');
+  if (b.size === 'default') html.removeAttribute('data-buttons'); else html.setAttribute('data-buttons', b.size === 'small' ? 'compact' : b.size === 'xsmall' ? 'xsmall' : 'large');
+  // An exact height for every button (small buttons 8px less), on top of the size's padding and text.
+  if (b.height) { html.setAttribute('data-btn-height', ''); root.setProperty('--btn-h', `${b.height}px`); } else html.removeAttribute('data-btn-height');
   root.setProperty('--radius-button', BUTTON_RADIUS[b.radius] ?? '0px');
   for (const [k, v] of Object.entries(CORNERS.square)) root.setProperty(`--radius-${k}`, v);
   html.dataset.corners = 'square';

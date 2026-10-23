@@ -90,6 +90,11 @@
 [data-buttons="compact"] .btn-md { height: 2.25rem; padding-left: 0.75rem; padding-right: 0.75rem; font-size: 13px; }
 [data-buttons="compact"] .btn-sm { height: 1.75rem; padding-left: 0.5rem; padding-right: 0.5rem; font-size: 12px; }
 [data-buttons="large"] .btn-md { height: 3rem; padding-left: 1.25rem; padding-right: 1.25rem; font-size: 16px; }
+[data-buttons="xsmall"] .btn-md { height: 1.875rem; padding-left: 0.625rem; padding-right: 0.625rem; font-size: 12px; }
+[data-buttons="xsmall"] .btn-sm { height: 1.5rem; padding-left: 0.5rem; padding-right: 0.5rem; font-size: 11px; }
+/* One exact button height (Appearance → Buttons → Height). */
+[data-btn-height] .btn-md { height: var(--btn-h); }
+[data-btn-height] .btn-sm { height: max(1.25rem, calc(var(--btn-h) - 8px)); }
 [data-buttons="large"] .btn-sm { height: 2.5rem; padding-left: 0.875rem; padding-right: 0.875rem; font-size: 14px; }
 /* Small text and labels (the theme's "small text" size). */
 :is(.label, .text-xs, .text-\[11px\], .text-\[12px\], .text-\[13px\]) { zoom: var(--size-small, 1); }

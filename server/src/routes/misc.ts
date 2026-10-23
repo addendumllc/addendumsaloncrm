@@ -56,7 +56,7 @@ miscRouter.get('/look', ah(async (req, res) => {
   res.json({ look: { accent: null, mode: null, theme: null, workspace: null, ...((await getKV<object>(lookKey(req.user!.id))) ?? {}) } });
 }));
 const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
-const scale = z.enum(['small', 'default', 'large', 'xlarge']);
+const scale = z.enum(['xsmall', 'small', 'default', 'large', 'xlarge']);
 const choice = z.object({ theme: z.string().regex(/^[a-z]{1,20}$/).nullable(), accent: hex.nullable(), accent2: hex.nullable(), highlight: hex.nullable() });
 miscRouter.put('/look', ah(async (req, res) => {
   const b = parse(z.object({
@@ -72,8 +72,9 @@ miscRouter.put('/look', ah(async (req, res) => {
     custom: z.object({
       colors: z.object({ accent: hex, accent2: hex, background: hex, sidebar: hex, surface: hex, text: hex, line: hex }).partial(),
       type: z.object({ font: z.string().regex(/^[a-z0-9-]{1,40}$/), headingFont: z.string().regex(/^[a-z0-9-]{1,40}$/), base: scale, heading: scale, small: scale, weight: z.union([z.literal(400), z.literal(500)]) }).partial(),
-      buttons: z.object({ size: z.enum(['small', 'default', 'large']), radius: z.enum(['square', 'soft', 'rounded']) }).partial(),
+      buttons: z.object({ size: z.enum(['xsmall', 'small', 'default', 'large']), radius: z.enum(['square', 'soft', 'rounded']), height: z.number().int().min(24).max(64).nullable().optional() }).partial(),
       sidebarOpacity: z.number().int().min(0).max(100),
+      opacity: z.object({ accent: z.number().int().min(0).max(100), accent2: z.number().int().min(0).max(100), background: z.number().int().min(0).max(100), surface: z.number().int().min(0).max(100), text: z.number().int().min(0).max(100), line: z.number().int().min(0).max(100) }).partial(),
     }).partial().optional(),
   }), req.body);
   if (b.workspace && !workspacesFor(req.user!.permissions).some((w) => w.id === b.workspace)) throw forbidden('You don’t have access to that business.');
@@ -235,15 +236,16 @@ async function userThemes(viewerId: string): Promise<UserThemeDTO[]> {
 miscRouter.get('/user-themes', ah(async (req, res) => res.json({ themes: await userThemes(req.user!.id) })));
 
 const themeHex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
-const themeScale = z.enum(['small', 'default', 'large', 'xlarge']);
+const themeScale = z.enum(['xsmall', 'small', 'default', 'large', 'xlarge']);
 const themeFont = z.string().regex(/^[a-z0-9-]{1,40}$/);
 miscRouter.put('/user-themes/mine', ah(async (req, res) => {
   const b = parse(z.object({
     name: z.string().trim().min(1, 'give it a name').max(40), description: z.string().trim().max(120).default(''),
     colors: z.object({ accent: themeHex, accent2: themeHex, background: themeHex, sidebar: themeHex, surface: themeHex, text: themeHex, line: themeHex }),
     type: z.object({ font: themeFont, headingFont: themeFont, base: themeScale, heading: themeScale, small: themeScale, weight: z.union([z.literal(400), z.literal(500)]) }),
-    buttons: z.object({ size: z.enum(['small', 'default', 'large']), radius: z.enum(['square', 'soft', 'rounded']) }),
+    buttons: z.object({ size: z.enum(['xsmall', 'small', 'default', 'large']), radius: z.enum(['square', 'soft', 'rounded']), height: z.number().int().min(24).max(64).nullable().optional() }),
     sidebarOpacity: z.number().int().min(0).max(100).optional(),
+    opacity: z.object({ accent: z.number().int().min(0).max(100), accent2: z.number().int().min(0).max(100), background: z.number().int().min(0).max(100), surface: z.number().int().min(0).max(100), text: z.number().int().min(0).max(100), line: z.number().int().min(0).max(100) }).partial().optional(),
     published: z.boolean(),
   }), req.body);
   const { published, ...theme } = b;
