@@ -1179,6 +1179,10 @@ export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'sho
                   {remaining > 0 && p.status !== 'draft' && <span>{remaining} still to arrive</span>}
                 </div>
               )}
+              {/* One lot number for the order (usually the same for every item) — editable at any stage. */}
+              <label className="mt-2 flex items-center gap-1.5 text-[13px] text-ink-soft">Lot number
+                <input key={p.lotNumber ?? ''} className="field h-9 w-40 py-1 font-mono text-[13px]" maxLength={40} defaultValue={p.lotNumber ?? ''} placeholder="e.g. L0724" aria-label={`Lot number for ${p.name ?? `PO #${p.number}`}`}
+                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== (p.lotNumber ?? '')) patch(p, { lotNumber: v || null }); }} /></label>
               {/* Item lines wrap on phones (name first, then quantity, lead time or arrival, cost). */}
               <ul className="mt-3 divide-y divide-line text-[13px]">
                 {p.lines.map((l) => {
@@ -1190,10 +1194,9 @@ export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'sho
                       <span className="min-w-[min(100%,12rem)] flex-1 text-ink">
                         {l.label}<span className="ml-2 text-[11px] text-stone">{l.sku}{p.supplier?.includes(' + ') && l.supplier ? ` · ${l.supplier}` : ''}</span>
                       </span>
-                      {/* Lot number: always shown and editable, at any stage. */}
-                      <label className="inline-flex items-center gap-1 text-[12px] text-stone">Lot
-                        <input className={cx(small, 'w-24 font-mono')} maxLength={40} defaultValue={l.lotNote ?? ''} placeholder="—" aria-label={`Lot for ${l.label}`}
-                          onBlur={(e) => { const v = e.target.value.trim(); if (v !== (l.lotNote ?? '')) patchLine(p, l.id, { lotNote: v || null }); }} /></label>
+                      {/* A short note per item (e.g. a different lot, or "2 damaged"), at any stage. */}
+                      <input className={cx(small, 'w-32 text-[12px]')} maxLength={40} defaultValue={l.lotNote ?? ''} placeholder="Note" aria-label={`Note for ${l.label}`}
+                        onBlur={(e) => { const v = e.target.value.trim(); if (v !== (l.lotNote ?? '')) patchLine(p, l.id, { lotNote: v || null }); }} />
                       {edit && !['received', 'cancelled'].includes(p.status) ? (
                         <>
                           <label className="inline-flex items-center gap-1 text-[12px] text-stone" title={l.received ? `${l.received} already received` : undefined}>Qty
@@ -1272,10 +1275,12 @@ function ReceiveModal({ po, onClose }: { po: PurchaseOrderDTO; onClose: () => vo
   const [note, setNote] = useState('');
   // Lot numbers usually come with the delivery: entered here, saved on each item.
   const [lots, setLots] = useState<Record<string, string>>(Object.fromEntries(po.lines.map((l) => [l.id, l.lotNote ?? ''])));
+  const [lot, setLot] = useState(po.lotNumber ?? '');
   const [busy, setBusy] = useState(false);
   const save = async () => {
     setBusy(true);
     try {
+      if (lot.trim() !== (po.lotNumber ?? '')) await api.patch(`/inventory-sync/stock/purchase-orders/${po.id}`, { lotNumber: lot.trim() || null });
       for (const l of po.lines) {
         const v = (lots[l.id] ?? '').trim();
         if (v !== (l.lotNote ?? '')) await api.patch(`/inventory-sync/stock/purchase-orders/${po.id}/lines/${l.id}`, { lotNote: v || null });
@@ -1293,10 +1298,11 @@ function ReceiveModal({ po, onClose }: { po: PurchaseOrderDTO; onClose: () => vo
   return (
     <Modal open onClose={onClose} title={`Receive PO #${po.number}`} footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} onClick={save}>Add to stock</Button></>}>
       <p className="mb-3 text-[13px] text-ink-soft">Enter what arrived (leave out anything damaged or missing). It’s added to stock in Square and Shopify and logged with the order number.</p>
+      <Field label="Lot number" hint="For the whole order." className="mb-3"><input className="field w-48 font-mono" maxLength={40} value={lot} onChange={(e) => setLot(e.target.value)} placeholder="e.g. L0724" /></Field>
       <table className="w-full text-[13px]"><tbody className="divide-y divide-line">
         {po.lines.map((l) => (
           <tr key={l.id}><td className="py-1.5 text-ink">{l.label}<span className="block text-[11px] text-stone">{l.received} of {l.quantity} received so far</span>
-              <input className="mt-1 w-28 rounded-md border border-line bg-white px-2 py-1 font-mono text-[12px]" maxLength={40} placeholder="Lot e.g. L0724" value={lots[l.id] ?? ''} onChange={(e) => setLots((x) => ({ ...x, [l.id]: e.target.value }))} aria-label={`Lot number for ${l.label}`} /></td>
+              <input className="mt-1 w-40 rounded-md border border-line bg-white px-2 py-1 text-[12px]" maxLength={40} placeholder="Note (optional)" value={lots[l.id] ?? ''} onChange={(e) => setLots((x) => ({ ...x, [l.id]: e.target.value }))} aria-label={`Note for ${l.label}`} /></td>
             <td className="w-24 py-1.5 pl-2 align-top"><input inputMode="numeric" className="field num" value={got[l.id] ?? ''} onChange={(e) => setGot((g) => ({ ...g, [l.id]: e.target.value }))} aria-label={`Received of ${l.label}`} /></td></tr>
         ))}
       </tbody></table>

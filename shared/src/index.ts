@@ -2268,6 +2268,8 @@ export interface PurchaseOrderDTO {
   number: number;
   /** Its own name (shown in place of "PO #12"); null = just the number. */
   name: string | null;
+  /** The order's lot number (usually the same for every item); each item can also have a short note (lotNote). */
+  lotNumber: string | null;
   /** Which store it's for: the salon (Square) or online (Shopify). Receiving adds stock there. */
   store: 'salon' | 'shopify';
   supplier: string | null;

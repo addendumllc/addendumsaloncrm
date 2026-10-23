@@ -268,5 +268,20 @@ describe('Suppliers', () => {
     expect((await api.get('/api/analytics/forecast')).body.items.some((i: any) => /platinum/i.test(i.label))).toBe(false);
     await api.put('/api/inventory-sync/stock/forecast/settings', { ...base });
   });
+
+  it('one lot number per order, settable at any stage (even received); each item keeps a short note', async () => {
+    const key = (await api.get('/api/inventory-sync/stock/products')).body.products.find((p: any) => p.squareVariationId).key;
+    const po = (await api.post('/api/inventory-sync/stock/purchase-orders', { store: 'salon', lines: [{ productKey: key, quantity: 2 }] })).body.orders[0];
+    expect(po.lotNumber).toBeNull();
+    await api.patch(`/api/inventory-sync/stock/purchase-orders/${po.id}`, { lotNumber: 'L0724' });
+    expect((await api.get('/api/inventory-sync/stock/purchase-orders')).body.orders.find((o: any) => o.id === po.id).lotNumber).toBe('L0724');
+    await api.patch(`/api/inventory-sync/stock/purchase-orders/${po.id}`, { status: 'ordered' });
+    await api.post(`/api/inventory-sync/stock/purchase-orders/${po.id}/receive`, { lines: [{ lineId: po.lines[0].id, quantity: 2 }] });
+    expect((await api.patch(`/api/inventory-sync/stock/purchase-orders/${po.id}`, { lotNumber: 'L0801' })).status).toBe(200);
+    expect((await api.patch(`/api/inventory-sync/stock/purchase-orders/${po.id}/lines/${po.lines[0].id}`, { lotNote: '1 box dented' })).status).toBe(200);
+    const after = (await api.get('/api/inventory-sync/stock/purchase-orders')).body.orders.find((o: any) => o.id === po.id);
+    expect(after).toMatchObject({ status: 'received', lotNumber: 'L0801' });
+    expect(after.lines[0].lotNote).toBe('1 box dented');
+  });
 });
 

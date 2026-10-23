@@ -626,7 +626,7 @@ async function poDTOs(where = '', args: unknown[] = []): Promise<PurchaseOrderDT
       leadTimeDays: l.lead_time_days ?? null, expectedOn: l.expected_on ? localDateOnly(l.expected_on) : null, lotNote: l.lot_note ?? null, supplier: l.supplier ?? null,
     }));
     return {
-      id: p.id, number: p.number, name: p.name ?? null, store: p.store === 'shopify' ? 'shopify' as const : 'salon' as const, supplier: p.supplier, status: p.status, expectedOn: p.expected_on ? localDateOnly(p.expected_on) : null, note: p.note,
+      id: p.id, number: p.number, name: p.name ?? null, lotNumber: p.lot_number ?? null, store: p.store === 'shopify' ? 'shopify' as const : 'salon' as const, supplier: p.supplier, status: p.status, expectedOn: p.expected_on ? localDateOnly(p.expected_on) : null, note: p.note,
       createdAt: iso(p.created_at)!, orderedAt: iso(p.ordered_at), receivedAt: iso(p.received_at), createdByName: p.created_by_name ?? null,
       lines: mine, totalCents: mine.reduce((a, l) => a + (l.costCents ?? 0) * l.quantity, 0),
     };
@@ -795,16 +795,17 @@ export async function suggestPurchaseOrders(store: 'salon' | 'shopify' | 'all', 
   return orders;
 }
 
-export async function updatePurchaseOrder(id: string, b: { name?: string | null; supplier?: string | null; status?: PurchaseOrderStatus; expectedOn?: string | null; note?: string | null; lines?: PoLineInput[] }) {
+export async function updatePurchaseOrder(id: string, b: { name?: string | null; lotNumber?: string | null; supplier?: string | null; status?: PurchaseOrderStatus; expectedOn?: string | null; note?: string | null; lines?: PoLineInput[] }) {
   const p = await onePO(id);
   if (b.lines && p.status !== 'draft') throw badRequest('Items can only be changed while the order is a draft.');
   if (b.status === 'received') throw badRequest('Use Receive to add the items to stock.');
   // A closed order's note can still change (e.g. lot or delivery details); nothing else can.
-  const noteOnly = Object.keys(b).every((k) => k === 'note' || k === 'name');
+  const noteOnly = Object.keys(b).every((k) => k === 'note' || k === 'name' || k === 'lotNumber');
   if ((p.status === 'received' || p.status === 'cancelled') && !noteOnly) throw badRequest('This order is closed.');
   const rows = b.lines ? await lineRows(b.lines) : null;
   await db().tx(async (q) => {
     if (b.name !== undefined) await q.query('UPDATE purchase_orders SET name = $2, updated_at = now() WHERE id = $1', [id, b.name?.trim() || null]);
+    if (b.lotNumber !== undefined) await q.query('UPDATE purchase_orders SET lot_number = $2, updated_at = now() WHERE id = $1', [id, b.lotNumber?.trim() || null]);
     await q.query(
       `UPDATE purchase_orders SET supplier = $2, status = $3, expected_on = $4, note = $5,
          ordered_at = CASE WHEN $3 IN ('ordered','shipped') AND ordered_at IS NULL THEN now() ELSE ordered_at END, updated_at = now() WHERE id = $1`,

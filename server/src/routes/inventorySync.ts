@@ -245,7 +245,7 @@ inventorySyncRouter.post('/stock/purchase-orders/suggest', ah(async (req, res) =
 }));
 inventorySyncRouter.patch('/stock/purchase-orders/:id', ah(async (req, res) => {
   const b = parse(z.object({
-    name: z.string().trim().max(80).nullable().optional(),
+    name: z.string().trim().max(80).nullable().optional(), lotNumber: z.string().trim().max(40).nullable().optional(),
     supplier: z.string().trim().max(500).nullable().optional(), status: z.enum(['draft', 'ordered', 'shipped', 'cancelled']).optional(),
     expectedOn: ymd.nullable().optional(), note: z.string().trim().max(1000).nullable().optional(), lines: poLines.min(1).optional(),
   }), req.body);
