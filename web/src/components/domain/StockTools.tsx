@@ -682,7 +682,8 @@ function SpreadsheetModal({ products, onClose }: { products: StockProductDTO[]; 
 }
 
 // ---------------- Stock: counts, adjustments, history ----------------
-export function StockView() {
+/** `store`: every product, or only those the salon (Square) or Addendum Hair (online) sells. */
+export function StockView({ store = 'all' }: { store?: 'all' | 'salon' | 'hair' } = {}) {
   const N = useStoreNames();
   const { data, isLoading, error, refetch } = useProducts();
   const toast = useToast();
@@ -695,7 +696,8 @@ export function StockView() {
   const [note, setNote] = useState('');
   const [fill, setFill] = useState('');
   const [busy, setBusy] = useState(false);
-  const shown = useMemo(() => filterProducts(data?.products ?? [], q, 'active').filter((p) => p.squareQty != null || p.shopifyQty != null), [data, q]);
+  const shown = useMemo(() => filterProducts(data?.products ?? [], q, 'active').filter((p) => (p.squareQty != null || p.shopifyQty != null)
+    && (store === 'all' || (store === 'salon' ? !!p.squareVariationId : !!p.shopifyInventoryItemId || p.store2.length > 0))), [data, q, store]);
   if (isLoading) return <PageLoading />;
   if (error || !data) return <ErrorNote error={error} onRetry={refetch} />;
   const entered = Object.entries(vals).filter(([, v]) => v.trim() !== '');

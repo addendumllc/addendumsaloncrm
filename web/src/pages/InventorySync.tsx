@@ -63,9 +63,9 @@ export function InventorySyncPage() {
   const setView = (v: string) => setParams((p) => { const n = new URLSearchParams(p); n.delete('part'); if (v === 'inventory') n.delete('view'); else n.set('view', v); return n; });
   const setStore = (hair: boolean) => setParams((p) => { const n = new URLSearchParams(p); if (['square', 'shopify', 'all'].includes(n.get('view') ?? '')) n.delete('view'); if (n.get('view') === 'orders-online') n.set('view', 'orders'); n.set('for', hair ? 'hair' : 'salon'); return n; });
   // Products: each store's own list, or every product across the stores (pairing, SKUs, Add to Square).
-  // To order (forecasts): every store unless one is picked.
-  // To order (forecasts): every store unless one is picked (older ?view=preorders links are Addendum Hair's).
-  const reorderStore = (['salon', 'hair'] as const).find((s) => s === params.get('for')) ?? (raw === 'preorders' ? 'hair' : 'all');
+  // To order, Stock counts and Pricing: every store unless one is picked.
+  // To order, Stock counts and Pricing: every store unless one is picked (older ?view=preorders links are Addendum Hair's).
+  const storePick = (['salon', 'hair'] as const).find((s) => s === params.get('for')) ?? (raw === 'preorders' ? 'hair' : 'all');
   const productsStore = view === 'products' ? 'all' : forHair ? 'hair' : 'salon';
   const setProductsStore = (v: string) => (v === 'all' ? setView('products') : setParams((p) => { const n = new URLSearchParams(p); n.delete('view'); n.delete('part'); n.set('for', v); return n; }));
   const { data: me } = useMe();
@@ -100,7 +100,9 @@ export function InventorySyncPage() {
         view === 'inventory' || view === 'products'
           ? <Segmented size="sm" value={productsStore} onChange={setProductsStore} options={[{ value: 'all', label: 'All stores' }, { value: 'salon', label: 'Addendum Salon' }, { value: 'hair', label: 'Addendum Hair' }]} />
           : view === 'reorder'
-            ? <Segmented size="sm" value={reorderStore} onChange={(v) => setParams((p) => { const n = new URLSearchParams(p); n.set('for', v); return n; })} options={[{ value: 'all', label: 'All stores' }, { value: 'salon', label: 'Addendum Salon' }, { value: 'hair', label: 'Addendum Hair' }]} />
+            ? <Segmented size="sm" value={storePick} onChange={(v) => setParams((p) => { const n = new URLSearchParams(p); n.set('for', v); return n; })} options={[{ value: 'all', label: 'All stores' }, { value: 'salon', label: 'Addendum Salon' }, { value: 'hair', label: 'Addendum Hair' }]} />
+          : view === 'stock' || view === 'pricing'
+            ? <Segmented size="sm" value={storePick} onChange={(v) => setParams((p) => { const n = new URLSearchParams(p); if (v === 'all') n.delete('for'); else n.set('for', v); return n; })} options={[{ value: 'all', label: 'All stores' }, { value: 'salon', label: 'Addendum Salon' }, { value: 'hair', label: 'Addendum Hair' }]} />
           : PER_STORE.has(view) && <Segmented size="sm" value={forHair ? 'hair' : 'salon'} onChange={(v) => setStore(v === 'hair')} options={[{ value: 'salon', label: 'Addendum Salon' }, { value: 'hair', label: 'Addendum Hair' }]} />
       } />}
       <PageHeader
@@ -113,12 +115,12 @@ export function InventorySyncPage() {
       <SectionPicker path="/inventory-sync" names={N} can={can} className="mb-4" />
       {view === 'inventory' && (forHair ? <ProductsView key="online" only="shopify" /> : <SquareInventoryView />)}
       {view !== 'reorder' && <PreorderBanner />}
-      {view === 'pricing' && <PricingView />}
+      {view === 'pricing' && <PricingView store={storePick} />}
       {view === 'products' && <div className="mb-3 flex flex-wrap justify-end gap-2"><AddLengthButton /><AddToSquareButton /></div>}
       {view === 'products' && <ProductsView setup />}
-      {view === 'stock' && <StockView />}
-      {view === 'reorder' && <WaitingForStock store={reorderStore} />}
-      {view === 'reorder' && <ReorderView key={reorderStore} store={reorderStore} initialFilter={params.get('show') === 'alerts' ? 'alerts' : 'reorder'} onOrders={() => setView('orders')} />}
+      {view === 'stock' && <StockView store={storePick} />}
+      {view === 'reorder' && <WaitingForStock store={storePick} />}
+      {view === 'reorder' && <ReorderView key={storePick} store={storePick} initialFilter={params.get('show') === 'alerts' ? 'alerts' : 'reorder'} onOrders={() => setView('orders')} />}
       {view === 'orders' && (forHair ? <PurchaseOrdersView key="shopify" store="shopify" /> : <PurchaseOrdersView key="salon" store="salon" />)}
       {view === 'suppliers' && <SuppliersView />}
       {view === 'sync' && <>

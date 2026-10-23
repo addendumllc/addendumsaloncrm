@@ -20,7 +20,8 @@ const margin = (price: number | null, cost: number | null) => (price && cost != 
  * store (e.g. stylist pricing on the pro store, retail on the other) — side by side, with margins. Change any of them
  * here (one by one, or many at once) and Save sends them to the stores.
  */
-export function PricingView() {
+/** `store`: every product, or only those the salon (Square) or Addendum Hair (online) sells. */
+export function PricingView({ store = 'all' }: { store?: 'all' | 'salon' | 'hair' } = {}) {
   const toast = useToast();
   const qc = useQueryClient();
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['stock-prices'], queryFn: () => api.get<PriceData>('/inventory-sync/stock/prices') });
@@ -40,7 +41,8 @@ export function PricingView() {
     ];
   }, [data]);
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
-  const rows = (data?.rows ?? []).filter((r) => words.every((w) => `${r.label} ${r.sku ?? ''}`.toLowerCase().includes(w)));
+  const rows = (data?.rows ?? []).filter((r) => words.every((w) => `${r.label} ${r.sku ?? ''}`.toLowerCase().includes(w))
+    && (store === 'all' || (store === 'salon' ? !!r.square : r.shopify.length > 0 || r.shopify2.length > 0)));
   if (isLoading) return <PageLoading />;
   if (error || !data) return <ErrorNote error={error} onRetry={refetch} />;
 
