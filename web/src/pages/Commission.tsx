@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { CommissionEntryDTO, CommissionPeriodDTO, CommissionStatusDTO, CommissionSummaryDTO, CommissionTeamRowDTO, PaySummaryDTO, TaxEstimateDTO } from '@addendum/shared';
 import { AlertTriangle, ArrowLeft, Download, Info, Lock, RefreshCw, UserCheck } from 'lucide-react';
 import { api, ApiError } from '../api/client';
-import { useCanDo } from '../api/hooks';
+import { useCanDo, useMe } from '../api/hooks';
 import { addDaysKey, dayKey, labelOfKey, relative } from '../lib/format';
 import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, Segmented, Spinner, cx, useToast } from '../components/ui';
 import { DateRangeBar, EntriesList, SummaryCards, usd, useDateRange } from '../components/domain/Commission';
@@ -276,6 +276,9 @@ function CategoryEntries({ entries, emptyText }: { entries: CommissionEntryDTO[]
 
 function StaffDetail({ id, dr, onBack }: { id: string; dr: ReturnType<typeof useDateRange>; onBack: () => void }) {
   const canDo = useCanDo();
+  const { data: me } = useMe();
+  // Adding hours by pay period: administrators only.
+  const adminPay = me?.role === 'admin' && canDo('commission:manage');
   const [adjust, setAdjust] = useState(false);
   const [view, setView] = useState<PayView>('commission');
   const { data, isLoading } = useQuery({
@@ -291,7 +294,7 @@ function StaffDetail({ id, dr, onBack }: { id: string; dr: ReturnType<typeof use
         {canDo('commission:export') && <a className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line-strong bg-white px-3 text-[13px] font-medium hover:bg-mist/60" href={`/api/commission/export?from=${dr.range.from}&to=${dr.range.to}&staffId=${id}`}><Download className="h-4 w-4" />CSV</a>}
       </div>
       <Segmented className="mb-4" value={view} onChange={setView} options={PAY_VIEWS} />
-      {view === 'year' ? <YearTable url={`/commission/staff/${id}/year`} /> : <DateRangeBar {...dr} />}
+      {view === 'year' ? <YearTable url={`/commission/staff/${id}/year`} staffId={adminPay ? id : undefined} /> : <DateRangeBar {...dr} />}
       {view === 'taxes' && data && <TaxesPanel taxes={data.taxes} />}
       {view === 'commission' && (isLoading || !data ? <PageLoading /> : (
         <>

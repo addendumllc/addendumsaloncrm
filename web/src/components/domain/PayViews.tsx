@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { PayPeriodRowDTO, PaySummaryDTO, TaxEstimateDTO } from '@addendum/shared';
-import { ChevronDown, ChevronLeft, ChevronRight, Columns3 } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Columns3, Plus } from 'lucide-react';
 import { api } from '../../api/client';
 import { dayKey, labelOfKey } from '../../lib/format';
-import { Button, PageLoading, cx } from '../ui';
+import { Button, PageLoading, cx, useToast } from '../ui';
 import { usd } from './Commission';
 
 /** Hours always with 2 decimals (8.00, 9.25). */
@@ -77,7 +77,44 @@ const OPTIONAL = [['minutes', 'Hours'], ['commissionCents', 'Commission'], ['tip
 type Optional = (typeof OPTIONAL)[number][0];
 const COLS_KEY = 'addendum:year-columns';
 
-export function YearTable({ url, showPaid = true }: { url: string; showPaid?: boolean }) {
+/**
+ * Add hours to one pay period (Team Commission → a person → Year): saved as manual hours on the period's last day
+ * (or today, for the current period), noted with the period's dates.
+ */
+function AddPeriodHours({ staffId, row, onDone }: { staffId: string; row: PayPeriodRowDTO; onDone: () => void }) {
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [hours, setHours] = useState('');
+  const [busy, setBusy] = useState(false);
+  const n = Number(hours);
+  const save = async () => {
+    setBusy(true);
+    try {
+      const today = dayKey(new Date());
+      await api.post('/commission/hours', { staffId, date: row.to < today ? row.to : today, hours: n, note: `Pay period ${fmt(row.from)} – ${fmt(row.to)}` });
+      toast(`${n} hours added to ${fmt(row.from)} – ${fmt(row.to)}`);
+      setHours(''); setOpen(false); onDone();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!open) return <button type="button" className="inline-flex items-center gap-1 text-[12px] text-plum hover:underline" onClick={() => setOpen(true)}><Plus className="h-3.5 w-3.5" />Add hours</button>;
+  return (
+    <span className="inline-flex items-center gap-1">
+      <input autoFocus inputMode="decimal" className="w-16 rounded-md border border-line bg-white px-1.5 py-0.5 text-right text-[13px] num" placeholder="hrs" value={hours} onChange={(e) => setHours(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter' && n > 0) void save(); if (e.key === 'Escape') setOpen(false); }} aria-label={`Hours to add to ${fmt(row.from)} – ${fmt(row.to)}`} />
+      <Button size="sm" variant="primary" loading={busy} disabled={!(n > 0 && n <= 744)} onClick={save}>Add</Button>
+      <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+    </span>
+  );
+}
+
+/** `staffId` (people who manage pay): each pay period gets "Add hours". */
+export function YearTable({ url, showPaid = true, staffId }: { url: string; showPaid?: boolean; staffId?: string }) {
+  const qc = useQueryClient();
+  const refreshPay = () => { for (const k of ['pay-year', 'commission-staff', 'pay']) void qc.invalidateQueries({ queryKey: [k] }); };
   const [year, setYear] = useState(Number(dayKey(new Date()).slice(0, 4)));
   // Columns chosen in the dropdown (remembered on this device). Until someone chooses, columns that are zero all year are hidden.
   const [chosen, setChosen] = useState<Optional[] | null>(() => { try { const v = localStorage.getItem(COLS_KEY); return v ? JSON.parse(v) : null; } catch { return null; } });
@@ -134,6 +171,7 @@ export function YearTable({ url, showPaid = true }: { url: string; showPaid?: bo
                   <p className="num text-[17px] font-medium text-ink">{usd(r.netCents)}<span className="ml-1 text-[11px] font-normal text-stone">net</span></p>
                 </div>
                 {showPaid && <p className="text-[12px] text-stone">Paid {fmt(r.payDate)}</p>}
+                {staffId && <div className="mt-1"><AddPeriodHours staffId={staffId} row={r} onDone={refreshPay} /></div>}
                 <dl className="mt-2 grid grid-cols-3 gap-x-3 gap-y-1 text-[13px]">
                   {OPTIONAL.filter(([k]) => shown.has(k)).map(([k, label]) => <div key={k}><dt className="text-[11px] text-stone">{label}</dt><dd className="num text-ink">{val(r, k)}</dd></div>)}
                   <div><dt className="text-[11px] text-stone">Gross</dt><dd className="num font-medium text-ink">{usd(r.grossCents)}</dd></div>
@@ -169,7 +207,8 @@ export function YearTable({ url, showPaid = true }: { url: string; showPaid?: bo
             <tbody className="divide-y divide-line">
               {rows.map((r) => (
                 <tr key={r.from} className={r.from > today ? 'text-stone' : r.from <= today && r.to >= today ? 'bg-mist/30' : ''}>
-                  <td className="px-4 py-2">{fmt(r.from)} – {fmt(r.to)}{r.from <= today && r.to >= today && <span className="ml-1.5 text-[12px] text-plum">current</span>}</td>
+                  <td className="px-4 py-2">{fmt(r.from)} – {fmt(r.to)}{r.from <= today && r.to >= today && <span className="ml-1.5 text-[12px] text-plum">current</span>}
+                    {staffId && r.from <= today && <span className="block"><AddPeriodHours staffId={staffId} row={r} onDone={refreshPay} /></span>}</td>
                   {showPaid && <td className="px-3 py-2 text-ink-soft">{fmt(r.payDate)}</td>}
                   {OPTIONAL.filter(([k]) => shown.has(k)).map(([k]) => <td key={k} className={cell}>{val(r, k)}</td>)}
                   <td className={`${cell} font-medium`}>{usd(r.grossCents)}</td>
