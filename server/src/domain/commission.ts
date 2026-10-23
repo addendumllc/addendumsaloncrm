@@ -425,7 +425,6 @@ export async function rebuildCommission(now = new Date()) {
   const notTipEligible = new Set(staffRows.filter((s) => s.tip_eligible === false).map((s) => s.id as string));
   const services = new Map((await db().query<any>('SELECT id, name, square_variation_id FROM services WHERE square_variation_id IS NOT NULL'))
     .map((s) => [s.square_variation_id as string, { id: s.id as string, name: s.name as string }]));
-  const products = new Set((await db().query<any>('SELECT variation_id FROM square_inventory')).map((p) => p.variation_id as string));
   const appts = await db().query<any>(
     `SELECT id, square_customer_id, start_at, square_status, raw->'appointment_segments' AS segments FROM appointments
       WHERE square_customer_id IS NOT NULL AND square_status IN ('ACCEPTED','PENDING','NO_SHOW')`);
@@ -526,9 +525,15 @@ export async function rebuildCommission(now = new Date()) {
       const net = gross - discount;
       if (line.item_type === 'GIFT_CARD') continue; // selling a gift card isn't a sale of work or product
       const svc = line.catalog_object_id ? services.get(line.catalog_object_id) : undefined;
-      let category: Desired['category'] = svc ? 'service' : line.catalog_object_id && products.has(line.catalog_object_id) ? 'retail' : 'other';
+      // Anything from the Square catalog that isn't a service is a product (even if the CRM's copy of the catalog hasn't
+      // caught up, e.g. a new bundle). Lines without a catalog item (custom amounts) go to the visit's stylist when there's one.
+      let category: Desired['category'] = svc ? 'service' : line.catalog_object_id ? 'retail' : 'other';
       const steps: string[] = [];
       let reviewReason: string | null = null;
+      if (category === 'other' && providerTms.length === 1 && providers[0] && !attributions.get(lineKey)) {
+        category = 'retail';
+        steps.push(`Not a catalog item — credited with the visit’s stylist (${staffNames.get(providers[0]) ?? 'stylist'}) at retail rules.`);
+      }
       let onHold = false;
       let suggestions: CommissionSuggestion[] = [];
       /** Square didn't record who checked out: credit the likeliest person (on hold), or list them as choices. */

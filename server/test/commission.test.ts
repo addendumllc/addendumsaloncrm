@@ -103,6 +103,20 @@ describe('Square sales → commission', () => {
     await admin.put('/api/commission/settings', { basis: 'after_discounts', zeroPriced: 'no_commission' });
   });
 
+  it('anything from the Square catalog that isn’t a service counts as a product, even if the CRM’s copy hasn’t caught up', async () => {
+    const saved = await db().query<any>('SELECT * FROM square_inventory');
+    await db().query('DELETE FROM square_inventory');
+    try {
+      await rebuildCommission();
+      const unknown = await entries("kind = 'sale' AND category = 'other' AND catalog_object_id IS NOT NULL");
+      expect(unknown).toEqual([]);
+      expect((await entries("kind = 'sale' AND category = 'retail' AND catalog_object_id IS NOT NULL")).length).toBeGreaterThan(0);
+    } finally {
+      for (const r of saved) await db().query(`INSERT INTO square_inventory SELECT * FROM json_populate_record(NULL::square_inventory, $1::json)`, [JSON.stringify(r)]);
+      await rebuildCommission();
+    }
+  });
+
   it('keeps tips separate from commission', async () => {
     const tips = await entries("kind = 'tip' AND staff_id IS NOT NULL");
     expect(tips.length).toBeGreaterThan(0);
