@@ -91,6 +91,10 @@ export function InventorySyncPage() {
 
   return (
     <div>
+      {(view === 'inventory' || view === 'products') && (
+        <Segmented className="mb-4" value={productsStore} onChange={setProductsStore}
+          options={[{ value: 'all', label: 'All stores' }, { value: 'salon', label: 'Addendum Salon' }, { value: 'hair', label: 'Addendum Hair' }]} />
+      )}
       {togglePages && <Segmented className="mb-4" value={view === 'products' ? 'inventory' : view} onChange={setView} options={togglePages} />}
       {PER_STORE.has(view) && (
         <Segmented className="mb-4" value={forHair ? 'hair' : 'salon'} onChange={(v) => setStore(v === 'hair')}
@@ -104,10 +108,6 @@ export function InventorySyncPage() {
       {data.demoMode && <p className="mb-4 rounded-xl2 border border-line bg-mist/50 px-4 py-2 text-[13px] text-ink-soft">Demo Mode: this syncs the demo Square and Shopify catalogs. Nothing is sent to a real store.</p>}
       {/* Sections are in the side menu; on phones (no sidebar) a dropdown. */}
       <SectionPicker path="/inventory-sync" names={N} can={can} className="mb-4" />
-      {(view === 'inventory' || view === 'products') && (
-        <Segmented className="mb-4" value={productsStore} onChange={setProductsStore}
-          options={[{ value: 'salon', label: 'Addendum Salon' }, { value: 'hair', label: 'Addendum Hair' }, { value: 'all', label: 'All stores' }]} />
-      )}
       {view === 'inventory' && (forHair ? <ProductsView key="online" only="shopify" /> : <SquareInventoryView />)}
       {view !== 'toorder' && <PreorderBanner />}
       {view === 'pricing' && <PricingView />}
