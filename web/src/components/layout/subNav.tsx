@@ -73,7 +73,6 @@ export const SUB_NAV: Record<string, SubNav> = {
       // "shared:…": also shown when that settings section is shared with the team (Settings → Share with the team).
       { to: '/messages?view=replies', label: 'Saved replies', group: 'Default messages', anyOf: ['settings:read', 'shared:replies'] },
       { to: '/messages?view=reminders', label: 'Reminder & review texts', group: 'Default messages', anyOf: ['settings:read', 'shared:reminders'] },
-      { to: '/messages?view=texting', label: 'Signature & texting', group: 'Default messages', anyOf: ['settings:read'] },
     ],
   },
   '/clients': {

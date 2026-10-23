@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import type { ConversationDTO, MessageDTO } from '@addendum/shared';
 import {
   ArrowLeft, CalendarDays, Check, CheckCheck, MessageSquare, MessageSquareOff, Phone, Plus, Send, Sparkles, UserPlus, AlertCircle, FlaskConical, Trash2 } from 'lucide-react';
@@ -15,7 +15,6 @@ import { SectionPicker } from '../components/layout/subNav';
 import { useStoreNames } from '../lib/storeNames';
 import { RepliesSettings } from './settings/RepliesTab';
 import { RemindersSettings } from './settings/RulesTabs';
-import { SmsSettings } from './settings/IntegrationTabs';
 
 /**
  * Texting history. Texts are sent from Apple Messages on the staff member's device: the CRM opens Messages
@@ -25,7 +24,6 @@ import { SmsSettings } from './settings/IntegrationTabs';
 const DEFAULT_MESSAGES: Record<string, { title: string; render: () => JSX.Element }> = {
   replies: { title: 'Saved replies', render: () => <RepliesSettings /> },
   reminders: { title: 'Reminder & review texts', render: () => <RemindersSettings /> },
-  texting: { title: 'Signature & texting', render: () => <SmsSettings /> },
 };
 
 export function MessagesPage() {
@@ -64,6 +62,8 @@ export function MessagesPage() {
     );
   }
 
+  // Signature & texting moved to Settings (administrators).
+  if (view === 'texting') return <Navigate to="/settings?tab=sms" replace />;
   return (
     <div className="flex min-h-0 flex-1">
       {/* Conversation list */}
