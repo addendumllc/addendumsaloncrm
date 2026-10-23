@@ -3,8 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { KeyRound } from 'lucide-react';
 import { api } from '../api/client';
 import { phone } from '../lib/format';
-import { Avatar, Button, Field, Segmented, Spinner, cx, useToast } from '../components/ui';
-import { useWorkspace } from '../lib/workspace';
+import { Avatar, Button, Field, Spinner, cx, useToast } from '../components/ui';
 import { USER_COLORS } from '../lib/theme';
 import { DisplayChoices } from '../components/layout/TextSizeButton';
 import { MyAppearance } from './settings/MyAppearance';
@@ -17,24 +16,10 @@ import { ChangePasswordModal } from '../components/layout/ChangePassword';
 export function DisplayPanel() {
   return (
     <div className="space-y-4">
-      <MyWorkspace />
       <MyAppearance />
       <div className="panel p-4"><DisplayChoices /></div>
       {/* Calendar colour: separate from the theme (changing your accent never changes it). */}
       <MyColor />
-    </div>
-  );
-}
-
-/** Which business the CRM opens in (also changed from the switcher at the top of the sidebar). Only with access to both. */
-function MyWorkspace() {
-  const { current, available, switchTo } = useWorkspace();
-  if (available.length < 2 || !current) return null;
-  return (
-    <div className="panel p-4">
-      <p className="text-[11px] uppercase tracking-wide text-stone">Default business</p>
-      <p className="mb-3 mt-1 text-[13px] text-ink-soft">Which business pages like Tasks, Follow-Ups, Inventory and Clients open on. You can switch on each page; the menu shows both businesses’ tools you can use.</p>
-      <Segmented value={current.id} onChange={(id) => void switchTo(id)} options={available.map((w) => ({ value: w.id, label: w.name }))} />
     </div>
   );
 }

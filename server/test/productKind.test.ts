@@ -54,6 +54,29 @@ describe('Product types', () => {
     expect(row.kind).toBe('separate');
   });
 
+  it('separate stock: when the salon sells more than it has, the rest comes out of the online stock (never below 0 online)', async () => {
+    await sync();
+    await setKind([SQ.tape], 'separate');
+    demoSquareStock.set(SQ.tape, -2); // the salon sold 2 more than it had
+    MockShopifyService.stock.set(SH.tape, 20);
+    await sync();
+    expect(demoSquareStock.get(SQ.tape)).toBe(0);
+    expect(MockShopifyService.stock.get(SH.tape)).toBe(18);
+    // Not enough online: only what's there moves; the salon stays short (flagged for a count).
+    demoSquareStock.set(SQ.tape, -5);
+    MockShopifyService.stock.set(SH.tape, 3);
+    const run = await sync();
+    expect(demoSquareStock.get(SQ.tape)).toBe(-2);
+    expect(MockShopifyService.stock.get(SH.tape)).toBe(0);
+    expect(run.message).toMatch(/made up from the online stock/);
+    // A salon count that isn't below 0 is left alone, as before.
+    demoSquareStock.set(SQ.tape, 4);
+    MockShopifyService.stock.set(SH.tape, 10);
+    await sync();
+    expect(demoSquareStock.get(SQ.tape)).toBe(4);
+    expect(MockShopifyService.stock.get(SH.tape)).toBe(10);
+  });
+
   it('add-on services leave the product lists and “Not matched”; switching back to shared syncs again', async () => {
     await sync();
     await setKind([SQ.bond], 'service');

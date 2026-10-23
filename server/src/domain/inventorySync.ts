@@ -673,6 +673,45 @@ async function execute(runId: string, onlyFailed: boolean): Promise<InventorySyn
       [l.square_variation_id, l.label, l.sku, p.why, extraNote || null, p.S, p.target, p.H, p.target, `sync:${runId}`]);
   }
 
+  // ---- Separate stock: when the salon sells more than it has (Square below 0), the rest comes out of the online stock —
+  // online goes down by that much (never below 0) and the salon back to 0. The other online store follows below.
+  let movedFromOnline = 0;
+  if (!onlyFailed) {
+    for (const l of allLinks.filter((x) => off.has(x.square_variation_id) && !isGone(x))) {
+      const p = sqById.get(l.square_variation_id);
+      const i = shById.get(l.shopify_inventory_item_id);
+      if (!p?.trackInventory || !i?.tracked || i.available == null) continue;
+      const S = sqQty.get(p.variationId) ?? 0;
+      if (S >= 0 || !Number.isInteger(S)) continue;
+      const moved = Math.min(-S, Math.max(0, i.available));
+      const label = l.label;
+      if (!moved) {
+        tally.attention++;
+        note({ label, sku: l.sku, result: 'attention', note: `Separate stock: the salon sold ${-S} more than it had, and there’s none online to take them from. Count the salon stock.` });
+        continue;
+      }
+      const H = i.available - moved;
+      const salon = S + moved;
+      try {
+        await shop.setAvailable(shLoc, [{ inventoryItemId: i.inventoryItemId, quantity: H, changeFromQuantity: i.available }], `inv-sync-sep-${runId}-${l.id}`, `addendum-crm://inventory-sync/${runId}`);
+        await sq.setInventoryCounts([{ variationId: p.variationId, locationId: sqLoc, quantity: salon, occurredAt: squareReadAt, referenceId: `addendum-sync:${runId}` }], `inv-sync-sep-sq-${runId}-${l.id}`);
+        await updateLocalSquareCopy(p.variationId, sqLoc, salon);
+        const why = `Separate stock: the salon sold ${-S} more than it had — ${moved} taken from the online stock`;
+        note({ label, sku: l.sku, result: 'updated_both', note: `${SQ} ${S} → ${salon}, ${SH} ${i.available} → ${H} (${why})${salon < 0 ? ' — still short in the salon; count it' : ''}` });
+        await db().query(
+          `INSERT INTO stock_txns(product_key, label, sku, kind, reason, note, square_before, square_after, shopify_before, shopify_after, reference)
+           VALUES ($1,$2,$3,'sync',$4,NULL,$5,$6,$7,$8,$9)`, [p.variationId, label, l.sku, why, S, salon, i.available, H, `sync:${runId}`]);
+        i.available = H; // the online stores' shared count follows from here
+        tally.updated_square++;
+        tally.updated_shopify++;
+        movedFromOnline++;
+      } catch (e) {
+        if (e instanceof ShopifyStaleQuantityError) note({ label, sku: l.sku, result: 'retry', note: `${SH}’s count changed during the sync — next time.` });
+        else { tally.failed++; note({ label, sku: l.sku, result: 'failed', note: e instanceof IntegrationError ? e.userMessage : 'Not updated.' }); }
+      }
+    }
+  }
+
   // ---- Shopify-only products: not in Square, same SKU in both Shopify stores. The two stores keep one shared count,
   // combined the same way (count when last set + changes in each store since). The first time, the main store's count is kept.
   let shopifyOnlySynced = 0;
@@ -726,6 +765,7 @@ async function execute(runId: string, onlyFailed: boolean): Promise<InventorySyn
     tally.updated_square && `${tally.updated_square} updated in ${SQ}`,
     tally.updated_store2 && `${tally.updated_store2} updated in ${store2}`,
     shopifyOnlySynced && `${shopifyOnlySynced} online product${shopifyOnlySynced === 1 ? '' : 's'} synced between ${SH} and ${store2}`,
+    movedFromOnline && `${movedFromOnline} separate-stock product${movedFromOnline === 1 ? '' : 's'} oversold in the salon, made up from the online stock`,
     draftsTracked && `stock tracking turned on for ${draftsTracked} draft listing${draftsTracked === 1 ? '' : 's'} in ${store2}`,
     store2Problem,
     `${tally.unchanged} already matched`,
