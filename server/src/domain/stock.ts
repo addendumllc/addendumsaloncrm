@@ -615,7 +615,7 @@ async function poDTOs(where = '', args: unknown[] = []): Promise<PurchaseOrderDT
   return pos.map((p) => {
     const mine = lines.filter((l) => l.po_id === p.id).map((l) => ({
       id: l.id, productKey: l.product_key, label: l.label, sku: l.sku, quantity: l.quantity, received: l.received, costCents: l.cost_cents,
-      leadTimeDays: l.lead_time_days ?? null, expectedOn: l.expected_on ? localDateOnly(l.expected_on) : null, lotNote: l.lot_note ?? null,
+      leadTimeDays: l.lead_time_days ?? null, expectedOn: l.expected_on ? localDateOnly(l.expected_on) : null, lotNote: l.lot_note ?? null, supplier: l.supplier ?? null,
     }));
     return {
       id: p.id, number: p.number, name: p.name ?? null, store: p.store === 'shopify' ? 'shopify' as const : 'salon' as const, supplier: p.supplier, status: p.status, expectedOn: p.expected_on ? localDateOnly(p.expected_on) : null, note: p.note,
@@ -637,18 +637,24 @@ type PoLineInput = { productKey: string; quantity: number; costCents?: number | 
 async function lineRows(lines: PoLineInput[]) {
   const L = await live();
   const byKey = new Map(L.rows.map((r) => [r.key, r]));
-  // Suppliers whose lead time isn't tracked: their items get no lead time (so no expected date) unless one is entered.
-  const untracked = new Set((await db().query<{ name: string }>('SELECT name FROM suppliers WHERE lead_untracked')).map((x) => x.name));
+  // Each item's supplier: its lead time (+ shipping) unless one is entered; none when its lead time isn't tracked.
+  const sups = new Map((await db().query<any>('SELECT * FROM suppliers')).map((x) => [x.name as string, x]));
   const fallback = await defaultSupplier();
+  const leadFor = (own: number | null, name: string | null) => {
+    const sup = name ? sups.get(name) : undefined;
+    if (sup?.lead_untracked) return null;
+    const base = own ?? sup?.lead_time_days ?? null;
+    return base == null ? null : base + (sup?.shipping_days ?? 0);
+  };
   return lines.map((l) => {
     const r = byKey.get(l.productKey);
     if (!r) throw badRequest('A product on this order wasn’t found. Refresh and try again.');
     if (!Number.isInteger(l.quantity) || l.quantity <= 0) throw badRequest(`Enter how many of ${r.label} to order.`);
     // Its own lead time: as entered, else the product's (which comes from its supplier when not set).
-    return { key: r.key, label: r.label, sku: r.sku, quantity: l.quantity, cost: l.costCents ?? r.costCents, lead: l.leadTimeDays === undefined ? (untracked.has(r.supplier ?? fallback ?? '') ? null : r.leadTimeDays) : l.leadTimeDays };
+    return { key: r.key, label: r.label, sku: r.sku, quantity: l.quantity, cost: l.costCents ?? r.costCents, lead: l.leadTimeDays === undefined ? leadFor(r.leadTimeDays, r.supplier ?? fallback) : l.leadTimeDays, supplier: r.supplier ?? fallback };
   });
 }
-const LINE_INSERT = 'INSERT INTO purchase_order_lines(po_id, product_key, label, sku, quantity, cost_cents, lead_time_days) VALUES ($1,$2,$3,$4,$5,$6,$7)';
+const LINE_INSERT = 'INSERT INTO purchase_order_lines(po_id, product_key, label, sku, quantity, cost_cents, lead_time_days, supplier) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)';
 
 /**
  * When an order is placed: each item's expected date is today (salon time) + its own lead time, and the order's expected
@@ -695,7 +701,7 @@ export async function addPoLines(poId: string, lines: PoLineInput[]) {
   if (p.status === 'received' || p.status === 'cancelled') throw badRequest('This order is closed.');
   const rows = await lineRows(lines);
   await db().tx(async (q) => {
-    for (const r of rows) await q.query(LINE_INSERT, [poId, r.key, r.label, r.sku, r.quantity, r.cost, r.lead]);
+    for (const r of rows) await q.query(LINE_INSERT, [poId, r.key, r.label, r.sku, r.quantity, r.cost, r.lead, r.supplier]);
     if (p.status !== 'draft') await setArrivalDates(q, poId);
   });
   return onePO(poId);
@@ -717,12 +723,20 @@ export async function removePoLine(poId: string, lineId: string) {
  * New draft purchase orders: one per supplier and store. Without a store (e.g. from Reorder), products in Square go on salon
  * orders and online-only products on online (Shopify) orders.
  */
-export async function createPurchaseOrders(lines: PoLineInput[], staffId: string | null, supplier?: string | null, store?: 'salon' | 'shopify') {
+/** Several suppliers on one order are listed together: "AH - 18in + AH - 22in". */
+export const joinSuppliers = (names: string[]) => [...new Set(names.map((n) => n.trim()).filter(Boolean))].join(' + ') || null;
+
+/**
+ * Makes draft orders: one per store and supplier — or, given `suppliers` (several, e.g. one company's product lines with
+ * different lead times), one order for all of them. Each item keeps its own supplier and lead time either way.
+ */
+export async function createPurchaseOrders(lines: PoLineInput[], staffId: string | null, supplier?: string | null, store?: 'salon' | 'shopify', suppliers?: string[], name?: string | null) {
   if (!lines.length) throw badRequest('Add at least one product.');
   const rows = await lineRows(lines);
   const L = await live();
   const fallback = await defaultSupplier();
-  const supplierOf = (k: string) => supplier ?? L.rows.find((r) => r.key === k)?.supplier ?? fallback;
+  const together = suppliers && suppliers.length ? joinSuppliers(suppliers) : null;
+  const supplierOf = (k: string) => together ?? supplier ?? L.rows.find((r) => r.key === k)?.supplier ?? fallback;
   const storeOf = (k: string): 'salon' | 'shopify' => store ?? (L.rows.find((r) => r.key === k)?.squareVariationId ? 'salon' : 'shopify');
   const groups = new Map<string, typeof rows>();
   for (const r of rows) {
@@ -733,13 +747,44 @@ export async function createPurchaseOrders(lines: PoLineInput[], staffId: string
   for (const [key, g] of groups) {
     const [poStore, s] = [key.slice(0, key.indexOf('|')), key.slice(key.indexOf('|') + 1)];
     const id = await db().tx(async (q) => {
-      const [p] = await q.query<{ id: string }>('INSERT INTO purchase_orders(supplier, created_by_staff_id, store) VALUES ($1,$2,$3) RETURNING id', [s || null, staffId, poStore]);
-      for (const r of g) await q.query(LINE_INSERT, [p.id, r.key, r.label, r.sku, r.quantity, r.cost, r.lead]);
+      const [p] = await q.query<{ id: string }>('INSERT INTO purchase_orders(supplier, created_by_staff_id, store, name) VALUES ($1,$2,$3,$4) RETURNING id', [s || null, staffId, poStore, name?.trim() || null]);
+      for (const r of g) await q.query(LINE_INSERT, [p.id, r.key, r.label, r.sku, r.quantity, r.cost, r.lead, r.supplier]);
       return p.id;
     });
     ids.push(id);
   }
   return Promise.all(ids.map(onePO));
+}
+
+/** The most specific collection of each product (the one with the fewest products), as To order groups them. */
+function collectionOfEach(items: StockForecastDTO[]) {
+  const size = new Map<string, number>();
+  for (const i of items) for (const c of i.collections) size.set(c, (size.get(c) ?? 0) + 1);
+  return (i: StockForecastDTO) => [...i.collections].sort((a, b) => (size.get(a) ?? 0) - (size.get(b) ?? 0) || a.localeCompare(b))[0] ?? 'Other';
+}
+
+/**
+ * Suggested orders: a draft purchase order per collection with what needs ordering (out of stock with sales or
+ * pre-orders, order now, reorder soon) at the suggested amounts — named "Suggested · <collection>". Earlier suggested
+ * drafts for the same store are replaced, so it can be run again after stock changes. Nothing is ordered.
+ */
+export async function suggestPurchaseOrders(store: 'salon' | 'shopify' | 'all', staffId: string | null) {
+  const f = await stockForecast();
+  const fallback = await defaultSupplier();
+  const inStore = (i: StockForecastDTO) => store === 'all' || (store === 'salon' ? i.stores.salon : i.stores.online);
+  const need = f.items.filter((i) => i.suggestedQty > 0 && ['out', 'order_now', 'soon'].includes(i.status) && inStore(i));
+  await db().query(`DELETE FROM purchase_orders WHERE status = 'draft' AND name LIKE 'Suggested · %' AND ($1 = 'all' OR store = $1)`, [store]);
+  if (!need.length) return [];
+  const coll = collectionOfEach(f.items.filter(inStore));
+  const groups = new Map<string, StockForecastDTO[]>();
+  for (const i of need) groups.set(coll(i), [...(groups.get(coll(i)) ?? []), i]);
+  const orders: PurchaseOrderDTO[] = [];
+  for (const [c, list] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
+    const suppliers = [...new Set(list.map((i) => i.supplier ?? fallback).filter((x): x is string => !!x))];
+    orders.push(...await createPurchaseOrders(list.map((i) => ({ productKey: i.key, quantity: i.suggestedQty })), staffId, null,
+      store === 'all' ? undefined : store, suppliers.length ? suppliers : undefined, `Suggested · ${c}`.slice(0, 80)));
+  }
+  return orders;
 }
 
 export async function updatePurchaseOrder(id: string, b: { name?: string | null; supplier?: string | null; status?: PurchaseOrderStatus; expectedOn?: string | null; note?: string | null; lines?: PoLineInput[] }) {
@@ -758,7 +803,7 @@ export async function updatePurchaseOrder(id: string, b: { name?: string | null;
       [id, b.supplier === undefined ? p.supplier : b.supplier?.trim() || null, b.status ?? p.status, b.expectedOn === undefined ? p.expectedOn : b.expectedOn, b.note === undefined ? p.note : b.note?.trim() || null]);
     if (rows) {
       await q.query('DELETE FROM purchase_order_lines WHERE po_id = $1', [id]);
-      for (const r of rows) await q.query(LINE_INSERT, [id, r.key, r.label, r.sku, r.quantity, r.cost, r.lead]);
+      for (const r of rows) await q.query(LINE_INSERT, [id, r.key, r.label, r.sku, r.quantity, r.cost, r.lead, r.supplier]);
     }
     if ((b.status === 'ordered' || b.status === 'shipped') && !p.orderedAt) await setArrivalDates(q, id);
   });
@@ -1016,12 +1061,13 @@ export async function analyticsForecast() {
 export async function listSuppliers(): Promise<SupplierDTO[]> {
   const prods = await db().query<any>(`SELECT supplier, count(*)::int AS n, avg(lead_time_days)::float AS lead FROM stock_products WHERE supplier IS NOT NULL GROUP BY supplier`);
   const pos = await db().query<any>(
-    `SELECT p.supplier,
+    `SELECT s.name AS supplier,
             count(*) FILTER (WHERE p.status = 'received')::int AS received,
             count(*) FILTER (WHERE p.status IN ('draft','ordered','shipped'))::int AS open,
             avg(EXTRACT(EPOCH FROM (p.received_at - p.ordered_at)) / 86400) FILTER (WHERE p.status = 'received' AND p.ordered_at IS NOT NULL)::float AS actual,
-            coalesce(sum((SELECT sum(l.received * coalesce(l.cost_cents, 0)) FROM purchase_order_lines l WHERE l.po_id = p.id)), 0)::bigint AS spent
-       FROM purchase_orders p WHERE p.supplier IS NOT NULL GROUP BY p.supplier`);
+            coalesce(sum((SELECT sum(l.received * coalesce(l.cost_cents, 0)) FROM purchase_order_lines l WHERE l.po_id = p.id AND coalesce(l.supplier, p.supplier) = s.name)), 0)::bigint AS spent
+       FROM purchase_orders p CROSS JOIN LATERAL unnest(string_to_array(p.supplier, ' + ')) AS s(name)
+      WHERE p.supplier IS NOT NULL GROUP BY s.name`);
   const saved = await db().query<any>('SELECT * FROM suppliers');
   const names = new Set<string>([...saved.map((s) => s.name), ...prods.map((p) => p.supplier), ...pos.map((p) => p.supplier)]);
   return [...names].sort((a, b) => a.localeCompare(b)).map((name) => {
@@ -1127,6 +1173,8 @@ export async function renameSupplier(from: string, to: string, staffId: string |
   await db().tx(async (q) => {
     await q.query('UPDATE stock_products SET supplier = $2, updated_by_staff_id = $3, updated_at = now() WHERE supplier = $1', [from, name, staffId]);
     await q.query('UPDATE purchase_orders SET supplier = $2, updated_at = now() WHERE supplier = $1', [from, name]);
+    await q.query(`UPDATE purchase_orders SET supplier = array_to_string(array_replace(string_to_array(supplier, ' + '), $1, $2), ' + '), updated_at = now() WHERE supplier LIKE '% + %' AND $1 = ANY(string_to_array(supplier, ' + '))`, [from, name]);
+    await q.query('UPDATE purchase_order_lines SET supplier = $2 WHERE supplier = $1', [from, name]);
     await q.query('UPDATE suppliers SET name = $2, updated_at = now() WHERE name = $1 AND NOT EXISTS (SELECT 1 FROM suppliers WHERE name = $2)', [from, name]);
   });
   forgetStockCache();

@@ -2258,7 +2258,7 @@ export interface StockForecastResponse {
 
 export type PurchaseOrderStatus = 'draft' | 'ordered' | 'shipped' | 'received' | 'cancelled';
 /** `leadTimeDays`: this item's own lead time; `expectedOn`: when it should arrive (set when the order is placed). */
-export interface PurchaseOrderLineDTO { id: string; productKey: string; label: string; sku: string | null; quantity: number; received: number; costCents: number | null; leadTimeDays: number | null; expectedOn: string | null; lotNote: string | null }
+export interface PurchaseOrderLineDTO { id: string; productKey: string; label: string; sku: string | null; quantity: number; received: number; costCents: number | null; leadTimeDays: number | null; expectedOn: string | null; lotNote: string | null; supplier: string | null }
 export interface PurchaseOrderDTO {
   id: string;
   number: number;

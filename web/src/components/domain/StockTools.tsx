@@ -4,7 +4,7 @@ import {
   STOCK_REASONS, productSearchText, productSearchWords, type PurchaseOrderDTO, type StockApplyResultDTO, type SupplierDTO, type StockChangeInput, type StockForecastDTO, type StockForecastResponse,
   type StockProductDTO, type StockProductStatus, type StockTxnDTO,
 } from '@addendum/shared';
-import { AlertTriangle, ArrowLeftRight, Settings2, ChevronDown, ChevronRight, Download, FileUp, ListPlus, PackageCheck, Plus, Replace, Search, Trash2, Pencil } from 'lucide-react';
+import { AlertTriangle, ArrowLeftRight, Settings2, ChevronDown, ChevronRight, Download, FileUp, ListPlus, PackageCheck, Plus, Replace, Search, Trash2, Pencil, X } from 'lucide-react';
 import { api } from '../../api/client';
 import { useCanDo } from '../../api/hooks';
 import { downloadCsv, parseCsv } from '../../lib/csv';
@@ -892,6 +892,21 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
       setBusy(false);
     }
   };
+  // A draft purchase order per collection with what needs ordering; earlier suggested drafts for this store are replaced.
+  const suggestPOs = async () => {
+    if (!window.confirm('Make a draft purchase order for each collection with what needs ordering now (suggested amounts)? Earlier suggested drafts are replaced; nothing is ordered.')) return;
+    setBusy(true);
+    try {
+      const r = await api.post<{ orders: PurchaseOrderDTO[] }>('/inventory-sync/stock/purchase-orders/suggest', { store: store === 'hair' ? 'shopify' : store });
+      toast(r.orders.length ? `${r.orders.length} suggested draft${r.orders.length === 1 ? '' : 's'} made, one per collection — review them in Purchase orders.` : 'Nothing needs ordering right now.');
+      refresh();
+      if (r.orders.length) onOrders();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
   const refreshSales = async () => {
     setBusy(true);
     try { await api.post('/inventory-sync/stock/sales/refresh'); refetch(); } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
@@ -922,6 +937,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
         </select>
         <span className="ml-auto flex items-center gap-2">
           <Toggle checked={showMoq} onChange={(v) => { setShowMoq(v); try { localStorage.setItem('reorder-moq', v ? '1' : '0'); } catch { /* private window */ } }} label="MOQ timing" />
+          <Button size="sm" icon={<ListPlus className="h-4 w-4" />} loading={busy} onClick={suggestPOs}>Draft suggested orders</Button>
           <Button size="sm" icon={<Settings2 className="h-4 w-4" />} onClick={() => setDefaults(data.settings)}>Forecast settings</Button>
         </span>
       </div>
@@ -1168,14 +1184,12 @@ export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'sho
                   return (
                     <li key={`${l.id}-${l.quantity}-${l.costCents}-${l.lotNote}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
                       <span className="min-w-[min(100%,12rem)] flex-1 text-ink">
-                        {l.lotNote && <Badge className="mr-1.5 align-middle font-mono">{l.lotNote}</Badge>}
-                        {l.label}<span className="ml-2 text-[11px] text-stone">{l.sku}</span>
+                        {l.label}<span className="ml-2 text-[11px] text-stone">{l.sku}{p.supplier?.includes(' + ') && l.supplier ? ` · ${l.supplier}` : ''}</span>
                       </span>
-                      {edit && (
-                        <label className="inline-flex items-center gap-1 text-[12px] text-stone">Lot
-                          <input className={cx(small, 'w-24 font-mono')} maxLength={40} defaultValue={l.lotNote ?? ''} placeholder="L0724" aria-label={`Lot for ${l.label}`}
-                            onBlur={(e) => { const v = e.target.value.trim(); if (v !== (l.lotNote ?? '')) patchLine(p, l.id, { lotNote: v || null }); }} /></label>
-                      )}
+                      {/* Lot number: always shown and editable, at any stage. */}
+                      <label className="inline-flex items-center gap-1 text-[12px] text-stone">Lot
+                        <input className={cx(small, 'w-24 font-mono')} maxLength={40} defaultValue={l.lotNote ?? ''} placeholder="—" aria-label={`Lot for ${l.label}`}
+                          onBlur={(e) => { const v = e.target.value.trim(); if (v !== (l.lotNote ?? '')) patchLine(p, l.id, { lotNote: v || null }); }} /></label>
                       {edit && !['received', 'cancelled'].includes(p.status) ? (
                         <>
                           <label className="inline-flex items-center gap-1 text-[12px] text-stone" title={l.received ? `${l.received} already received` : undefined}>Qty
@@ -1300,15 +1314,23 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
   const { data: suppliers } = useSuppliers();
   const { data: forecast } = useQuery({ queryKey: ['stock-forecast'], queryFn: () => api.get<StockForecastResponse>('/inventory-sync/stock/forecast'), staleTime: 60_000 });
   const fallback = suppliers?.find((x) => x.isDefault)?.name ?? null;
-  const [supplier, setSupplier] = useState<string | null>(null); // null = not picked yet (then the default)
-  const chosen = supplier ?? fallback ?? '';
+  // One or more suppliers (e.g. one company's product lines with different lead times); null = not picked yet (the default).
+  const [picked, setPicked] = useState<string[] | null>(null);
+  const chosenList = picked ?? (fallback ? [fallback] : []);
+  const chosen = chosenList.join(' + ');
   const [q, setQ] = useState('');
   type Line = { p: StockProductDTO; qty: string; cost: string; lead: string };
   const [lines, setLines] = useState<Line[]>([]);
   const [busy, setBusy] = useState<'draft' | 'order' | null>(null);
   const fc = useMemo(() => new Map((forecast?.items ?? []).map((i) => [i.key, i])), [forecast]);
-  const sup = suppliers?.find((x) => x.name === chosen) ?? null;
-  const leadOf = (p: StockProductDTO) => (sup?.leadUntracked ? null : p.leadTimeDays ?? sup?.leadTimeDays ?? null);
+  // Each product's lead time comes from its own supplier (plus shipping), whichever suppliers the order is for.
+  const supOf = (p: StockProductDTO) => suppliers?.find((x) => x.name === (p.supplier ?? fallback)) ?? null;
+  const leadOf = (p: StockProductDTO) => {
+    const s = supOf(p);
+    if (s?.leadUntracked) return null;
+    const base = p.leadTimeDays ?? s?.leadTimeDays ?? null;
+    return base == null ? null : base + (s?.shippingDays ?? 0);
+  };
   const qtyOf = (p: StockProductDTO) => Math.max(fc.get(p.key)?.suggestedQty ?? 0, p.moq ?? 0, 1);
   const lineFor = (p: StockProductDTO): Line => ({ p, qty: String(qtyOf(p)), cost: p.costCents != null ? (p.costCents / 100).toFixed(2) : '', lead: leadOf(p) != null ? String(leadOf(p)) : '' });
   const add = (ps: StockProductDTO[]) => setLines((cur) => [...cur, ...ps.filter((p) => !cur.some((l) => l.p.key === p.key)).map(lineFor)]);
@@ -1317,7 +1339,7 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
   const rank = (p: StockProductDTO) => ({ out: 0, order_now: 1, soon: 2, watch: 3 } as Record<string, number>)[fc.get(p.key)?.status ?? ''] ?? 9;
   // Only products sold in this order's store.
   const inStore = (p: StockProductDTO) => (store === 'salon' ? !!p.squareVariationId : !!p.shopifyInventoryItemId);
-  const theirs = chosen ? (data?.products ?? []).filter((p) => p.status === 'active' && inStore(p) && (p.supplier ?? fallback) === chosen).sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label)) : [];
+  const theirs = chosenList.length ? (data?.products ?? []).filter((p) => p.status === 'active' && inStore(p) && chosenList.includes(p.supplier ?? fallback ?? '')).sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label)) : [];
   const suggested = theirs.filter((p) => rank(p) <= 2 && !has(p.key));
   const found = q.trim() ? filterProducts(data?.products ?? [], q, 'all').filter((p) => inStore(p) && !has(p.key)).slice(0, 8) : [];
   const set = (i: number, patch: Partial<Line>) => setLines((x) => x.map((y, j) => (j === i ? { ...y, ...patch } : y)));
@@ -1327,7 +1349,7 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
     setBusy(place ? 'order' : 'draft');
     try {
       const r = await api.post<{ orders: PurchaseOrderDTO[] }>('/inventory-sync/stock/purchase-orders', {
-        supplier: chosen || null, store,
+        ...(chosenList.length > 1 ? { suppliers: chosenList } : { supplier: chosenList[0] ?? null }), store,
         lines: lines.map((l) => ({ productKey: l.p.key, quantity: Math.round(Number(l.qty) || 0), costCents: l.cost.trim() === '' ? null : Math.round(Number(l.cost) * 100), leadTimeDays: l.lead.trim() === '' ? null : Math.round(Number(l.lead)) }))
           .filter((l) => l.quantity > 0),
       });
@@ -1351,17 +1373,25 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
         <Button variant="primary" loading={busy === 'order'} disabled={!lines.length || !!busy} onClick={() => save(true)}>Create &amp; mark ordered</Button>
       </>}>
       <div className="space-y-4">
-        <Field label="Supplier" hint={chosen ? undefined : 'Without one, each product’s own supplier is used (one order per supplier).'}>
-          <select className="field" value={chosen} onChange={(e) => setSupplier(e.target.value)}>
-            <option value="">Each product’s own supplier</option>
-            {(suppliers ?? []).map((x) => <option key={x.name} value={x.name}>{x.name}{x.isDefault ? ' (default)' : ''}{x.leadTimeDays != null ? ` · usually ${x.leadTimeDays} days` : ''}</option>)}
-          </select>
+        <Field label="Suppliers" hint={chosenList.length > 1 ? 'One order for all of them — each item keeps its own supplier’s lead time.' : chosenList.length ? 'Add more for one order across several (e.g. the same company’s product lines).' : 'Without one, each product’s own supplier is used (one order per supplier).'}>
+          <div className="flex flex-wrap items-center gap-2">
+            {chosenList.map((n) => (
+              <span key={n} className="inline-flex items-center gap-1 rounded-full border border-line bg-white py-1 pl-3 pr-1 text-[13px] text-ink">
+                {n}{(() => { const s = suppliers?.find((x) => x.name === n); return s?.leadUntracked ? <span className="text-stone"> · not tracked</span> : s?.leadTimeDays != null ? <span className="text-stone"> · {s.leadTimeDays + (s.shippingDays ?? 0)} days</span> : null; })()}
+                <button type="button" className="rounded-full p-0.5 text-stone hover:bg-mist hover:text-ink" aria-label={`Remove ${n}`} onClick={() => setPicked(chosenList.filter((x) => x !== n))}><X className="h-3.5 w-3.5" /></button>
+              </span>
+            ))}
+            <select className="field h-9 w-auto min-w-[12rem] py-1 text-sm" value="" onChange={(e) => e.target.value && setPicked([...chosenList, e.target.value])} aria-label="Add a supplier">
+              <option value="">{chosenList.length ? '+ Add a supplier' : 'Choose a supplier'}</option>
+              {(suppliers ?? []).filter((x) => !chosenList.includes(x.name)).map((x) => <option key={x.name} value={x.name}>{x.name}{x.isDefault ? ' (default)' : ''}{x.leadTimeDays != null ? ` · usually ${x.leadTimeDays} days` : ''}</option>)}
+            </select>
+          </div>
         </Field>
 
         {chosen && (
           <section>
             <div className="mb-1.5 flex items-center gap-2">
-              <h3 className="text-[13px] font-semibold uppercase tracking-wide text-stone">Products from {chosen}</h3>
+              <h3 className="text-[13px] font-semibold uppercase tracking-wide text-stone">Products from {chosenList.length > 1 ? `${chosenList.length} suppliers` : chosen}</h3>
               {suggested.length > 0 && <Button size="sm" className="ml-auto" onClick={() => add(suggested)}>Add all suggested ({suggested.length})</Button>}
             </div>
             {theirs.length === 0 ? <p className="text-[13px] text-stone">No products have this supplier yet — search below, or give it products under Suppliers.</p> : (
@@ -1374,7 +1404,7 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
                       <label className="flex cursor-pointer items-center gap-3 px-3 py-2 text-[13px] hover:bg-mist/50">
                         <input type="checkbox" className="h-4 w-4 shrink-0 accent-plum" checked={has(p.key)} onChange={() => (has(p.key) ? setLines((x) => x.filter((l) => l.p.key !== p.key)) : add([p]))} />
                         <span className="min-w-0 flex-1"><span className="block truncate text-ink">{p.label}</span>
-                          <span className="block text-[11px] text-stone"><span className="font-mono">{p.sku}</span> · {f ? `${f.stock} in stock` : ''}{leadOf(p) != null ? ` · ${leadOf(p)} day lead` : ''}</span></span>
+                          <span className="block text-[11px] text-stone"><span className="font-mono">{p.sku}</span> · {f ? `${f.stock} in stock` : ''}{leadOf(p) != null ? ` · ${leadOf(p)} day lead` : ''}{chosenList.length > 1 ? ` · ${p.supplier ?? fallback}` : ''}</span></span>
                         {low && f && <Badge tone={f.status === 'out' || f.status === 'order_now' ? 'rose' : 'amber'}>Suggest {f.suggestedQty}</Badge>}
                       </label>
                     </li>
@@ -1390,7 +1420,7 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
           <input className="field h-11 pl-9 text-[16px] sm:text-[14px]" placeholder={chosen ? 'Add another product: name, colour, collection or SKU' : SEARCH_HINT} value={q} onChange={(e) => setQ(e.target.value)} />
           {found.length > 0 && (
             <ul className="absolute z-20 mt-1 w-full rounded-lg border border-line bg-white shadow-pop">
-              {found.map((p) => <li key={p.key}><button type="button" className="w-full px-3 py-2 text-left text-[13px] hover:bg-mist" onClick={() => { add([p]); setQ(''); }}>{p.label} <span className="text-stone">{p.sku}{p.supplier && p.supplier !== chosen ? ` · ${p.supplier}` : ''}</span></button></li>)}
+              {found.map((p) => <li key={p.key}><button type="button" className="w-full px-3 py-2 text-left text-[13px] hover:bg-mist" onClick={() => { add([p]); setQ(''); }}>{p.label} <span className="text-stone">{p.sku}{p.supplier && !chosenList.includes(p.supplier) ? ` · ${p.supplier}` : ''}</span></button></li>)}
             </ul>
           )}
         </div>
@@ -1410,7 +1440,7 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
                 </li>
               ))}
             </ul>
-            <p className="mt-1.5 text-[12px] text-stone">Lead times start from each product’s own (or the supplier’s usual). Arrival dates are set per item when the order is placed.</p>
+            <p className="mt-1.5 text-[12px] text-stone">Lead times start from each product’s own (or its supplier’s usual), plus shipping. Arrival dates are set per item when the order is placed.</p>
           </section>
         )}
       </div>

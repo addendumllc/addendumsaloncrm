@@ -7,7 +7,7 @@ import {
   unmarkSeparate,
 } from '../domain/inventorySync.js';
 import { addToSquare, applyNewLength, applyPrices, applyProPrices, newLengthPlan, priceList, proPricePlan, squareCandidates,
-  applyStockChanges, createPurchaseOrders, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
+  applyStockChanges, createPurchaseOrders, suggestPurchaseOrders, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
   assignSupplier, deleteSupplier, refreshShopifySales, renameSupplier, saveProductSettings, saveSupplier, setForecastSettings, setSupplierLeadTime, stockForecast, stockHistory, stockProducts, updatePurchaseOrder,
 } from '../domain/stock.js';
 import { setSquareSku } from '../domain/squareInventory.js';
@@ -230,15 +230,22 @@ const poLines = z.array(z.object({
   leadTimeDays: z.number().int().min(0).max(730).nullable().optional(),
 })).max(1000);
 inventorySyncRouter.post('/stock/purchase-orders', ah(async (req, res) => {
-  const b = parse(z.object({ lines: poLines.min(1), supplier: z.string().trim().max(120).nullable().optional(), store: z.enum(['salon', 'shopify']).optional() }), req.body);
-  const orders = await createPurchaseOrders(b.lines, req.user!.id, b.supplier, b.store);
+  const b = parse(z.object({ lines: poLines.min(1), supplier: z.string().trim().max(120).nullable().optional(), suppliers: z.array(z.string().trim().min(1).max(120)).max(20).optional(), store: z.enum(['salon', 'shopify']).optional() }), req.body);
+  const orders = await createPurchaseOrders(b.lines, req.user!.id, b.supplier, b.store, b.suppliers);
   await logAction(req, 'stock.po_create', 'purchase_order', orders[0]?.id ?? null, { orders: orders.map((o) => o.number) });
+  res.status(201).json({ orders });
+}));
+// Suggested orders: a draft per collection with what needs ordering (replaces earlier suggested drafts for the store).
+inventorySyncRouter.post('/stock/purchase-orders/suggest', ah(async (req, res) => {
+  const b = parse(z.object({ store: z.enum(['salon', 'shopify', 'all']).default('all') }), req.body ?? {});
+  const orders = await suggestPurchaseOrders(b.store, req.user!.id);
+  await logAction(req, 'stock.po_suggest', 'purchase_order', null, { orders: orders.map((o) => o.number), store: b.store });
   res.status(201).json({ orders });
 }));
 inventorySyncRouter.patch('/stock/purchase-orders/:id', ah(async (req, res) => {
   const b = parse(z.object({
     name: z.string().trim().max(80).nullable().optional(),
-    supplier: z.string().trim().max(120).nullable().optional(), status: z.enum(['draft', 'ordered', 'shipped', 'cancelled']).optional(),
+    supplier: z.string().trim().max(500).nullable().optional(), status: z.enum(['draft', 'ordered', 'shipped', 'cancelled']).optional(),
     expectedOn: ymd.nullable().optional(), note: z.string().trim().max(1000).nullable().optional(), lines: poLines.min(1).optional(),
   }), req.body);
   const order = await updatePurchaseOrder(req.params.id, b);

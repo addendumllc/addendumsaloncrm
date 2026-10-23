@@ -220,5 +220,40 @@ describe('Suppliers', () => {
     forgetStockCache();
     expect(await notifyStockAlerts(send, async () => ['x'])).toBe(0); // not again
   });
+
+  it('one order can be for several suppliers: each item keeps its own supplier and lead time (with shipping)', async () => {
+    await api.post('/api/inventory-sync/stock/suppliers', { name: 'AH 18', leadTimeDays: 14 });
+    await api.post('/api/inventory-sync/stock/suppliers', { name: 'AH 22', leadTimeDays: 30, shippingDays: 4 });
+    const [a, b] = (await api.get('/api/inventory-sync/stock/products')).body.products.filter((p: any) => p.squareVariationId);
+    await api.put('/api/inventory-sync/stock/products/settings', { rows: [{ key: a.key, supplier: 'AH 18' }, { key: b.key, supplier: 'AH 22' }] });
+    forgetStockCache();
+    const r = await api.post('/api/inventory-sync/stock/purchase-orders', { suppliers: ['AH 18', 'AH 22'], store: 'salon', lines: [{ productKey: a.key, quantity: 5 }, { productKey: b.key, quantity: 5 }] });
+    expect(r.status).toBe(201);
+    expect(r.body.orders).toHaveLength(1);
+    const po = r.body.orders[0];
+    expect(po.supplier).toBe('AH 18 + AH 22');
+    expect(po.lines.map((l: any) => [l.supplier, l.leadTimeDays]).sort()).toEqual([['AH 18', 14], ['AH 22', 34]]);
+    // Lot numbers can be set at any stage.
+    expect((await api.patch(`/api/inventory-sync/stock/purchase-orders/${po.id}/lines/${po.lines[0].id}`, { lotNote: 'L0724' })).status).toBe(200);
+    // Both suppliers count the order.
+    const list = (await api.get('/api/inventory-sync/stock/suppliers')).body.suppliers;
+    expect(list.filter((x: any) => ['AH 18', 'AH 22'].includes(x.name)).map((x: any) => x.openOrders)).toEqual([1, 1]);
+    expect(list.some((x: any) => x.name.includes(' + '))).toBe(false);
+  });
+
+  it('suggested orders: a draft per collection with what needs ordering, replaced when run again', async () => {
+    await api.post('/api/inventory-sync/stock/sales/refresh');
+    // Make everything need ordering.
+    const products = (await api.get('/api/inventory-sync/stock/products')).body.products;
+    await api.put('/api/inventory-sync/stock/products/settings', { rows: products.map((p: any) => ({ key: p.key, leadTimeDays: 700 })) });
+    forgetStockCache();
+    const first = (await api.post('/api/inventory-sync/stock/purchase-orders/suggest', { store: 'all' })).body.orders;
+    expect(first.length).toBeGreaterThan(0);
+    expect(first.every((o: any) => o.status === 'draft' && o.name.startsWith('Suggested · '))).toBe(true);
+    forgetStockCache();
+    const again = (await api.post('/api/inventory-sync/stock/purchase-orders/suggest', { store: 'all' })).body.orders;
+    const all = (await api.get('/api/inventory-sync/stock/purchase-orders')).body.orders.filter((o: any) => o.name?.startsWith('Suggested · '));
+    expect(all.length).toBe(again.length); // the earlier ones were replaced
+  });
 });
 
