@@ -3,7 +3,7 @@ import { pathInAwaySections } from '@addendum/shared';
 import { useAccessStatus } from './NetworkBlocked';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
-  ArrowLeftRight, BarChart3, ShoppingBag, Timer, Bell, CalendarDays, CircleDollarSign, Package, CheckSquare, Home, ListTodo, LogOut, Menu as MenuIcon, MessageSquare, Plus, Settings, Sparkles, Users, Wallet, X,
+  ArrowLeftRight, BarChart3, ChevronDown, ShoppingBag, Timer, Bell, CalendarDays, CircleDollarSign, Package, CheckSquare, Home, ListTodo, LogOut, Menu as MenuIcon, MessageSquare, Plus, Settings, Sparkles, Users, Wallet, X,
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
@@ -14,7 +14,7 @@ import { useActions } from '../domain/ActionsProvider';
 import { BrandMark, useAppearance } from './Brand';
 import { GlobalSearch } from './GlobalSearch';
 import { SystemBanner } from './SystemBanner';
-import { SubNavList } from './subNav';
+import { SUB_NAV, SubNavList, setSectionCollapsed, useSectionCollapsed } from './subNav';
 import { CustomizeMenuLink, CustomizeMenuModal, useMenu } from './sidebarLayout';
 import { useStoreNames } from '../../lib/storeNames';
 import { Notifications, useUpdates } from './Notifications';
@@ -46,6 +46,34 @@ export const NAV: { to: string; label: string; icon: typeof Home; end?: boolean;
 ];
 /** Phone tab bar: the first four of these the person can open (by role); everything else is under More. */
 const MOBILE_TABS = ['/', '/time-clock', '/follow-ups', '/appointments', '/my-calendar', '/messages', '/clients', '/tasks', '/inventory', '/my-commission'];
+
+/**
+ * A sidebar tab. A tab with collapsible sub-tabs (Inventory) opens them when you go to it, and clicking it while you're
+ * in that section opens or closes them — it stays highlighted while any of its sub-tabs is showing.
+ */
+function NavItem({ n, unread }: { n: (typeof NAV)[number]; unread: number }) {
+  const loc = useLocation();
+  const collapsible = !!SUB_NAV[n.to]?.collapsible;
+  const collapsed = useSectionCollapsed(n.to);
+  const inSection = loc.pathname === n.to || loc.pathname.startsWith(`${n.to}/`);
+  return (
+    <NavLink
+      to={n.to}
+      end={n.end}
+      aria-expanded={collapsible ? inSection && !collapsed : undefined}
+      onClick={(e) => {
+        if (!collapsible) return;
+        if (inSection) { e.preventDefault(); setSectionCollapsed(n.to, !collapsed); } else setSectionCollapsed(n.to, false);
+      }}
+      className={({ isActive }) => cx('relative flex min-h-[48px] items-center gap-3 rounded-lg px-3 py-2 text-[16px] transition-colors lg:min-h-0 lg:text-[14.5px]', isActive ? 'bg-white font-medium text-ink shadow-sm' : 'text-ink-soft hover:bg-white/60')}
+    >
+      <n.icon className="h-[18px] w-[18px] text-stone" />
+      <span className="flex-1">{n.label}</span>
+      {n.badge === 'messages' && unread > 0 && <span className="rounded-full bg-plum px-1.5 text-[11px] font-semibold leading-5 text-white num">{unread}</span>}
+      {collapsible && <ChevronDown className={cx('h-3.5 w-3.5 text-stone transition-transform', inSection && !collapsed && 'rotate-180')} aria-hidden />}
+    </NavLink>
+  );
+}
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { data: me } = useMe();
@@ -85,15 +113,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const link = (n: (typeof items)[number]) => (
     <div key={n.to}>
-      <NavLink
-        to={n.to}
-        end={n.end}
-        className={({ isActive }) => cx('relative flex min-h-[48px] items-center gap-3 rounded-lg px-3 py-2 text-[16px] transition-colors lg:min-h-0 lg:text-[14.5px]', isActive ? 'bg-white font-medium text-ink shadow-sm' : 'text-ink-soft hover:bg-white/60')}
-      >
-        <n.icon className="h-[18px] w-[18px] text-stone" />
-        <span className="flex-1">{n.label}</span>
-        {n.badge === 'messages' && unread > 0 && <span className="rounded-full bg-plum px-1.5 text-[11px] font-semibold leading-5 text-white num">{unread}</span>}
-      </NavLink>
+      <NavItem n={n} unread={unread} />
       {/* While in a section with a sub-menu, its parts are listed underneath. */}
       <SubNavList path={n.to} names={names} can={(p) => can(p)} />
     </div>

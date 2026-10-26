@@ -123,7 +123,8 @@ export function InventorySyncPage() {
         </>}
       />
       {/* Inventory's pages (a dropdown on phones); the store switch sits with the header's actions. */}
-      <PageTabs value={view === 'products' ? 'items' : view} onChange={(v) => setView(v)} options={TABS} />
+      {/* On larger screens the sidebar lists Inventory's sub-tabs; phones get the page dropdown here. */}
+      <PageTabs className="lg:hidden" value={view === 'products' ? 'items' : view} onChange={(v) => setView(v)} options={TABS} />
       {data.demoMode && view === 'sync' && <p className="mb-4 rounded-xl2 border border-line bg-mist/50 px-4 py-2 text-[13px] text-ink-soft">Demo Mode: this syncs the demo Square and Shopify catalogs. Nothing is sent to a real store.</p>}
       {['overview', 'items', 'stock'].includes(view) && <PreorderBanner />}
       {view === 'overview' && <InventoryOverview store={storePick} onOpenTab={setView} />}

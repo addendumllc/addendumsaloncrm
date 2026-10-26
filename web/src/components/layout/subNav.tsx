@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowDown, ArrowUp, ChevronDown } from 'lucide-react';
 import { useSidebarLayout } from './sidebarLayout';
@@ -14,10 +14,26 @@ import type { StoreNames } from '../../lib/storeNames';
 /** `menu`: similar sub-tabs folded under one dropdown in the sidebar (e.g. Ordering, Products). */
 /** `also`: other pages of this sub-tab (picked with a toggle on the page) — it's highlighted on those too. */
 export type SubItem = { to: string; label: string | ((n: StoreNames) => string); anyOf?: string[]; group?: string; menu?: string; also?: string[] };
-export type SubNav = { params: string[]; items: SubItem[] };
+/** `collapsible`: clicking the parent tab while in the section opens or closes its sub-tabs (Inventory). */
+export type SubNav = { params: string[]; items: SubItem[]; collapsible?: boolean };
 
 export const SUB_NAV: Record<string, SubNav> = {
-  // Inventory has no sub-menu: its pages are tabs on the page (Overview, Products, … Activity).
+  // Inventory: its original sub-tabs, each opening its page (the store pages pick Addendum Salon / Addendum Hair on the
+  // page: Square for the salon, Shopify for Addendum Hair). Clicking Inventory opens or closes them.
+  '/inventory-sync': {
+    params: ['view'],
+    collapsible: true,
+    items: [
+      { to: '/inventory-sync', label: 'Inventory', also: ['/inventory-sync?view=items'] },
+      { to: '/inventory-sync?view=reorder', label: 'To order', also: ['/inventory-sync?view=toorder', '/inventory-sync?view=preorders'] },
+      { to: '/inventory-sync?view=orders', label: 'Purchase orders' },
+      { to: '/inventory-sync?view=stock', label: 'Stock counts', also: ['/inventory-sync?view=activity'] },
+      { to: '/inventory-sync?view=products', label: 'Products' },
+      { to: '/inventory-sync?view=pricing', label: 'Pricing' },
+      { to: '/inventory-sync?view=suppliers', label: 'Suppliers' },
+      { to: '/inventory-sync?view=sync', label: 'Sync' },
+    ],
+  },
   // Tasks: each page starts with Addendum Salon / Addendum Hair.
   '/tasks': {
     params: ['view'],
@@ -121,14 +137,32 @@ export function SectionPicker({ path, names, can: canDo, className }: { path: st
  * The sub-menu under a sidebar item, while you're in that section (both sidebars use it). Similar sub-tabs fold under a
  * dropdown; each person can reorder the sub-tabs (Reorder, at the bottom — saved to their account).
  */
+/** Sections the person has closed (collapsible ones only), remembered on this device. */
+const COLLAPSED_KEY = 'addendum:nav-collapsed';
+const collapsedListeners = new Set<() => void>();
+const readCollapsed = (): string[] => { try { return JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]'); } catch { return []; } };
+export function setSectionCollapsed(path: string, collapsed: boolean) {
+  const cur = new Set(readCollapsed());
+  if (collapsed) cur.add(path); else cur.delete(path);
+  try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...cur])); } catch { /* private window */ }
+  collapsedListeners.forEach((f) => f());
+}
+export function useSectionCollapsed(path: string) {
+  const [, bump] = useState(0);
+  useEffect(() => { const f = () => bump((n) => n + 1); collapsedListeners.add(f); return () => { collapsedListeners.delete(f); }; }, []);
+  return readCollapsed().includes(path);
+}
+
 export function SubNavList({ path, names, can: canDo }: { path: string; names: StoreNames; can: (p: string) => boolean }) {
   const can = useCanOrShared(canDo);
   const loc = useLocation();
+  const collapsed = useSectionCollapsed(path);
   const { layout, save } = useSidebarLayout();
   const [reordering, setReordering] = useState(false);
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({});
   const sub = SUB_NAV[path];
   if (!sub || !(loc.pathname === path || loc.pathname.startsWith(`${path}/`))) return null;
+  if (sub.collapsible && collapsed) return null;
   const allowed = sub.items.filter((i) => !i.anyOf || i.anyOf.some(can));
   if (allowed.length < 2) return null;
   // Their order (new sub-tabs keep their built-in place).
