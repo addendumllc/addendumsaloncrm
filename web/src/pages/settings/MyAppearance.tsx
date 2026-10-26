@@ -5,7 +5,7 @@ import { api } from '../../api/client';
 import { useLook, useMe, useSettings, useUserThemes } from '../../api/hooks';
 import { USER_COLORS, applyPersonalLook, fontStackFor } from '../../lib/theme';
 import { ButtonFields, COLOR_FIELDS, ColorField, LivePreview, ThemeCard, ThemePreviewLarge, TypeFields, suggestColors, SidebarOpacityField, OpacityField } from '../../components/domain/ThemeFields';
-import { Button, Field, Modal, Segmented, Toggle, cx, useToast } from '../../components/ui';
+import { Button, Field, Modal, PageTabs, Segmented, Toggle, cx, useToast } from '../../components/ui';
 import { Pencil, Plus } from 'lucide-react';
 
 /** A section of the Appearance page. */
@@ -57,6 +57,9 @@ export function MyAppearance() {
   // Opacity of each colour (the sidebar has its own): their own over the theme's.
   const setOpacity = (k: Exclude<keyof ThemeColors, 'sidebar'>, v: number | undefined) => { const o = { ...(custom.opacity ?? {}) }; if (v == null) delete o[k]; else o[k] = v; setCustom({ ...custom, opacity: o }); };
   const setColor = (k: keyof ThemeColors, v: string | undefined) => { const colors = { ...(custom.colors ?? {}) }; if (v) colors[k] = v; else delete colors[k]; setCustom({ ...custom, colors }); };
+  // Theme Settings (themes and colours) · Font Style (fonts and every text size) · Button Style — one draft, one Save.
+  const [section, setSectionState] = useState<'theme' | 'font' | 'buttons'>(() => { try { const v = localStorage.getItem('appearance-section'); return v === 'font' || v === 'buttons' ? v : 'theme'; } catch { return 'theme'; } });
+  const setSection = (v: 'theme' | 'font' | 'buttons') => { setSectionState(v); try { localStorage.setItem('appearance-section', v); } catch { /* private window */ } };
   const [more, setMore] = useState(() => !!Object.keys(start.custom?.colors ?? {}).some((k) => k !== 'accent' && k !== 'accent2'));
   // Their calendar colour (Calendar color, below): offered as an accent.
   const { data: profile } = useQuery({ queryKey: ['my-profile'], queryFn: () => api.get<{ profile: { color: string | null } }>('/my-profile').then((r) => r.profile) });
@@ -87,7 +90,11 @@ export function MyAppearance() {
 
   return (
     <div className="border border-line bg-white">
+      <div className="px-5 pt-4">
+        <PageTabs className="mb-0" value={section} onChange={setSection} options={[{ value: 'theme', label: 'Theme Settings' }, { value: 'font', label: 'Font Style' }, { value: 'buttons', label: 'Button Style' }]} />
+      </div>
       <div className="space-y-6 p-5">
+        {section === 'theme' && <>
         <Part title="Theme" hint="Themes published by your administrator. Pick one, then adjust it below if you like.">
           <div className="-mx-1.5 flex flex-wrap gap-1">
             {def && <ThemeCard t={def} badge="Default" on={!d.themeId} onPick={() => setDraft({ ...d, themeId: null })} />}
@@ -148,6 +155,11 @@ export function MyAppearance() {
             </div>
           )}
         </Part>
+        <Part title="Display" hint="Light, dark or following your device. The layout and sizes stay the same.">
+          <Segmented value={(d.mode ?? 'light') as ColorMode} onChange={(m) => setDraft({ ...d, mode: m })} options={[{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }, { value: 'auto', label: 'System' }]} />
+        </Part>
+        </>}
+        {section === 'font' && <>
         {fontStyles.length > 0 && (
           <Part title="Font style" hint="Font styles made by your administrator: a font for headings, subheadings, paragraphs, the menu, buttons and labels. Pick the one you prefer.">
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -166,20 +178,20 @@ export function MyAppearance() {
             </div>
           </Part>
         )}
-        <Part title={fontStyles.length ? 'Text size' : 'Fonts & text size'} hint={fontStyles.length ? 'Sizes for text, headings and small labels — applied evenly across the CRM.' : 'The interface font and sizes for text, headings and small labels — applied evenly across the CRM.'} locked={ts.allow.type ? undefined : locked}>
+        <Part title={fontStyles.length ? 'Text size & weight' : 'Fonts, text size & weight'} hint={fontStyles.length ? 'Base text, headings, small text and labels, and text weight — applied evenly across the CRM, for you only.' : 'The interface font, sizes for text, headings and small labels, and text weight — applied evenly across the CRM, for you only.'} locked={ts.allow.type ? undefined : locked}>
           <TypeFields hideFonts={fontStyles.length > 0} value={r.type} onChange={(p) => setCustom({ ...custom, type: { ...(custom.type ?? {}), ...p } })}
             customFonts={{ heading: fontFile(org, 'heading')?.name, body: fontFile(org, 'body')?.name }} />
         </Part>
-        <Part title="Buttons" hint="One size and corner style for every button." locked={ts.allow.buttons ? undefined : locked}>
-          <ButtonFields value={r.buttons} onChange={(p) => setCustom({ ...custom, buttons: { ...(custom.buttons ?? {}), ...p } })} />
-        </Part>
+        </>}
+        {section === 'buttons' && (
+          <Part title="Button style" hint="One size, height and corner style for every button — for you only." locked={ts.allow.buttons ? undefined : locked}>
+            <ButtonFields value={r.buttons} onChange={(p) => setCustom({ ...custom, buttons: { ...(custom.buttons ?? {}), ...p } })} />
+          </Part>
+        )}
         <section className="border-t border-line pt-6">
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-stone">Preview</p>
           <LivePreview />
         </section>
-        <Part title="Display" hint="Light, dark or following your device. The layout and sizes stay the same.">
-          <Segmented value={(d.mode ?? 'light') as ColorMode} onChange={(m) => setDraft({ ...d, mode: m })} options={[{ value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }, { value: 'auto', label: 'System' }]} />
-        </Part>
       </div>
       <div className={cx('sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-line bg-white px-5 py-3')}>
         {dirty ? <span className="text-[13px] text-amber">Unsaved changes — previewing now</span> : <span className="text-[13px] text-stone">Saved to your account</span>}

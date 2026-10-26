@@ -391,7 +391,7 @@ function EditSettings({ p, onClose }: { p: StockProductDTO; onClose: () => void 
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Production (days)" hint={sup?.leadTimeDays != null ? `Blank = ${sup.name}’s ${sup.leadTimeDays}` : 'Blank = the default'}><input className="field num" inputMode="numeric" placeholder={str(sup?.leadTimeDays)} {...f('lead')} /></Field>
           <Field label="Transit (days)" hint={sup?.shippingDays != null ? `Blank = ${sup.name}’s ${sup.shippingDays}` : 'Blank = none'}><input className="field num" inputMode="numeric" placeholder={str(sup?.shippingDays)} {...f('ship')} /></Field>
-          <Field label="Total lead time"><p className="py-2 text-ink">{(num(d.lead) ?? sup?.leadTimeDays ?? 0) + (num(d.ship) ?? sup?.shippingDays ?? 0)} days</p></Field>
+          <Field label="Total lead time"><p className="py-2 text-ink">{(num(d.lead) ?? sup?.leadTimeDays) == null ? <span className="text-stone">The forecast default (Forecast settings){(num(d.ship) ?? sup?.shippingDays) ? ` + ${num(d.ship) ?? sup?.shippingDays} transit` : ''}</span> : `${(num(d.lead) ?? sup!.leadTimeDays!) + (num(d.ship) ?? sup?.shippingDays ?? 0)} days`}</p></Field>
         </div>
         <p className={g}>Ordering</p>
         <div className="grid gap-3 sm:grid-cols-3">
