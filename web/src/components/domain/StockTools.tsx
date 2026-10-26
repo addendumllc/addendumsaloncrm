@@ -1037,7 +1037,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
         <select className="field h-9 w-auto py-1 text-sm" value={by} onChange={(e) => setBy(e.target.value as typeof by)} aria-label="View by">
           <option value="product">View by product</option><option value="collection">View by collection</option><option value="supplier">View by supplier</option>
         </select>
-        <span className="ml-auto flex items-center gap-2">
+        <span className="flex flex-wrap items-center gap-2 sm:ml-auto">
           <Toggle checked={showMoq} onChange={(v) => { setShowMoq(v); try { localStorage.setItem('reorder-moq', v ? '1' : '0'); } catch { /* private window */ } }} label="MOQ timing" />
           <Button size="sm" icon={<ListPlus className="h-4 w-4" />} onClick={() => setSuggesting(true)}>Draft suggested orders</Button>
           <Button size="sm" icon={<Settings2 className="h-4 w-4" />} onClick={() => setDefaults(data.settings)}>Forecast settings</Button>

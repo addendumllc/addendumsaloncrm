@@ -141,7 +141,7 @@ describe('Square sales → commission', () => {
   });
 
   it('sends what Square can’t attribute to review instead of guessing, and a person can credit it', async () => {
-    const review = (await admin.get('/api/commission/review')).body.entries;
+    const review = (await admin.get(`/api/commission/review?from=${daysAgo(400)}&to=${today()}`)).body.entries;
     const custom = review.find((e: any) => e.itemName === 'Custom amount');
     expect(custom.staffId).toBeNull();
     expect(custom.reviewReason).toMatch(/Custom amount/);
@@ -262,13 +262,13 @@ describe('Rate changes, finalizing and history', () => {
     expect((await admin.put('/api/commission/settings', { unrecordedCheckout: { ...settings.unrecordedCheckout, fallbackStaffId: michaelId } })).status).toBe(200);
     const b2 = (await entries("square_order_id = 'demo-ord-nobody-b'"))[0];
     expect(b2).toMatchObject({ staff_id: michaelId, attribution: 'fallback', on_hold: true });
-    const review = (await admin.get('/api/commission/review')).body.entries;
+    const review = (await admin.get(`/api/commission/review?from=${daysAgo(400)}&to=${today()}`)).body.entries;
     expect(review.find((e: any) => e.squareOrderId === 'demo-ord-nobody-b').calc.suggestions[0]).toMatchObject({ staffId: michaelId });
     // Someone switched off for suggestions (e.g. never at the salon) is never picked or suggested.
     expect((await admin.put(`/api/commission/pay/${michaelId}/suggest`, { suggest: false })).status).toBe(200);
     const b3 = (await entries("square_order_id = 'demo-ord-nobody-b'"))[0];
     expect(b3.staff_id).toBeNull();
-    const review3 = (await admin.get('/api/commission/review')).body.entries.find((e: any) => e.squareOrderId === 'demo-ord-nobody-b');
+    const review3 = (await admin.get(`/api/commission/review?from=${daysAgo(400)}&to=${today()}`)).body.entries.find((e: any) => e.squareOrderId === 'demo-ord-nobody-b');
     expect((review3.calc.suggestions ?? []).some((x: any) => x.staffId === michaelId)).toBe(false);
     await admin.put(`/api/commission/pay/${michaelId}/suggest`, { suggest: true });
 

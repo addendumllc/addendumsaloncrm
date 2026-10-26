@@ -117,6 +117,9 @@ async function live(fresh = false): Promise<Live> {
   return out;
 }
 
+/** The products as listed now (for other parts of the CRM, e.g. Purchases & Transactions). */
+export const stockRows = async () => (await live()).rows;
+
 export async function stockProducts() {
   const l = await live();
   const sq = await squareService();
@@ -1382,7 +1385,7 @@ async function fillOrderWho(lines: { order_id: string; store: string }[]) {
   await setKV('stock.order-who', orderWhoCache);
 }
 
-const shopifyNameOf = (which: 'shopify' | 'shopify2') => (which === 'shopify2' ? storeNames().shopify2 ?? shopify2Name() ?? 'Store 2' : storeNames().shopify);
+export const shopifyNameOf = (which: 'shopify' | 'shopify2') => (which === 'shopify2' ? storeNames().shopify2 ?? shopify2Name() ?? 'Store 2' : storeNames().shopify);
 
 /**
  * Bell notification when customers pre-order something new (a product goes further below zero online), to everyone who

@@ -3,7 +3,7 @@ import { pathInAwaySections } from '@addendum/shared';
 import { useAccessStatus } from './NetworkBlocked';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
-  ArrowLeftRight, BarChart3, Timer, Bell, CalendarDays, CircleDollarSign, Package, CheckSquare, Home, ListTodo, LogOut, Menu as MenuIcon, MessageSquare, Plus, Settings, Sparkles, Users, Wallet, X,
+  ArrowLeftRight, BarChart3, ShoppingBag, Timer, Bell, CalendarDays, CircleDollarSign, Package, CheckSquare, Home, ListTodo, LogOut, Menu as MenuIcon, MessageSquare, Plus, Settings, Sparkles, Users, Wallet, X,
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
@@ -39,6 +39,8 @@ export const NAV: { to: string; label: string; icon: typeof Home; end?: boolean;
   { to: '/my-commission', label: 'Earnings & Goals', icon: Wallet, anyOf: ['commission:own'] },
   { to: '/commission', label: 'Team Payroll', icon: CircleDollarSign, anyOf: ['commission:team', 'commission:approve'] },
   { to: '/analytics', label: 'Analytics', icon: BarChart3, anyOf: ['analytics:read', 'revenue:projections'] },
+  // Orders from every store the person can see (Square and Shopify), with item filters.
+  { to: '/purchases', label: 'Purchases', icon: ShoppingBag, anyOf: ['analytics:read', 'inventory:sync', 'hair:manage'] },
   // Everyone ('' = no permission needed): their own profile, display and password, plus the salon settings they're allowed.
   { to: '/settings', label: 'Settings', icon: Settings, anyOf: [''] },
 ];

@@ -1446,7 +1446,7 @@ export interface SidebarDefaults {
 /** Which business each tab belongs to. "/appointments" and "/my-calendar" are one tab (all calendars, or their own). */
 export const DEFAULT_MENU_GROUPS: Record<string, MenuGroup> = {
   '/': 'shared', '/tasks': 'shared', '/follow-ups': 'shared', '/inventory-sync': 'shared', '/commission': 'shared', '/analytics': 'shared',
-  '/announcements': 'shared', '/settings': 'shared',
+  '/announcements': 'shared', '/settings': 'shared', '/purchases': 'shared',
   // Clients: one tab for both businesses (Addendum Salon / Addendum Hair at the top of the page, like Tasks).
   '/clients': 'shared',
   '/time-clock': 'salon', '/messages': 'salon', '/inventory': 'salon', '/appointments': 'salon', '/my-calendar': 'salon', '/my-commission': 'salon',
@@ -1464,14 +1464,14 @@ export const MENU_SECTIONS: { key: string; label: string }[] = [
 export const DEFAULT_MENU_SECTIONS: Record<string, MenuSection> = {
   '/': 'daily', '/tasks': 'daily', '/follow-ups': 'daily', '/messages': 'daily', '/clients': 'daily', '/appointments': 'daily', '/my-calendar': 'daily', '/announcements': 'daily',
   '/inventory-sync': 'operations', '/inventory': 'operations', '/time-clock': 'operations',
-  '/analytics': 'business', '/commission': 'business', '/my-commission': 'business',
+  '/analytics': 'business', '/purchases': 'business', '/commission': 'business', '/my-commission': 'business',
   '/settings': 'admin',
 };
 /** The built-in order (within each section). */
 export const DEFAULT_MENU_ORDER = [
   '/', '/tasks', '/follow-ups', '/messages', '/clients', '/appointments', '/my-calendar', '/announcements',
   '/inventory-sync', '/inventory', '/time-clock',
-  '/analytics', '/commission', '/my-commission',
+  '/analytics', '/purchases', '/commission', '/my-commission',
   '/settings',
 ];
 /** Tabs nobody can hide (none: Settings can be hidden too — their name at the bottom still opens their settings). */

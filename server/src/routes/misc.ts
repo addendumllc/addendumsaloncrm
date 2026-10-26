@@ -5,6 +5,8 @@ import { requirePermission } from '../auth/session.js';
 import { db } from '../db/index.js';
 import { analytics } from '../domain/analytics.js';
 import { analyticsForecast, productAnalytics } from '../domain/stock.js';
+import { listPurchases, purchaseItems, type PurchaseStore } from '../domain/purchases.js';
+import { shopifyService, shopifyService2 } from '../integrations/registry.js';
 import { dashboard } from '../domain/dashboard.js';
 import { newClientStats } from '../domain/newClients.js';
 import { globalSearch } from '../domain/search.js';
@@ -169,6 +171,41 @@ miscRouter.get('/analytics/products', requirePermission('analytics:read'), ah(as
 
 /** Forecast: what to order by urgency (products of suppliers whose lead time isn't tracked are left out). */
 miscRouter.get('/analytics/forecast', requirePermission('analytics:read'), ah(async (_req, res) => res.json(await analyticsForecast())));
+
+/**
+ * Purchases & Transactions. Which stores someone may see: the salon's Square orders with Analytics; the Shopify stores'
+ * orders with inventory or Addendum Hair access (or Analytics). Asking for a store they can't see is refused, and
+ * customer names need client access.
+ */
+function purchaseStores(perms: string[]): PurchaseStore[] {
+  const has = (p: string) => perms.includes(p);
+  const out: PurchaseStore[] = [];
+  if (has('analytics:read')) out.push('square');
+  if (has('analytics:read') || has('inventory:sync') || has('hair:manage')) {
+    if (shopifyService()) out.push('shopify');
+    if (shopifyService2()) out.push('shopify2');
+  }
+  return out;
+}
+const purchaseQuery = z.object({
+  store: z.enum(['all', 'salon', 'hair', 'square', 'shopify', 'shopify2']).default('all'),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  q: z.string().max(100).optional(), items: z.string().max(4000).optional(), sort: z.enum(['new', 'old']).default('new'),
+  limit: z.coerce.number().int().min(1).max(5000).default(50), offset: z.coerce.number().int().min(0).default(0),
+});
+const purchaseFilter = (req: any) => {
+  const b = parse(purchaseQuery, req.query);
+  const allowed = purchaseStores(req.user!.permissions);
+  const want: PurchaseStore[] = b.store === 'all' ? allowed : b.store === 'salon' ? ['square'] : b.store === 'hair' ? ['shopify', 'shopify2'] : [b.store];
+  const stores = want.filter((s) => allowed.includes(s));
+  if (!stores.length) throw forbidden('You don’t have access to that store’s purchases.');
+  return { ...b, stores, items: b.items ? b.items.split(',').filter(Boolean) : undefined, customers: can(req.user, 'clients:read') };
+};
+miscRouter.get('/purchases', ah(async (req, res) => {
+  const f = purchaseFilter(req);
+  res.json({ ...(await listPurchases(f)), stores: purchaseStores(req.user!.permissions) });
+}));
+miscRouter.get('/purchases/items', ah(async (req, res) => res.json({ items: await purchaseItems(purchaseFilter(req)) })));
 
 const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be a date (YYYY-MM-DD)').refine((x) => !Number.isNaN(Date.parse(x)), 'must be a valid date');
 const newClientQuery = z.object({ from: ymd, to: ymd, staffId: z.string().uuid().optional() })
