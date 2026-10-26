@@ -1259,6 +1259,15 @@ export const DEFAULT_ORDER_HAIR: OrderHairLayout = { onlyListed: false, listed: 
  * "Hand-Tied Weft – 20\" / #60 Platinum" → collection Hand-Tied Weft, length 20", colour #60 Platinum. Single items
  * (tools, beads) are "Tools & accessories".
  */
+/**
+ * A hair product's length, e.g. 18" — from the SKU's start (18-…, 22-…) or the name (18", 18 inch); null when neither
+ * says. Purchase orders and suggested orders are grouped and sorted by it.
+ */
+export function hairLengthOf(label: string, sku?: string | null): string | null {
+  const s = (sku ?? '').match(/^(\d{2})-/)?.[1] ?? label.match(/\b(\d{2})\s*(?:"|”|''|inch(?:es)?\b|in\b)/i)?.[1];
+  return s ? `${s}"` : null;
+}
+
 export function hairParts(label: string): { collection: string; length: string; color: string; detail: string } {
   const parts = label.split(/\s+[-–]\s+/).map((x) => x.trim()).filter((x) => x && x.toLowerCase() !== 'default title');
   if (parts.length >= 3) return { color: parts[0], collection: parts[1], length: parts[2], detail: parts.slice(3).join(' · ') };

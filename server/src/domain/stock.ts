@@ -1,4 +1,4 @@
-import { productSearchWords } from '@addendum/shared';
+import { hairLengthOf, productSearchWords } from '@addendum/shared';
 import type {
   ProductAnalyticsDTO, PurchaseOrderDTO, PurchaseOrderStatus, SupplierDTO, StockApplyResultDTO, StockChangeInput, StockForecastDTO, StockForecastResponse, StockForecastSettings,
   StockProductDTO, StockProductStatus, StockTxnDTO, StockTxnKind, SupplierAssign, SupplierInput,
@@ -966,7 +966,11 @@ export interface SuggestedGroup {
 }
 
 /** What suggested orders would contain, per collection (nothing is saved). */
-export async function suggestedOrderPlan(store: 'salon' | 'shopify' | 'all'): Promise<SuggestedGroup[]> {
+/** How suggested orders are split: by collection, by length (18", 22"…), or both ("Redefined · 18\""). */
+export type SuggestGroupBy = 'collection' | 'length' | 'collection_length';
+const lengthNum = (l: string | null) => (l ? Number.parseInt(l, 10) : 999);
+
+export async function suggestedOrderPlan(store: 'salon' | 'shopify' | 'all', by: SuggestGroupBy = 'collection'): Promise<SuggestedGroup[]> {
   const f = await stockForecast();
   const fallback = await defaultSupplier();
   const inStore = (i: StockForecastDTO) => store === 'all' || (store === 'salon' ? i.stores.salon : i.stores.online);
@@ -974,12 +978,15 @@ export async function suggestedOrderPlan(store: 'salon' | 'shopify' | 'all'): Pr
   const coll = collectionOfEach(f.items.filter(inStore));
   // One draft per collection and supplier — never two suppliers on one order; products without one are "Supplier needed".
   const groups = new Map<string, StockForecastDTO[]>();
-  const keyOf = (i: StockForecastDTO) => `${coll(i)} · ${i.supplier ?? fallback ?? 'Supplier needed'}`;
+  const len = (i: StockForecastDTO) => hairLengthOf(i.label, i.sku);
+  const part = (i: StockForecastDTO) => (by === 'length' ? len(i) ?? 'No length' : by === 'collection_length' ? [coll(i), len(i)].filter(Boolean).join(' · ') : coll(i));
+  const keyOf = (i: StockForecastDTO) => `${part(i)} · ${i.supplier ?? fallback ?? 'Supplier needed'}`;
   for (const i of need) groups.set(keyOf(i), [...(groups.get(keyOf(i)) ?? []), i]);
-  return [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([collection, list]) => ({
+  // Groups in order (lengths shortest first), and in each: by length, then name.
+  return [...groups].sort(([a], [b]) => (by === 'length' ? lengthNum(a) - lengthNum(b) : 0) || a.localeCompare(b, undefined, { numeric: true })).map(([collection, list]) => ({
     collection,
     suppliers: [...new Set(list.map((i) => i.supplier ?? fallback).filter((x): x is string => !!x))],
-    lines: list.map((i) => ({ productKey: i.key, label: i.label, sku: i.sku, status: i.status, stock: i.stock, quantity: i.suggestedQty, costCents: i.costCents })),
+    lines: [...list].sort((a, b) => lengthNum(len(a)) - lengthNum(len(b)) || a.label.localeCompare(b.label)).map((i) => ({ productKey: i.key, label: i.label, sku: i.sku, status: i.status, stock: i.stock, quantity: i.suggestedQty, costCents: i.costCents })),
   }));
 }
 
@@ -987,8 +994,8 @@ export async function suggestedOrderPlan(store: 'salon' | 'shopify' | 'all'): Pr
  * Makes the suggested drafts — the plan as previewed (with any products left out or amounts changed), or the current
  * plan. Earlier suggested drafts for the same store are replaced first.
  */
-export async function suggestPurchaseOrders(store: 'salon' | 'shopify' | 'all', staffId: string | null, chosen?: { collection: string; lines: { productKey: string; quantity: number }[] }[]) {
-  const plan = await suggestedOrderPlan(store);
+export async function suggestPurchaseOrders(store: 'salon' | 'shopify' | 'all', staffId: string | null, chosen?: { collection: string; lines: { productKey: string; quantity: number }[] }[], by: SuggestGroupBy = 'collection') {
+  const plan = await suggestedOrderPlan(store, by);
   const groups = chosen
     ? chosen.filter((g) => g.lines.some((l) => l.quantity > 0)).map((g) => ({ collection: g.collection, suppliers: plan.find((p) => p.collection === g.collection)?.suppliers ?? [], lines: g.lines.filter((l) => l.quantity > 0) }))
     : plan;

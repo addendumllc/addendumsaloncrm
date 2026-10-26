@@ -269,17 +269,18 @@ inventorySyncRouter.post('/stock/purchase-orders', ah(async (req, res) => {
   await logAction(req, 'stock.po_create', 'purchase_order', orders[0]?.id ?? null, { orders: orders.map((o) => o.number) });
   res.status(201).json({ orders });
 }));
+const suggestBy = z.enum(['collection', 'length', 'collection_length']).catch('collection');
 // Suggested orders: a draft per collection with what needs ordering (replaces earlier suggested drafts for the store).
 inventorySyncRouter.get('/stock/purchase-orders/suggest', ah(async (req, res) => {
   const store = (['salon', 'shopify'] as const).find((s) => s === req.query.store) ?? 'all';
-  res.json({ groups: await suggestedOrderPlan(store) });
+  res.json({ groups: await suggestedOrderPlan(store, suggestBy.parse(req.query.groupBy ?? 'collection')) });
 }));
 inventorySyncRouter.post('/stock/purchase-orders/suggest', ah(async (req, res) => {
   const b = parse(z.object({
-    store: z.enum(['salon', 'shopify', 'all']).default('all'),
+    store: z.enum(['salon', 'shopify', 'all']).default('all'), groupBy: suggestBy.default('collection'),
     groups: z.array(z.object({ collection: z.string().min(1).max(120), lines: z.array(z.object({ productKey: z.string().min(1).max(200), quantity: z.number().int().min(0).max(100_000) })).max(500) })).max(200).optional(),
   }), req.body ?? {});
-  const orders = await suggestPurchaseOrders(b.store, req.user!.id, b.groups);
+  const orders = await suggestPurchaseOrders(b.store, req.user!.id, b.groups, b.groupBy);
   await logAction(req, 'stock.po_suggest', 'purchase_order', null, { orders: orders.map((o) => o.number), store: b.store });
   res.status(201).json({ orders });
 }));

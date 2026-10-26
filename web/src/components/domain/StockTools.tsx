@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  STOCK_REASONS, productSearchText, productSearchWords, type PurchaseOrderDTO, type StockApplyResultDTO, type SupplierDTO, type StockChangeInput, type StockForecastDTO, type StockForecastResponse,
+  STOCK_REASONS, hairLengthOf, productSearchText, productSearchWords, type PurchaseOrderDTO, type StockApplyResultDTO, type SupplierDTO, type StockChangeInput, type StockForecastDTO, type StockForecastResponse,
   type StockProductDTO, type StockProductStatus, type StockTxnDTO,
 } from '@addendum/shared';
 import { AlertTriangle, ArrowLeftRight, Settings2, ChevronDown, ChevronRight, Download, FileUp, ListPlus, PackageCheck, Plus, Replace, Search, Trash2, Pencil, X } from 'lucide-react';
@@ -887,6 +887,21 @@ const F_STATUS: Record<StockForecastDTO['status'], { label: string; tone: 'rose'
   watch: { label: 'Watch', tone: 'plum' }, healthy: { label: 'Healthy', tone: 'sage' }, no_sales: { label: 'No recent sales', tone: 'neutral' }, discontinued: { label: 'Discontinued', tone: 'neutral' },
 };
 
+type SuggestGroupBy = 'collection' | 'length' | 'collection_length';
+const SUGGEST_BY: Record<SuggestGroupBy, string> = { collection: 'Collection', length: 'Length', collection_length: 'Collection + length' };
+/**
+ * An order's items sorted by collection and/or length (shortest first), each with the heading to show above it when
+ * it starts a new group; "none" keeps them as added.
+ */
+export function groupLines<L extends { productKey: string; label: string; sku: string | null }>(lines: L[], by: SuggestGroupBy | 'none', collectionOf: (key: string) => string) {
+  if (by === 'none') return lines.map((line) => ({ head: null as string | null, line }));
+  const len = (l: L) => hairLengthOf(l.label, l.sku);
+  const n = (l: L) => { const x = len(l); return x ? Number.parseInt(x, 10) : 999; };
+  const headOf = (l: L) => (by === 'length' ? len(l) ?? 'No length' : by === 'collection' ? collectionOf(l.productKey) : [collectionOf(l.productKey), len(l)].filter(Boolean).join(' · '));
+  const sorted = [...lines].sort((a, b) => (by === 'length' ? 0 : collectionOf(a.productKey).localeCompare(collectionOf(b.productKey))) || n(a) - n(b) || a.label.localeCompare(b.label));
+  return sorted.map((line, i) => ({ head: i === 0 || headOf(sorted[i - 1]) !== headOf(line) ? headOf(line) : null, line }));
+}
+
 type SuggestedGroup = { collection: string; suppliers: string[]; lines: { productKey: string; label: string; sku: string | null; status: StockForecastDTO['status']; stock: number; quantity: number; costCents: number | null }[] };
 
 /**
@@ -895,7 +910,10 @@ type SuggestedGroup = { collection: string; suppliers: string[]; lines: { produc
  */
 function SuggestedOrders({ store, onClose, onMade }: { store: 'all' | 'salon' | 'shopify'; onClose: () => void; onMade: () => void }) {
   const toast = useToast();
-  const { data, isLoading, error, refetch } = useQuery({ queryKey: ['suggested-orders', store], gcTime: 0, queryFn: () => api.get<{ groups: SuggestedGroup[] }>(`/inventory-sync/stock/purchase-orders/suggest?store=${store}`).then((r) => r.groups) });
+  // Group by collection, length (18", 22", 24"…) or both — remembered on this device.
+  const [groupBy, setGroupByState] = useState<SuggestGroupBy>(() => { try { const v = localStorage.getItem('suggest-by'); return v === 'length' || v === 'collection_length' ? v : 'collection'; } catch { return 'collection'; } });
+  const setGroupBy = (v: SuggestGroupBy) => { setGroupByState(v); try { localStorage.setItem('suggest-by', v); } catch { /* private window */ } };
+  const { data, isLoading, error, refetch } = useQuery({ queryKey: ['suggested-orders', store, groupBy], gcTime: 0, queryFn: () => api.get<{ groups: SuggestedGroup[] }>(`/inventory-sync/stock/purchase-orders/suggest?store=${store}&groupBy=${groupBy}`).then((r) => r.groups) });
   const [qty, setQty] = useState<Record<string, string>>({});
   const [off, setOff] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -909,7 +927,7 @@ function SuggestedOrders({ store, onClose, onMade }: { store: 'all' | 'salon' | 
     setBusy(true);
     try {
       const r = await api.post<{ orders: PurchaseOrderDTO[] }>('/inventory-sync/stock/purchase-orders/suggest', {
-        store, groups: groups.map((g) => ({ collection: g.collection, lines: g.lines.map((l) => ({ productKey: l.productKey, quantity: q(l) })) })),
+        store, groupBy, groups: groups.map((g) => ({ collection: g.collection, lines: g.lines.map((l) => ({ productKey: l.productKey, quantity: q(l) })) })),
       });
       toast(`${r.orders.length} suggested draft${r.orders.length === 1 ? '' : 's'} made — review them in Purchase orders.`);
       onMade();
@@ -929,7 +947,14 @@ function SuggestedOrders({ store, onClose, onMade }: { store: 'all' | 'salon' | 
         <EmptyState title="Nothing needs ordering right now">Nothing is out of stock, due to order now, or reorder soon.</EmptyState>
       ) : (
         <div className="space-y-4 text-[13px]">
-          <p className="text-ink-soft">One draft per collection, at the suggested amounts. Untick anything you don’t want or change an amount. Earlier suggested drafts are replaced; nothing is ordered until you mark a draft ordered.</p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="min-w-0 flex-1 text-ink-soft">One draft per {SUGGEST_BY[groupBy].toLowerCase()} and supplier, at the suggested amounts. Untick anything you don’t want or change an amount. Earlier suggested drafts are replaced; nothing is ordered until you mark a draft ordered.</p>
+            <label className="flex items-center gap-2 text-stone">Group by
+              <select className="field h-9 w-auto py-0 text-[13px]" value={groupBy} onChange={(e) => setGroupBy(e.target.value as SuggestGroupBy)}>
+                {(Object.keys(SUGGEST_BY) as SuggestGroupBy[]).map((k) => <option key={k} value={k}>{SUGGEST_BY[k]}</option>)}
+              </select>
+            </label>
+          </div>
           {groups.map((g) => (
             <section key={g.collection} className="rounded-xl2 border border-line">
               <header className="flex flex-wrap items-baseline gap-x-2 border-b border-line bg-mist/40 px-3 py-2">
@@ -1308,6 +1333,15 @@ export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'sho
   const [creating, setCreating] = useState(false);
   // The order being edited (quantities, costs, adding and removing items).
   const [editing, setEditing] = useState<string | null>(null);
+  // Items listed under headings by collection and/or length (18" → 22" → 24"), or as added — remembered on this device.
+  const [itemsBy, setItemsByState] = useState<SuggestGroupBy | 'none'>(() => { try { const v = localStorage.getItem('po-items-by'); return v === 'collection' || v === 'length' || v === 'none' ? v : 'collection_length'; } catch { return 'collection_length'; } });
+  const setItemsBy = (v: typeof itemsBy) => { setItemsByState(v); try { localStorage.setItem('po-items-by', v); } catch { /* private window */ } };
+  const { data: productList } = useProducts();
+  const collectionOf = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const x of productList?.products ?? []) { const c = x.collection ?? x.collections[0]; if (c) m.set(x.key, c); }
+    return (key: string) => m.get(key) ?? 'No collection';
+  }, [productList]);
   // Moving an order made in the wrong store.
   const [moving, setMoving] = useState<PurchaseOrderDTO | null>(null);
   const { data: suppliers } = useSuppliers();
@@ -1370,14 +1404,23 @@ export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'sho
         <label className="mt-2 flex items-center gap-1.5 text-[13px] text-ink-soft">Lot number
           <input key={p.lotNumber ?? ''} className="field h-9 w-40 py-1 font-mono text-[13px]" maxLength={40} defaultValue={p.lotNumber ?? ''} placeholder="e.g. L0724" aria-label={`Lot number for ${p.name ?? `PO #${p.number}`}`}
             onBlur={(e) => { const v = e.target.value.trim(); if (v !== (p.lotNumber ?? '')) patch(p, { lotNumber: v || null }); }} /></label>
+        {p.lines.length > 1 && (
+          <label className="mt-3 flex items-center justify-end gap-1.5 text-[12px] text-stone">Items by
+            <select className="field h-8 w-auto py-0 text-[12px]" value={itemsBy} onChange={(e) => setItemsBy(e.target.value as typeof itemsBy)} aria-label="List items by">
+              {(Object.keys(SUGGEST_BY) as SuggestGroupBy[]).map((k) => <option key={k} value={k}>{SUGGEST_BY[k]}</option>)}
+              <option value="none">As added</option>
+            </select></label>
+        )}
         {/* Item lines wrap on phones (name first, then quantity, lead time or arrival, cost). */}
-        <ul className="mt-3 divide-y divide-line text-[13px]">
-          {p.lines.map((l) => {
+        <ul className="mt-1 divide-y divide-line text-[13px]">
+          {groupLines(p.lines, itemsBy, collectionOf).map(({ head, line: l }) => {
             const open = !['received', 'cancelled'].includes(p.status) && l.received < l.quantity;
             const edit = editing === p.id;
             const small = 'rounded-md border border-line bg-white px-1.5 py-0.5 num';
             return (
-              <li key={`${l.id}-${l.quantity}-${l.costCents}-${l.lotNote}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
+              <Fragment key={`${l.id}-${l.quantity}-${l.costCents}-${l.lotNote}`}>
+              {head && <li className="bg-mist/40 px-2 pb-1 pt-2 text-[12px] font-semibold uppercase tracking-wide text-stone">{head}</li>}
+              <li className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
                 <span className="min-w-[min(100%,12rem)] flex-1 text-ink">
                   {l.label}<span className="ml-2 text-[11px] text-stone">{l.sku}{p.supplier?.includes(' + ') && l.supplier ? ` · ${l.supplier}` : ''}</span>
                 </span>
@@ -1410,6 +1453,7 @@ export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'sho
                 )}
 
               </li>
+              </Fragment>
             );
           })}
         </ul>

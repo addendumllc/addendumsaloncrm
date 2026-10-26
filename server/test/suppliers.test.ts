@@ -269,6 +269,23 @@ describe('Suppliers', () => {
     expect(all.length).toBe(again.length); // the earlier ones were replaced
   });
 
+  it('suggested orders can be grouped by length (18" before 22"…) or collection + length, and drafts are named that way', async () => {
+    await api.post('/api/inventory-sync/stock/sales/refresh');
+    const products = (await api.get('/api/inventory-sync/stock/products')).body.products;
+    await api.put('/api/inventory-sync/stock/products/settings', { rows: products.map((p: any) => ({ key: p.key, leadTimeDays: 700 })) });
+    forgetStockCache();
+    const byLen = (await api.get('/api/inventory-sync/stock/purchase-orders/suggest?store=all&groupBy=length')).body.groups;
+    const lens = byLen.map((g: any) => g.collection.split(' · ')[0]);
+    expect(lens.some((l: string) => /^\d{2}"$/.test(l))).toBe(true);
+    const nums = lens.filter((l: string) => /^\d{2}"$/.test(l)).map((l: string) => Number.parseInt(l, 10));
+    expect(nums).toEqual([...nums].sort((x, y) => x - y));
+    expect(byLen.every((g: any) => g.suppliers.length <= 1)).toBe(true);
+    const both = (await api.get('/api/inventory-sync/stock/purchase-orders/suggest?store=all&groupBy=collection_length')).body.groups;
+    expect(both.some((g: any) => /\d{2}" · /.test(g.collection))).toBe(true);
+    const made = (await api.post('/api/inventory-sync/stock/purchase-orders/suggest', { store: 'all', groupBy: 'length' })).body.orders;
+    expect(made.some((o: any) => /^Suggested · \d{2}"/.test(o.name))).toBe(true);
+  });
+
   it('products in a discontinued collection (e.g. Classic) are never suggested, alerted or put on suggested orders', async () => {
     const base = (await api.get('/api/inventory-sync/stock/forecast')).body.settings;
     expect(base.discontinuedCollections).toEqual(['Classic']);
