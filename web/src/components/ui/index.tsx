@@ -157,8 +157,14 @@ export function Segmented<T extends string>({ value, onChange, options, classNam
  */
 export function PageTabs<T extends string>({ value, onChange, options, aside, className }: { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode }[]; aside?: ReactNode; className?: string }) {
   return (
-    <div className={cx('mb-5 flex flex-wrap-reverse items-end justify-between gap-x-4 gap-y-2 border-b border-line', className)}>
-      <div className="-mb-px flex max-w-full gap-5 overflow-x-auto scrollbar-none font-button" role="tablist">
+    <div className={cx('mb-5 flex flex-wrap-reverse items-end justify-between gap-x-4 gap-y-2 sm:border-b sm:border-line', className)}>
+      {/* Phones: the pages as a dropdown, so the current one always shows. */}
+      {options.length > 1 && (
+        <select className="field h-11 w-full text-[16px] font-medium sm:hidden" value={value} onChange={(e) => onChange(e.target.value as T)} aria-label="Page">
+          {options.map((o) => <option key={o.value} value={o.value}>{typeof o.label === 'string' ? tc(o.label) : o.value}</option>)}
+        </select>
+      )}
+      <div className={cx('-mb-px max-w-full gap-5 overflow-x-auto scrollbar-none font-button', options.length > 1 ? 'hidden sm:flex' : 'flex border-b border-line sm:border-0')} role="tablist">
         {options.map((o) => (
           <button key={o.value} type="button" role="tab" aria-selected={value === o.value} onClick={() => onChange(o.value)}
             className={cx('whitespace-nowrap border-b-2 pb-2.5 pt-1 text-[14px] font-medium transition-colors focus:outline-none focus-visible:text-plum', value === o.value ? 'border-plum text-ink' : 'border-transparent text-stone hover:text-ink')}>
@@ -299,7 +305,7 @@ export function PageHeader({ title, subtitle, actions }: { title: ReactNode; sub
         <h1 className="h-display text-[34px] leading-[1.05] sm:text-[40px]"><Tc>{title}</Tc></h1>
         {subtitle && <p className="mt-1.5 text-[15px] text-stone">{subtitle}</p>}
       </div>
-      {actions && <div className="flex min-w-0 max-w-full flex-wrap gap-2">{actions}</div>}
+      {actions && <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2 sm:shrink-0">{actions}</div>}
     </div>
   );
 }

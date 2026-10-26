@@ -683,14 +683,14 @@ function SpreadsheetModal({ products, onClose }: { products: StockProductDTO[]; 
 
 // ---------------- Stock: counts, adjustments, history ----------------
 /** `store`: every product, or only those the salon (Square) or Addendum Hair (online) sells. */
-export function StockView({ store = 'all' }: { store?: 'all' | 'salon' | 'hair' } = {}) {
+export function StockView({ store = 'all', initialQuery = '' }: { store?: 'all' | 'salon' | 'hair'; initialQuery?: string } = {}) {
   const N = useStoreNames();
   const { data, isLoading, error, refetch } = useProducts();
   const toast = useToast();
   const refresh = useRefresh();
   const report = useApplyReport();
   const [mode, setMode] = useState<'count' | 'adjust'>('count');
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(initialQuery);
   const [vals, setVals] = useState<Record<string, string>>({});
   const [reason, setReason] = useState<string>('Stock count');
   const [note, setNote] = useState('');
@@ -766,16 +766,16 @@ export function StockView({ store = 'all' }: { store?: 'all' | 'salon' | 'hair' 
           <Field label="Note (optional)" className="min-w-[200px] flex-1"><input className="field" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
           <Button variant="primary" loading={busy} disabled={!entered.length} onClick={save}>{mode === 'count' ? 'Save counts' : 'Save changes'}{entered.length ? ` (${entered.length})` : ''}</Button>
         </div>
-        <p className="mt-1 text-[12px] text-stone">{mode === 'count' ? `A count sets ${N.square} and ${N.shopify} to that number.` : 'Each store moves by the amount (e.g. −2 for two damaged).'} Every change is logged below.</p>
+        <p className="mt-1 text-[12px] text-stone">{mode === 'count' ? `A count sets ${N.square} and ${N.shopify} to that number.` : 'Each store moves by the amount (e.g. −2 for two damaged).'} Every change is logged under Activity.</p>
       </section>
-      <StockHistory />
     </div>
   );
 }
 
 const KIND_LABEL: Record<StockTxnDTO['kind'], string> = { count: 'Count', adjust: 'Adjusted', import: 'Spreadsheet / list', receive: 'Received', sku: 'SKU', sync: 'Sync' };
 
-function StockHistory() {
+/** Inventory → Activity: every stock count, adjustment, delivery, SKU change and sync, newest first. */
+export function StockHistory() {
   const N = useStoreNames();
   const [q, setQ] = useState('');
   const [kind, setKind] = useState('');
@@ -789,12 +789,11 @@ function StockHistory() {
   return (
     <section>
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <h2 className="h-display mr-auto text-[22px]">Stock history</h2>
         <input className="field w-56" placeholder="Search product, SKU or reason" value={q} onChange={(e) => setQ(e.target.value)} />
         <select className="field w-auto" value={kind} onChange={(e) => setKind(e.target.value)}>
           <option value="">All changes</option>{Object.entries(KIND_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
-        <Button size="sm" icon={<Download className="h-4 w-4" />} disabled={!data?.length} onClick={download}>Download</Button>
+        <Button size="sm" className="ml-auto" icon={<Download className="h-4 w-4" />} disabled={!data?.length} onClick={download}>Download</Button>
       </div>
       {isLoading ? <PageLoading /> : !data?.length ? <p className="text-[14px] text-stone">No stock changes yet.</p> : (
         <div className="overflow-x-auto rounded-xl2 border border-line bg-white">
@@ -1194,12 +1193,33 @@ function MovePoModal({ po, onClose }: { po: PurchaseOrderDTO; onClose: () => voi
   );
 }
 
+/** One order in the list: name, status, supplier, dates, items and total — opens it in full. */
+function PoRow({ p, supplier, onOpen }: { p: PurchaseOrderDTO; supplier: string | null; onOpen: () => void }) {
+  const items = p.lines.reduce((n, l) => n + l.quantity, 0);
+  return (
+    <button type="button" onClick={onOpen} className="flex w-full flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-left hover:bg-mist/40">
+      <span className="min-w-0 flex-1 basis-48">
+        <span className="block truncate text-[15px] font-medium text-ink">{p.name ?? `PO #${p.number}`}</span>
+        <span className="block truncate text-[12px] text-stone">{p.name ? `PO #${p.number} · ` : ''}{supplier ?? 'Supplier not set'}</span>
+      </span>
+      <Badge tone={PO_STATUS[p.status].tone}>{PO_STATUS[p.status].label}</Badge>
+      <span className="w-28 text-[13px] text-ink-soft"><span className="block text-[11px] text-stone">{p.orderedAt ? 'Ordered' : 'Made'}</span>{dateShort(p.orderedAt ?? p.createdAt)}</span>
+      <span className="w-28 text-[13px] text-ink-soft"><span className="block text-[11px] text-stone">Expected</span>{p.expectedOn ? dateShort(`${p.expectedOn}T12:00:00Z`) : '—'}</span>
+      <span className="num w-20 text-right text-[13px] text-ink-soft"><span className="block text-[11px] text-stone">Items</span>{items}</span>
+      <span className="num w-24 text-right text-[14px] font-medium text-ink"><span className="block text-[11px] font-normal text-stone">Total</span>{p.totalCents ? `$${(p.totalCents / 100).toFixed(2)}` : '—'}</span>
+    </button>
+  );
+}
+
 export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'shopify' }) {
   const N = useStoreNames();
   const toast = useToast();
   const refresh = useRefresh();
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['stock-pos'], queryFn: () => api.get<{ orders: PurchaseOrderDTO[] }>('/inventory-sync/stock/purchase-orders').then((r) => r.orders) });
-  const [show, setShow] = useState<'open' | 'all'>('open');
+  // Open orders unless a status is picked; search by name, number, supplier, lot or product.
+  const [show, setShow] = useState<'open' | 'all' | PurchaseOrderDTO['status']>('open');
+  const [q, setQ] = useState('');
+  const [openId, setOpenId] = useState<string | null>(null);
   const [receiving, setReceiving] = useState<PurchaseOrderDTO | null>(null);
   const [creating, setCreating] = useState(false);
   // The order being edited (quantities, costs, adding and removing items).
@@ -1213,7 +1233,10 @@ export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'sho
   };
   if (isLoading) return <PageLoading />;
   if (error || !data) return <ErrorNote error={error} onRetry={refetch} />;
-  const list = data.filter((p) => p.store === store && (show === 'all' || !['received', 'cancelled'].includes(p.status)));
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const list = data.filter((p) => p.store === store && (show === 'all' || (show === 'open' ? !['received', 'cancelled'].includes(p.status) : p.status === show))
+    && words.every((w) => [p.name, `#${p.number}`, `po ${p.number}`, p.supplier, p.lotNumber, p.note, ...p.lines.flatMap((l) => [l.label, l.sku])].join(' ').toLowerCase().includes(w)));
+  const opened = data.find((p) => p.id === openId) ?? null;
   const patch = async (p: PurchaseOrderDTO, body: object) => {
     try { await api.patch(`/inventory-sync/stock/purchase-orders/${p.id}`, body); refresh(); } catch (e) { toast((e as Error).message, 'error'); }
   };
@@ -1221,106 +1244,115 @@ export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'sho
     if (!window.confirm(`Delete draft PO #${p.number}?`)) return;
     try { await api.del(`/inventory-sync/stock/purchase-orders/${p.id}`); refresh(); } catch (e) { toast((e as Error).message, 'error'); }
   };
+  // One order in full (in a side panel): name, status actions, note, supplier, lot number and its items.
+  const detail = (p: PurchaseOrderDTO) => {
+    const remaining = p.lines.reduce((a, l) => a + Math.max(0, l.quantity - l.received), 0);
+    return (
+      <section key={p.id}>
+        <div className="flex flex-wrap items-center gap-2">
+          <input key={`${p.id}-${p.name}`} className="min-w-0 max-w-[16rem] rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[16px] font-medium text-ink hover:border-line focus:border-plum focus:bg-white focus:outline-none"
+            defaultValue={p.name ?? ''} placeholder={`PO #${p.number}`} maxLength={80} aria-label="Order name"
+            onBlur={(e) => { const v = e.target.value.trim(); if (v !== (p.name ?? '')) patch(p, { name: v || null }); }} />
+          {p.name && <span className="text-[12px] text-stone">PO #{p.number}</span>}
+          <Badge tone={PO_STATUS[p.status].tone}>{PO_STATUS[p.status].label}</Badge>
+          <span className="text-[13px] text-ink-soft">{p.supplier ?? fallbackSupplier ?? 'Supplier not set'} · {p.lines.length} item{p.lines.length === 1 ? '' : 's'}{p.totalCents ? ` · $${(p.totalCents / 100).toFixed(2)}` : ''} · made {dateShort(p.createdAt)}{p.createdByName ? ` by ${p.createdByName}` : ''}</span>
+          <span className="ml-auto flex flex-wrap gap-1.5">
+            <Button size="sm" variant={editing === p.id ? 'primary' : 'ghost'} icon={editing === p.id ? undefined : <Pencil className="h-4 w-4" />} onClick={() => setEditing(editing === p.id ? null : p.id)}>{editing === p.id ? 'Done' : ['received', 'cancelled'].includes(p.status) ? 'Edit lots' : 'Edit'}</Button>
+            {p.status === 'draft' && <Button size="sm" variant="primary" onClick={() => patch(p, { status: 'ordered' })}>Mark ordered</Button>}
+            {p.status === 'ordered' && <Button size="sm" onClick={() => patch(p, { status: 'shipped' })}>Mark shipped</Button>}
+            {(p.status === 'ordered' || p.status === 'shipped') && <Button size="sm" variant="primary" icon={<PackageCheck className="h-4 w-4" />} onClick={() => setReceiving(p)}>Receive</Button>}
+            <Button size="sm" variant="ghost" icon={<ArrowLeftRight className="h-4 w-4" />} onClick={() => setMoving(p)}>Move to {store === 'salon' ? 'Addendum Hair' : 'Addendum Salon'}</Button>
+            {p.status === 'draft' && <Button size="sm" variant="ghost" icon={<Trash2 className="h-4 w-4" />} onClick={() => del(p)} aria-label="Delete draft" />}
+            {(p.status === 'ordered' || p.status === 'shipped') && <Button size="sm" variant="ghost" onClick={() => window.confirm(`Cancel PO #${p.number}?`) && patch(p, { status: 'cancelled' })}>Cancel</Button>}
+          </span>
+        </div>
+        {/* The order note sits at the top. */}
+        <textarea key={`${p.id}-${p.note}`} className="mt-2 min-h-[34px] w-full rounded-md border border-line bg-paper/60 px-2.5 py-1.5 text-[13px] text-ink placeholder:text-stone-light" rows={1} maxLength={1000}
+          defaultValue={p.note ?? ''} placeholder="Order note — delivery, invoice…" aria-label="Order note"
+          onBlur={(e) => { const v = e.target.value.trim(); if (v !== (p.note ?? '')) patch(p, { note: v || null }); }} />
+        {!['received', 'cancelled'].includes(p.status) && (
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-[13px] text-ink-soft">
+            <label className="flex items-center gap-1.5">Supplier
+              <select className="field h-9 w-auto py-1" value={p.supplier ?? ''} onChange={(e) => patch(p, { supplier: e.target.value || null })}>
+                <option value="">{fallbackSupplier ? `${fallbackSupplier} (default)` : 'Choose…'}</option>
+                {(suppliers ?? []).map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}
+                {p.supplier && !(suppliers ?? []).some((x) => x.name === p.supplier) && <option value={p.supplier}>{p.supplier}</option>}
+              </select></label>
+            <label className="flex items-center gap-1.5" title="When the whole order should be here (the last item to arrive)">Expected <input type="date" className="field w-auto" defaultValue={p.expectedOn ?? ''} onChange={(e) => patch(p, { expectedOn: e.target.value || null })} /></label>
+            {remaining > 0 && p.status !== 'draft' && <span>{remaining} still to arrive</span>}
+          </div>
+        )}
+        {/* One lot number for the order (usually the same for every item) — editable at any stage. */}
+        <label className="mt-2 flex items-center gap-1.5 text-[13px] text-ink-soft">Lot number
+          <input key={p.lotNumber ?? ''} className="field h-9 w-40 py-1 font-mono text-[13px]" maxLength={40} defaultValue={p.lotNumber ?? ''} placeholder="e.g. L0724" aria-label={`Lot number for ${p.name ?? `PO #${p.number}`}`}
+            onBlur={(e) => { const v = e.target.value.trim(); if (v !== (p.lotNumber ?? '')) patch(p, { lotNumber: v || null }); }} /></label>
+        {/* Item lines wrap on phones (name first, then quantity, lead time or arrival, cost). */}
+        <ul className="mt-3 divide-y divide-line text-[13px]">
+          {p.lines.map((l) => {
+            const open = !['received', 'cancelled'].includes(p.status) && l.received < l.quantity;
+            const edit = editing === p.id;
+            const small = 'rounded-md border border-line bg-white px-1.5 py-0.5 num';
+            return (
+              <li key={`${l.id}-${l.quantity}-${l.costCents}-${l.lotNote}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
+                <span className="min-w-[min(100%,12rem)] flex-1 text-ink">
+                  {l.label}<span className="ml-2 text-[11px] text-stone">{l.sku}{p.supplier?.includes(' + ') && l.supplier ? ` · ${l.supplier}` : ''}</span>
+                </span>
+                {/* A short note per item (e.g. a different lot, or "2 damaged"), at any stage. */}
+                <input className={cx(small, 'w-32 text-[12px]')} maxLength={40} defaultValue={l.lotNote ?? ''} placeholder="Note" aria-label={`Note for ${l.label}`}
+                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== (l.lotNote ?? '')) patchLine(p, l.id, { lotNote: v || null }); }} />
+                {edit && !['received', 'cancelled'].includes(p.status) ? (
+                  <>
+                    <label className="inline-flex items-center gap-1 text-[12px] text-stone" title={l.received ? `${l.received} already received` : undefined}>Qty
+                      <input inputMode="numeric" className={cx(small, 'w-14 text-right')} defaultValue={l.quantity}
+                        onBlur={(e) => { const n = Math.round(Number(e.target.value)); if (Number.isFinite(n) && n !== l.quantity) patchLine(p, l.id, { quantity: n }); }} /></label>
+                    <label className="inline-flex items-center gap-1 text-[12px] text-stone">$ each
+                      <input inputMode="decimal" className={cx(small, 'w-16 text-right')} defaultValue={l.costCents != null ? (l.costCents / 100).toFixed(2) : ''} placeholder="—"
+                        onBlur={(e) => { const v = e.target.value.trim(); const c = v === '' ? null : Math.round(Number(v.replace(/[$,]/g, '')) * 100); if (c !== l.costCents && (c == null || Number.isFinite(c))) patchLine(p, l.id, { costCents: c }); }} /></label>
+                  </>
+                ) : <span className="num">{l.received ? `${l.received} / ` : ''}{l.quantity}</span>}
+                {/* Each item's own lead time (draft) or arrival date (ordered) — products from one supplier can take different times. */}
+                <span className="text-[12px] text-ink-soft">
+                  {p.status === 'draft' ? (
+                    <label className="inline-flex items-center gap-1">Lead <input inputMode="numeric" className="w-14 rounded-md border border-line bg-white px-1.5 py-0.5 text-right num" defaultValue={l.leadTimeDays ?? ''} placeholder="—"
+                      onBlur={(e) => { const v = e.target.value.trim(); const n = v === '' ? null : Math.round(Number(v)); if (n !== l.leadTimeDays && (n == null || Number.isFinite(n))) patchLine(p, l.id, { leadTimeDays: n }); }} /> days</label>
+                  ) : open ? (
+                    <label className="inline-flex items-center gap-1">Arrives <input type="date" className="rounded-md border border-line bg-white px-1 py-0.5" defaultValue={l.expectedOn ?? ''} onChange={(e) => patchLine(p, l.id, { expectedOn: e.target.value || null })} /></label>
+                  ) : l.expectedOn ? `Due ${dateShort(`${l.expectedOn}T12:00:00Z`)}` : ''}
+                </span>
+                <span className="num w-20 text-right text-ink-soft">{l.costCents != null ? `$${((l.costCents * l.quantity) / 100).toFixed(2)}` : ''}</span>
+                {edit && !l.received && p.lines.length > 1 && !['received', 'cancelled'].includes(p.status) && (
+                  <button type="button" className="rounded p-1 text-stone hover:bg-mist hover:text-rose" aria-label={`Remove ${l.label}`}
+                    onClick={async () => { try { await api.del(`/inventory-sync/stock/purchase-orders/${p.id}/lines/${l.id}`); refresh(); } catch (e) { toast((e as Error).message, 'error'); } }}><Trash2 className="h-4 w-4" /></button>
+                )}
+
+              </li>
+            );
+          })}
+        </ul>
+        {editing === p.id && !['received', 'cancelled'].includes(p.status) && <AddToOrder po={p} onAdded={refresh} />}
+
+      </section>
+    );
+  };
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Segmented value={show} onChange={setShow} options={[{ value: 'open', label: 'Open' }, { value: 'all', label: 'All' }]} />
-        <Button size="sm" variant="primary" icon={<Plus className="h-4 w-4" />} className="ml-auto" onClick={() => setCreating(true)}>New purchase order</Button>
+        <label className="relative min-w-[12rem] flex-1 sm:max-w-xs">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone" />
+          <input className="field h-10 pl-9" placeholder="Search orders, suppliers or products" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search purchase orders" />
+        </label>
+        <select className="field h-10 w-auto" value={show} onChange={(e) => setShow(e.target.value as typeof show)} aria-label="Status">
+          <option value="open">Open</option><option value="draft">Draft</option><option value="ordered">Ordered</option><option value="shipped">Shipped</option><option value="received">Received</option><option value="cancelled">Cancelled</option><option value="all">All</option>
+        </select>
+        <Button variant="primary" icon={<Plus className="h-4 w-4" />} className="ml-auto" onClick={() => setCreating(true)}>New purchase order</Button>
       </div>
-      <p className="mb-3 text-[13px] text-stone">Orders for {store === 'salon' ? `the salon (${N.square})` : `online (${N.shopify})`}. Receiving adds the stock to {store === 'salon' ? N.square : N.shopify}; for products whose stock is shared, the next sync carries it across.</p>
-      {!list.length && <EmptyState title="No purchase orders" >Make them from Inventory → To order, or with New purchase order.</EmptyState>}
-      <div className="space-y-3">
-        {list.map((p) => {
-          const remaining = p.lines.reduce((a, l) => a + Math.max(0, l.quantity - l.received), 0);
-          return (
-            <section key={p.id} className="rounded-xl2 border border-line bg-white p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <input key={`${p.id}-${p.name}`} className="min-w-0 max-w-[16rem] rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[16px] font-medium text-ink hover:border-line focus:border-plum focus:bg-white focus:outline-none"
-                  defaultValue={p.name ?? ''} placeholder={`PO #${p.number}`} maxLength={80} aria-label="Order name"
-                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== (p.name ?? '')) patch(p, { name: v || null }); }} />
-                {p.name && <span className="text-[12px] text-stone">PO #{p.number}</span>}
-                <Badge tone={PO_STATUS[p.status].tone}>{PO_STATUS[p.status].label}</Badge>
-                <span className="text-[13px] text-ink-soft">{p.supplier ?? fallbackSupplier ?? 'Supplier not set'} · {p.lines.length} item{p.lines.length === 1 ? '' : 's'}{p.totalCents ? ` · $${(p.totalCents / 100).toFixed(2)}` : ''} · made {dateShort(p.createdAt)}{p.createdByName ? ` by ${p.createdByName}` : ''}</span>
-                <span className="ml-auto flex flex-wrap gap-1.5">
-                  <Button size="sm" variant={editing === p.id ? 'primary' : 'ghost'} icon={editing === p.id ? undefined : <Pencil className="h-4 w-4" />} onClick={() => setEditing(editing === p.id ? null : p.id)}>{editing === p.id ? 'Done' : ['received', 'cancelled'].includes(p.status) ? 'Edit lots' : 'Edit'}</Button>
-                  {p.status === 'draft' && <Button size="sm" variant="primary" onClick={() => patch(p, { status: 'ordered' })}>Mark ordered</Button>}
-                  {p.status === 'ordered' && <Button size="sm" onClick={() => patch(p, { status: 'shipped' })}>Mark shipped</Button>}
-                  {(p.status === 'ordered' || p.status === 'shipped') && <Button size="sm" variant="primary" icon={<PackageCheck className="h-4 w-4" />} onClick={() => setReceiving(p)}>Receive</Button>}
-                  <Button size="sm" variant="ghost" icon={<ArrowLeftRight className="h-4 w-4" />} onClick={() => setMoving(p)}>Move to {store === 'salon' ? 'Addendum Hair' : 'Addendum Salon'}</Button>
-                  {p.status === 'draft' && <Button size="sm" variant="ghost" icon={<Trash2 className="h-4 w-4" />} onClick={() => del(p)} aria-label="Delete draft" />}
-                  {(p.status === 'ordered' || p.status === 'shipped') && <Button size="sm" variant="ghost" onClick={() => window.confirm(`Cancel PO #${p.number}?`) && patch(p, { status: 'cancelled' })}>Cancel</Button>}
-                </span>
-              </div>
-              {/* The order note sits at the top. */}
-              <textarea key={`${p.id}-${p.note}`} className="mt-2 min-h-[34px] w-full rounded-md border border-line bg-paper/60 px-2.5 py-1.5 text-[13px] text-ink placeholder:text-stone-light" rows={1} maxLength={1000}
-                defaultValue={p.note ?? ''} placeholder="Order note — delivery, invoice…" aria-label="Order note"
-                onBlur={(e) => { const v = e.target.value.trim(); if (v !== (p.note ?? '')) patch(p, { note: v || null }); }} />
-              {!['received', 'cancelled'].includes(p.status) && (
-                <div className="mt-2 flex flex-wrap items-center gap-3 text-[13px] text-ink-soft">
-                  <label className="flex items-center gap-1.5">Supplier
-                    <select className="field h-9 w-auto py-1" value={p.supplier ?? ''} onChange={(e) => patch(p, { supplier: e.target.value || null })}>
-                      <option value="">{fallbackSupplier ? `${fallbackSupplier} (default)` : 'Choose…'}</option>
-                      {(suppliers ?? []).map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}
-                      {p.supplier && !(suppliers ?? []).some((x) => x.name === p.supplier) && <option value={p.supplier}>{p.supplier}</option>}
-                    </select></label>
-                  <label className="flex items-center gap-1.5" title="When the whole order should be here (the last item to arrive)">Expected <input type="date" className="field w-auto" defaultValue={p.expectedOn ?? ''} onChange={(e) => patch(p, { expectedOn: e.target.value || null })} /></label>
-                  {remaining > 0 && p.status !== 'draft' && <span>{remaining} still to arrive</span>}
-                </div>
-              )}
-              {/* One lot number for the order (usually the same for every item) — editable at any stage. */}
-              <label className="mt-2 flex items-center gap-1.5 text-[13px] text-ink-soft">Lot number
-                <input key={p.lotNumber ?? ''} className="field h-9 w-40 py-1 font-mono text-[13px]" maxLength={40} defaultValue={p.lotNumber ?? ''} placeholder="e.g. L0724" aria-label={`Lot number for ${p.name ?? `PO #${p.number}`}`}
-                  onBlur={(e) => { const v = e.target.value.trim(); if (v !== (p.lotNumber ?? '')) patch(p, { lotNumber: v || null }); }} /></label>
-              {/* Item lines wrap on phones (name first, then quantity, lead time or arrival, cost). */}
-              <ul className="mt-3 divide-y divide-line text-[13px]">
-                {p.lines.map((l) => {
-                  const open = !['received', 'cancelled'].includes(p.status) && l.received < l.quantity;
-                  const edit = editing === p.id;
-                  const small = 'rounded-md border border-line bg-white px-1.5 py-0.5 num';
-                  return (
-                    <li key={`${l.id}-${l.quantity}-${l.costCents}-${l.lotNote}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
-                      <span className="min-w-[min(100%,12rem)] flex-1 text-ink">
-                        {l.label}<span className="ml-2 text-[11px] text-stone">{l.sku}{p.supplier?.includes(' + ') && l.supplier ? ` · ${l.supplier}` : ''}</span>
-                      </span>
-                      {/* A short note per item (e.g. a different lot, or "2 damaged"), at any stage. */}
-                      <input className={cx(small, 'w-32 text-[12px]')} maxLength={40} defaultValue={l.lotNote ?? ''} placeholder="Note" aria-label={`Note for ${l.label}`}
-                        onBlur={(e) => { const v = e.target.value.trim(); if (v !== (l.lotNote ?? '')) patchLine(p, l.id, { lotNote: v || null }); }} />
-                      {edit && !['received', 'cancelled'].includes(p.status) ? (
-                        <>
-                          <label className="inline-flex items-center gap-1 text-[12px] text-stone" title={l.received ? `${l.received} already received` : undefined}>Qty
-                            <input inputMode="numeric" className={cx(small, 'w-14 text-right')} defaultValue={l.quantity}
-                              onBlur={(e) => { const n = Math.round(Number(e.target.value)); if (Number.isFinite(n) && n !== l.quantity) patchLine(p, l.id, { quantity: n }); }} /></label>
-                          <label className="inline-flex items-center gap-1 text-[12px] text-stone">$ each
-                            <input inputMode="decimal" className={cx(small, 'w-16 text-right')} defaultValue={l.costCents != null ? (l.costCents / 100).toFixed(2) : ''} placeholder="—"
-                              onBlur={(e) => { const v = e.target.value.trim(); const c = v === '' ? null : Math.round(Number(v.replace(/[$,]/g, '')) * 100); if (c !== l.costCents && (c == null || Number.isFinite(c))) patchLine(p, l.id, { costCents: c }); }} /></label>
-                        </>
-                      ) : <span className="num">{l.received ? `${l.received} / ` : ''}{l.quantity}</span>}
-                      {/* Each item's own lead time (draft) or arrival date (ordered) — products from one supplier can take different times. */}
-                      <span className="text-[12px] text-ink-soft">
-                        {p.status === 'draft' ? (
-                          <label className="inline-flex items-center gap-1">Lead <input inputMode="numeric" className="w-14 rounded-md border border-line bg-white px-1.5 py-0.5 text-right num" defaultValue={l.leadTimeDays ?? ''} placeholder="—"
-                            onBlur={(e) => { const v = e.target.value.trim(); const n = v === '' ? null : Math.round(Number(v)); if (n !== l.leadTimeDays && (n == null || Number.isFinite(n))) patchLine(p, l.id, { leadTimeDays: n }); }} /> days</label>
-                        ) : open ? (
-                          <label className="inline-flex items-center gap-1">Arrives <input type="date" className="rounded-md border border-line bg-white px-1 py-0.5" defaultValue={l.expectedOn ?? ''} onChange={(e) => patchLine(p, l.id, { expectedOn: e.target.value || null })} /></label>
-                        ) : l.expectedOn ? `Due ${dateShort(`${l.expectedOn}T12:00:00Z`)}` : ''}
-                      </span>
-                      <span className="num w-20 text-right text-ink-soft">{l.costCents != null ? `$${((l.costCents * l.quantity) / 100).toFixed(2)}` : ''}</span>
-                      {edit && !l.received && p.lines.length > 1 && !['received', 'cancelled'].includes(p.status) && (
-                        <button type="button" className="rounded p-1 text-stone hover:bg-mist hover:text-rose" aria-label={`Remove ${l.label}`}
-                          onClick={async () => { try { await api.del(`/inventory-sync/stock/purchase-orders/${p.id}/lines/${l.id}`); refresh(); } catch (e) { toast((e as Error).message, 'error'); } }}><Trash2 className="h-4 w-4" /></button>
-                      )}
-
-                    </li>
-                  );
-                })}
-              </ul>
-              {editing === p.id && !['received', 'cancelled'].includes(p.status) && <AddToOrder po={p} onAdded={refresh} />}
-
-            </section>
-          );
-        })}
+      <p className="mb-3 text-[13px] text-stone">Orders for {store === 'salon' ? `the salon (${N.square})` : `online (${N.shopify})`}. Receiving adds the stock to {store === 'salon' ? N.square : N.shopify}; for shared stock, the next sync carries it across.</p>
+      {!list.length && <EmptyState title={q || show !== 'open' ? 'No orders match' : 'No open purchase orders'}>Make them from To order, or with New purchase order.</EmptyState>}
+      <div className="divide-y divide-line overflow-hidden rounded-xl2 border border-line bg-white empty:hidden">
+        {list.map((p) => <PoRow key={p.id} p={p} supplier={p.supplier ?? fallbackSupplier} onOpen={() => setOpenId(p.id)} />)}
       </div>
       {moving && <MovePoModal po={moving} onClose={() => setMoving(null)} />}
+      {opened && <Modal open side wide onClose={() => { setOpenId(null); setEditing(null); }} title={opened.name ?? `PO #${opened.number}`}>{detail(opened)}</Modal>}
       {receiving && <ReceiveModal po={receiving} onClose={() => setReceiving(null)} />}
       {creating && <NewPoModal store={store} onClose={() => setCreating(false)} />}
     </div>

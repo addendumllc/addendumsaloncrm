@@ -17,17 +17,7 @@ export type SubItem = { to: string; label: string | ((n: StoreNames) => string);
 export type SubNav = { params: string[]; items: SubItem[] };
 
 export const SUB_NAV: Record<string, SubNav> = {
-  // Inventory: like Tasks — the per-store pages start with Addendum Salon (Square) / Addendum Hair (Shopify).
-  '/inventory-sync': {
-    params: ['view'],
-    items: [
-      // Each has a toggle across the top for its pages: Products · Stock counts · Reorder · Pricing, and
-      // To order · Purchase orders · Suppliers.
-      { to: '/inventory-sync', label: 'Inventory', also: ['/inventory-sync?view=products', '/inventory-sync?view=stock', '/inventory-sync?view=pricing'] },
-      { to: '/inventory-sync?view=reorder', label: 'Ordering', also: ['/inventory-sync?view=toorder', '/inventory-sync?view=orders', '/inventory-sync?view=suppliers'] },
-      { to: '/inventory-sync?view=sync', label: 'Sync' },
-    ],
-  },
+  // Inventory has no sub-menu: its pages are tabs on the page (Overview, Products, … Activity).
   // Tasks: each page starts with Addendum Salon / Addendum Hair.
   '/tasks': {
     params: ['view'],
