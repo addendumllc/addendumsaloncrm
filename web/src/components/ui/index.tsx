@@ -197,14 +197,14 @@ export function Modal({ open, onClose, title, children, footer, wide, xl, side }
   }, [open, onClose]);
   if (!open) return null;
   return createPortal(
-    <div className={cx('fixed inset-0 z-50 flex bg-black/35 backdrop-blur-[2px]', side ? 'justify-end' : 'items-end justify-center sm:items-center sm:p-6')} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className={cx('fixed inset-0 z-50 flex bg-black/35 backdrop-blur-[2px]', side ? 'justify-end' : 'items-center justify-center p-3 sm:p-6')} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div
         ref={ref}
         role="dialog"
         aria-modal="true"
         className={cx(
           'flex max-h-[100dvh] w-full flex-col bg-white shadow-pop',
-          side ? 'h-full max-w-xl animate-slide-in' : cx('rounded-t-2xl sm:rounded-2xl sm:max-h-[90vh] animate-rise', xl ? 'sm:max-w-5xl' : wide ? 'sm:max-w-3xl' : 'sm:max-w-lg'),
+          side ? 'h-full max-w-xl animate-slide-in' : cx('max-h-[calc(100dvh-1.5rem)] rounded-2xl sm:max-h-[90vh] animate-rise', xl ? 'sm:max-w-5xl' : wide ? 'sm:max-w-3xl' : 'sm:max-w-lg'),
         )}
       >
         <div className="flex items-center justify-between gap-4 border-b border-line px-5 py-4">

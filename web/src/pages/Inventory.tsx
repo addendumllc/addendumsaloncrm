@@ -503,7 +503,7 @@ function HairPicker({ shopify, loading, onPick, added }: { shopify?: { connected
 function RequestDetail({ id, onClose, canManage, seesAll }: { id: string; onClose: () => void; canManage: boolean; seesAll: boolean }) {
   const { data, isLoading, error } = useQuery({ queryKey: ['inventory', 'one', id], queryFn: () => api.get<{ request: InventoryRequestDTO }>(`/inventory/requests/${id}`).then((r) => r.request) });
   return (
-    <Modal open side onClose={onClose} title={data ? `Hair order #${data.number}` : 'Hair order'}>
+    <Modal open wide onClose={onClose} title={data ? `Hair order #${data.number}` : 'Hair order'}>
       {isLoading && <PageLoading />}
       {error && <ErrorNote error={error} />}
       {data && <DetailBody r={data} canManage={canManage} seesAll={seesAll} />}

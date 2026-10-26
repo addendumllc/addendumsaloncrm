@@ -923,6 +923,16 @@ function SuggestedOrders({ store, onClose, onMade }: { store: 'all' | 'salon' | 
   const items = kept.reduce((n, g) => n + g.lines.filter((l) => q(l) > 0).length, 0);
   const total = groups.reduce((n, g) => n + g.lines.reduce((m, l) => m + (l.costCents ?? 0) * q(l), 0), 0);
   const toggle = (k: string) => setOff((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  // Tick or untick a whole draft (collection) at once.
+  const toggleGroup = (g: SuggestedGroup, on: boolean) => setOff((s) => { const n = new Set(s); for (const l of g.lines) { if (on) n.delete(l.productKey); else n.add(l.productKey); } return n; });
+  // Skip: not ordering it — out of suggestions until turned back on (To order → All products).
+  const skipLine = async (l: SuggestedGroup['lines'][number]) => {
+    try {
+      await api.put('/inventory-sync/stock/products/skip', { keys: [l.productKey], until: '9999-12-31' });
+      toast(`${l.label} skipped — undo under To order → Skipped`);
+      void refetch();
+    } catch (e) { toast((e as Error).message, 'error'); }
+  };
   const create = async () => {
     setBusy(true);
     try {
@@ -957,7 +967,8 @@ function SuggestedOrders({ store, onClose, onMade }: { store: 'all' | 'salon' | 
           </div>
           {groups.map((g) => (
             <section key={g.collection} className="rounded-xl2 border border-line">
-              <header className="flex flex-wrap items-baseline gap-x-2 border-b border-line bg-mist/40 px-3 py-2">
+              <header className="flex flex-wrap items-center gap-x-2 border-b border-line bg-mist/40 px-3 py-2">
+                <input type="checkbox" className="h-4 w-4 accent-plum" checked={g.lines.some((l) => !off.has(l.productKey))} onChange={(e) => toggleGroup(g, e.target.checked)} aria-label={`Include the ${g.collection} draft`} />
                 <span className="font-medium text-ink">Suggested · {g.collection}</span>
                 <span className="text-stone">{g.suppliers.length ? g.suppliers.join(' + ') : 'No supplier set'}</span>
               </header>
@@ -969,6 +980,7 @@ function SuggestedOrders({ store, onClose, onMade }: { store: 'all' | 'salon' | 
                     <Badge tone={F_STATUS[l.status].tone}>{F_STATUS[l.status].label}</Badge>
                     <span className="num w-16 text-right text-stone">{l.stock} in stock</span>
                     <input inputMode="numeric" disabled={off.has(l.productKey)} className="w-16 rounded-md border border-line bg-white px-2 py-1 text-right num" value={qty[l.productKey] ?? String(l.quantity)} onChange={(e) => setQty((x) => ({ ...x, [l.productKey]: e.target.value }))} aria-label={`Amount of ${l.label}`} />
+                    <button type="button" className="rounded px-1.5 py-1 text-[12px] text-stone hover:bg-mist hover:text-ink" onClick={() => skipLine(l)}>Skip</button>
                   </li>
                 ))}
               </ul>
@@ -1480,7 +1492,7 @@ export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'sho
         {list.map((p) => <PoRow key={p.id} p={p} supplier={p.supplier ?? fallbackSupplier} onOpen={() => setOpenId(p.id)} />)}
       </div>
       {moving && <MovePoModal po={moving} onClose={() => setMoving(null)} />}
-      {opened && <Modal open side wide onClose={() => { setOpenId(null); setEditing(null); }} title={opened.name ?? `PO #${opened.number}`}>{detail(opened)}</Modal>}
+      {opened && <Modal open xl onClose={() => { setOpenId(null); setEditing(null); }} title={opened.name ?? `PO #${opened.number}`}>{detail(opened)}</Modal>}
       {receiving && <ReceiveModal po={receiving} onClose={() => setReceiving(null)} />}
       {creating && <NewPoModal store={store} onClose={() => setCreating(false)} />}
     </div>
@@ -1597,8 +1609,28 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
   const rank = (p: StockProductDTO) => ({ out: 0, order_now: 1, soon: 2, watch: 3 } as Record<string, number>)[fc.get(p.key)?.status ?? ''] ?? 9;
   // Only products sold in this order's store.
   const inStore = (p: StockProductDTO) => (store === 'salon' ? !!p.squareVariationId : !!p.shopifyInventoryItemId);
-  const theirs = chosenList.length ? (data?.products ?? []).filter((p) => p.status === 'active' && inStore(p) && chosenList.includes(p.supplier ?? fallback ?? '')).sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label)) : [];
-  const suggested = theirs.filter((p) => rank(p) <= 2 && !has(p.key));
+  // Grouped by collection (shortest length first in each); pick one collection or tick a whole one at once.
+  const collOf = (p: StockProductDTO) => p.collection ?? p.collections[0] ?? 'No collection';
+  const lenN = (p: StockProductDTO) => { const l = hairLengthOf(p.label, p.sku); return l ? Number.parseInt(l, 10) : 999; };
+  const [coll, setColl] = useState('');
+  // Skipped products (not being ordered) are hidden unless shown; skipping here works as on To order.
+  const [skipped, setSkipped] = useState<Set<string>>(new Set());
+  const [showSkipped, setShowSkipped] = useState(false);
+  const isSkipped = (p: StockProductDTO) => skipped.has(p.key) || !!fc.get(p.key)?.skippedUntil;
+  const allTheirs = chosenList.length ? (data?.products ?? []).filter((p) => p.status === 'active' && inStore(p) && chosenList.includes(p.supplier ?? fallback ?? '')) : [];
+  const collections = [...new Set(allTheirs.map(collOf))].sort((a, b) => a.localeCompare(b));
+  const theirs = allTheirs.filter((p) => (!coll || collOf(p) === coll) && (showSkipped || !isSkipped(p)))
+    .sort((a, b) => collOf(a).localeCompare(collOf(b)) || lenN(a) - lenN(b) || rank(a) - rank(b) || a.label.localeCompare(b.label));
+  const suggested = theirs.filter((p) => rank(p) <= 2 && !has(p.key) && !isSkipped(p));
+  const skipOne = async (p: StockProductDTO, on: boolean) => {
+    try {
+      await api.put('/inventory-sync/stock/products/skip', { keys: [p.key], until: on ? '9999-12-31' : null });
+      setSkipped((s) => { const n = new Set(s); if (on) n.add(p.key); else n.delete(p.key); return n; });
+      if (on) setLines((x) => x.filter((l) => l.p.key !== p.key));
+      toast(on ? `${p.label} skipped — not suggested until turned back on` : `${p.label} back in suggestions`);
+      refresh();
+    } catch (e) { toast((e as Error).message, 'error'); }
+  };
   const found = q.trim() ? filterProducts(data?.products ?? [], q, 'all').filter((p) => inStore(p) && !has(p.key)).slice(0, 8) : [];
   const set = (i: number, patch: Partial<Line>) => setLines((x) => x.map((y, j) => (j === i ? { ...y, ...patch } : y)));
   const arrives = (lead: string) => { const n = Number(lead); if (lead.trim() === '' || !Number.isFinite(n)) return null; const d = new Date(); d.setDate(d.getDate() + Math.round(n)); return dateShort(d.toISOString()); };
@@ -1623,7 +1655,7 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
   };
   const cell = 'rounded-lg border border-line bg-white px-2 py-1.5 text-[14px] num focus:border-plum focus:outline-none';
   return (
-    <Modal open side wide onClose={onClose} title={store === 'salon' ? `New ${N.square} purchase order` : `New ${N.shopify} purchase order`}
+    <Modal open xl onClose={onClose} title={store === 'salon' ? `New ${N.square} purchase order` : `New ${N.shopify} purchase order`}
       footer={<>
         {total > 0 && <span className="mr-auto text-[14px] text-ink-soft">Total <b className="num text-ink">${total.toFixed(2)}</b></span>}
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
@@ -1650,22 +1682,44 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
           <section>
             <div className="mb-1.5 flex items-center gap-2">
               <h3 className="text-[13px] font-semibold uppercase tracking-wide text-stone">Products from {chosenList.length > 1 ? `${chosenList.length} suppliers` : chosen}</h3>
-              {suggested.length > 0 && <Button size="sm" className="ml-auto" onClick={() => add(suggested)}>Add all suggested ({suggested.length})</Button>}
+              {suggested.length > 0 && <Button size="sm" variant="ghost" className="ml-auto" onClick={() => add(suggested)}>Add all suggested ({suggested.length})</Button>}
+            </div>
+            <div className="mb-2 flex flex-wrap items-center gap-2 text-[13px]">
+              <select className="field h-9 w-auto py-1 text-[13px]" value={coll} onChange={(e) => setColl(e.target.value)} aria-label="Collection">
+                <option value="">All collections</option>{collections.map((c) => <option key={c}>{c}</option>)}
+              </select>
+              <label className="flex items-center gap-1.5 text-stone"><input type="checkbox" className="h-4 w-4 accent-plum" checked={showSkipped} onChange={(e) => setShowSkipped(e.target.checked)} /> Show skipped</label>
             </div>
             {theirs.length === 0 ? <p className="text-[13px] text-stone">No products have this supplier yet — search below, or give it products under Suppliers.</p> : (
-              <ul className="max-h-56 divide-y divide-line overflow-auto rounded-xl border border-line bg-white">
-                {theirs.map((p) => {
+              <ul className="max-h-[45vh] divide-y divide-line overflow-auto rounded-xl border border-line bg-white">
+                {theirs.map((p, idx) => {
                   const f = fc.get(p.key);
                   const low = rank(p) <= 2;
+                  const c = collOf(p);
+                  const inC = theirs.filter((x) => collOf(x) === c && !isSkipped(x));
+                  const allIn = inC.length > 0 && inC.every((x) => has(x.key));
+                  const off = isSkipped(p);
                   return (
-                    <li key={p.key}>
-                      <label className="flex cursor-pointer items-center gap-3 px-3 py-2 text-[13px] hover:bg-mist/50">
-                        <input type="checkbox" className="h-4 w-4 shrink-0 accent-plum" checked={has(p.key)} onChange={() => (has(p.key) ? setLines((x) => x.filter((l) => l.p.key !== p.key)) : add([p]))} />
+                    <Fragment key={p.key}>
+                    {(idx === 0 || collOf(theirs[idx - 1]) !== c) && (
+                      <li className="sticky top-0 z-10 bg-mist">
+                        <label className="flex cursor-pointer items-center gap-3 px-3 py-1.5 text-[12px] font-semibold uppercase tracking-wide text-stone">
+                          <input type="checkbox" className="h-4 w-4 shrink-0 accent-plum" checked={allIn} disabled={!inC.length} aria-label={`Select all in ${c}`}
+                            onChange={() => (allIn ? setLines((x) => x.filter((l) => !inC.some((y) => y.key === l.p.key))) : add(inC))} />
+                          <span className="flex-1">{c}</span><span className="font-normal normal-case tracking-normal">{inC.filter((x) => has(x.key)).length}/{inC.length}</span>
+                        </label>
+                      </li>
+                    )}
+                    <li className={cx('flex items-center', off && 'opacity-50')}>
+                      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 px-3 py-2 text-[13px] hover:bg-mist/50">
+                        <input type="checkbox" className="h-4 w-4 shrink-0 accent-plum" disabled={off} checked={has(p.key)} onChange={() => (has(p.key) ? setLines((x) => x.filter((l) => l.p.key !== p.key)) : add([p]))} />
                         <span className="min-w-0 flex-1"><span className="block truncate text-ink">{p.label}</span>
                           <span className="block text-[11px] text-stone"><span className="font-mono">{p.sku}</span> · {f ? `${f.stock} in stock` : ''}{leadOf(p) != null ? ` · ${leadOf(p)} day lead` : ''}{chosenList.length > 1 ? ` · ${p.supplier ?? fallback}` : ''}</span></span>
-                        {low && f && <Badge tone={f.status === 'out' || f.status === 'order_now' ? 'rose' : 'amber'}>Suggest {f.suggestedQty}</Badge>}
+                        {low && f && !off && <Badge tone={f.status === 'out' || f.status === 'order_now' ? 'rose' : 'amber'}>{f.suggestedQty > 0 ? `Suggest ${f.suggestedQty}` : f.status === 'out' ? 'Out' : 'Low'}</Badge>}
                       </label>
+                      <button type="button" className="mr-2 shrink-0 rounded px-2 py-1 text-[12px] text-stone hover:bg-mist hover:text-ink" onClick={() => skipOne(p, !off)}>{off ? 'Unskip' : 'Skip'}</button>
                     </li>
+                    </Fragment>
                   );
                 })}
               </ul>
