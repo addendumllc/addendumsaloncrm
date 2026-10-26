@@ -265,7 +265,9 @@ function ProductPanel({ p, f, status, orders, onClose, onOpenTab }: {
               {row('Days of stock left', f.daysOfStock ?? '—')}
               {row('Order by', f.orderBy ? labelOfKey(f.orderBy, { month: 'short', day: 'numeric' }) : '—')}
               {row('Suggested order', f.suggestedQty || '—')}
-              {row('Lead time', f.leadUntracked ? 'Not tracked' : `${f.leadTimeDays} days${f.shippingDays ? ` (incl. ${f.shippingDays} shipping)` : ''}`)}
+              {row('Lead time', f.leadUntracked ? 'Not tracked' : f.leadSource?.kind === 'missing'
+                ? <span className="text-amber">Needs a lead time · using the {f.productionDays}-day default</span>
+                : <span>{f.productionDays} production{f.shippingDays ? ` + ${f.shippingDays} shipping` : ''}<span className="block text-[11px] text-stone">{f.leadSource?.kind === 'product' ? 'This product’s own' : f.leadSource?.kind === 'collection' ? `${f.leadSource.label} rule` : `${f.leadSource?.label ?? 'Supplier'} default`}</span></span>)}
               {row('Minimum order', f.moq ?? '—')}
               {p.caseSize != null && row('Case size', p.caseSize)}
             </dl>

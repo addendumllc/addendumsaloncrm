@@ -9,6 +9,7 @@ import { api } from '../../api/client';
 import { useCanDo } from '../../api/hooks';
 import { downloadCsv, parseCsv } from '../../lib/csv';
 import { collectionFilter, useInternalCollections } from './Collections';
+import { LeadTimesView } from './LeadTimes';
 import { dateShort, dateTime, dayKey, labelOfKey, relative } from '../../lib/format';
 import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, Segmented, Toggle, cx, useToast } from '../ui';
 import { useStoreNames } from '../../lib/storeNames';
@@ -1188,7 +1189,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
                 <tr>
                   <td className="px-3 py-1.5"><input type="checkbox" checked={picked.has(i.key)} onChange={() => toggle(i.key)} aria-label={`Select ${i.label}`} /></td>
                   <td className="px-2 py-1.5"><button type="button" className="flex items-start gap-1 text-left text-ink" onClick={() => setOpen(open === i.key ? null : i.key)}>{open === i.key ? <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0" />}<span>{i.label}<span className="block text-[11px] text-stone">{i.sku}</span></span></button></td>
-                  <td className="px-2 py-1.5"><Badge tone={F_STATUS[i.status].tone}>{F_STATUS[i.status].label}</Badge>{i.stockoutRisk && <span className="mt-1 block"><Badge tone="rose">Stock-out risk</Badge></span>}{i.skippedUntil && <span className="mt-1 block"><SkippedBadge until={i.skippedUntil} onUndo={() => skip([i.key], 'off')} /></span>}</td>
+                  <td className="px-2 py-1.5"><Badge tone={F_STATUS[i.status].tone}>{F_STATUS[i.status].label}</Badge>{i.stockoutRisk && <span className="mt-1 block"><Badge tone="rose">Stock-out risk</Badge></span>}{i.leadSource?.kind === 'missing' && i.status !== 'discontinued' && <span className="mt-1 block" title="No lead time for this product, its collections or its supplier"><Badge tone="amber">Needs lead time</Badge></span>}{i.skippedUntil && <span className="mt-1 block"><SkippedBadge until={i.skippedUntil} onUndo={() => skip([i.key], 'off')} /></span>}</td>
                   <td className="num px-2 py-1.5 text-right">{i.stock}</td>
                   <td className="num px-2 py-1.5 text-right">{i.incoming || ''}</td>
                   <td className="num px-2 py-1.5 text-right">{i.ratePerDay ? i.ratePerDay.toFixed(2) : '—'}</td>
@@ -1662,6 +1663,8 @@ export function SuppliersView() {
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['stock-suppliers'], queryFn: () => api.get<{ suppliers: SupplierDTO[] }>('/inventory-sync/stock/suppliers').then((r) => r.suppliers) });
   const [editing, setEditing] = useState<SupplierDTO | 'new' | null>(null);
   const [assigning, setAssigning] = useState<SupplierDTO | null>(null);
+  // Suppliers, or their lead times (default, collection rules and products' own).
+  const [part, setPart] = useState<'suppliers' | 'lead'>('suppliers');
   // A supplier's products, with each one's own timing and ordering rules.
   const [openSup, setOpenSup] = useState<string | null>(null);
   const { data: productData } = useProducts();
@@ -1688,8 +1691,15 @@ export function SuppliersView() {
     if (!window.confirm(`Remove ${s.name}?${s.products ? ` Its ${s.products} product${s.products === 1 ? '' : 's'} will have no supplier (nothing else changes).` : ''}`)) return;
     try { await api.post('/inventory-sync/stock/suppliers/remove', { name: s.name }); toast(`${s.name} removed`); again(); } catch (e) { toast((e as Error).message, 'error'); }
   };
+  if (part === 'lead') return (
+    <div>
+      <Segmented className="mb-4" value={part} onChange={setPart} options={[{ value: 'suppliers', label: 'Suppliers' }, { value: 'lead', label: 'Lead times' }]} />
+      <LeadTimesView suppliers={data} />
+    </div>
+  );
   return (
     <div>
+      <Segmented className="mb-4" value={part} onChange={setPart} options={[{ value: 'suppliers', label: 'Suppliers' }, { value: 'lead', label: 'Lead times' }]} />
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <p className="mr-auto text-[14px] text-ink-soft">{details ? 'Who you buy from, the name each is shown as, their contact details and how long they take.' : 'Who you buy from and how long they take.'} Give them products by store or one by one.</p>
         <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEditing('new')}>Add supplier</Button>
