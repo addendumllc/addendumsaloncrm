@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
-import type { PurchaseOrderDTO, StockForecastDTO, StockForecastResponse, StockProductDTO, StockTxnDTO } from '@addendum/shared';
+import type { PurchaseOrderDTO, StockForecastDTO, StockForecastResponse, StockProductDTO, StockProductStatus, StockTxnDTO, SupplierDTO } from '@addendum/shared';
 import { api } from '../../api/client';
 import { dateShort, labelOfKey } from '../../lib/format';
 import { useStoreNames } from '../../lib/storeNames';
-import { Badge, Button, EmptyState, ErrorNote, Modal, PageLoading, cx } from '../ui';
+import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, cx, useToast } from '../ui';
 
 type Store = 'all' | 'salon' | 'hair';
 type Sales = {
@@ -15,6 +15,11 @@ type Sales = {
   byChannel: { channel: string; name: string; units: number; revenueCents: number }[];
 };
 const usd0 = (c: number) => `$${Math.round(c / 100).toLocaleString()}`;
+type PriceListing = { variantId: string; label: string; priceCents: number | null; pro?: boolean };
+type PriceRow = { key: string; costCents: number | null; costFrom: 'crm' | 'shopify' | null; square: { priceCents: number | null } | null; shopify: PriceListing[]; shopify2: PriceListing[] };
+const money = (c: number) => `$${(c / 100).toFixed(2)}`;
+/** Gross margin on a selling price: only when both the price and our cost are known and the price is above zero. */
+const marginOf = (price: number | null | undefined, cost: number | null) => (price != null && price > 0 && cost != null ? Math.round(((price - cost) / price) * 100) : null);
 type Simple = 'out' | 'low' | 'watch' | 'ok' | 'discontinued' | 'skipped';
 const SIMPLE: Record<Simple, { label: string; tone: 'rose' | 'amber' | 'neutral' | 'sage' | 'plum' }> = {
   out: { label: 'Out of stock', tone: 'rose' }, low: { label: 'Low stock', tone: 'amber' }, watch: { label: 'Watch', tone: 'neutral' },
@@ -176,6 +181,10 @@ function ProductPanel({ p, f, status, orders, onClose, onOpenTab }: {
   const history = useQuery({ queryKey: ['stock-history', 'product', p.key], queryFn: () => api.get<{ entries: StockTxnDTO[] }>(`/inventory-sync/stock/history?key=${encodeURIComponent(p.key)}`).then((r) => r.entries) });
   const sales = useQuery({ queryKey: ['product-sales', p.key], queryFn: () => api.get<Sales>(`/inventory-sync/stock/products/${encodeURIComponent(p.key)}/sales`) });
   const [monthsOpen, setMonthsOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  // Prices from each store (the same list as Inventory → Pricing).
+  const prices = useQuery({ queryKey: ['stock-prices'], queryFn: () => api.get<{ rows: PriceRow[]; stores: { square: string; shopify: string; shopify2: string | null } }>('/inventory-sync/stock/prices'), staleTime: 60_000 });
+  const pr = prices.data?.rows.find((r) => r.key === p.key) ?? null;
   const stockoutOn = f && f.daysOfStock != null && f.ratePerDay > 0 ? (() => { const d = new Date(); d.setDate(d.getDate() + f.daysOfStock); return dateShort(d.toISOString()); })() : null;
   const [why, setWhy] = useState(false);
   const row = (label: string, value: React.ReactNode) => <div className="flex justify-between gap-3 py-1"><dt className="text-stone">{label}</dt><dd className="text-right text-ink">{value}</dd></div>;
@@ -190,7 +199,8 @@ function ProductPanel({ p, f, status, orders, onClose, onOpenTab }: {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="primary" onClick={() => onOpenTab('stock', p.sku ? { q: p.sku } : {})}>Count or adjust stock</Button>
-          <Button size="sm" onClick={() => onOpenTab('products')}>Edit product details</Button>
+          <Button size="sm" onClick={() => setEditing(true)}>Edit settings</Button>
+          <Button size="sm" variant="ghost" onClick={() => onOpenTab('reorder')}>Open in To order</Button>
         </div>
         {/* Performance first: what sold, how fast, when it runs out and what to order. */}
         <section>
@@ -262,10 +272,36 @@ function ProductPanel({ p, f, status, orders, onClose, onOpenTab }: {
           </section>
         )}
         <section>
-          <h3 className={h}>Supplier</h3>
+          <h3 className={h}>Pricing</h3>
+          {prices.isLoading ? <PageLoading /> : !pr ? <p className="text-[13px] text-stone">Prices couldn’t be read from the stores.</p> : (() => {
+            const cost = pr.costCents;
+            const retail = pr.shopify2.find((l) => !l.pro) ?? null;
+            const proListing = pr.shopify2.find((l) => l.pro) ?? null;
+            const price = (label: string, c: number | null | undefined, where: string, listed: boolean) => row(label, !listed ? <span className="text-stone">Not sold there</span>
+              : c == null ? <span className="text-amber">Price missing</span>
+                : <span><span className="num">{money(c)}</span>{marginOf(c, cost) != null && <span className="ml-1.5 text-[12px] text-stone">{marginOf(c, cost)}% margin</span>}<span className="block text-[11px] text-stone">{where}</span></span>);
+            return (
+              <dl className="divide-y divide-line">
+                {row('Our cost', cost != null ? <span><span className="num">{money(cost)}</span><span className="block text-[11px] text-stone">{pr.costFrom === 'shopify' ? 'From Shopify’s cost per item' : 'Set in the CRM'} · never shown to customers</span></span> : <span className="text-stone">Not set</span>)}
+                {price('AH-PRO stylist price', pr.shopify[0]?.priceCents, `${prices.data!.stores.shopify}`, pr.shopify.length > 0)}
+                {price('Retail (DTC) price', retail?.priceCents, `${prices.data!.stores.shopify2 ?? 'Retail store'}`, !!retail)}
+                {proListing && price('Retail store’s Pro listing', proListing.priceCents, `${prices.data!.stores.shopify2}`, true)}
+                {price('Salon price', pr.square?.priceCents, prices.data!.stores.square, !!pr.square)}
+              </dl>
+            );
+          })()}
+          <p className="mt-1 text-[12px] text-stone">Prices live in each store; change them under Pricing. A missing price is shown as missing, never as $0.</p>
+        </section>
+        <section>
+          <h3 className={h}>Supplier &amp; ordering</h3>
           <dl className="divide-y divide-line">
             {row('Supplier', p.supplier ?? 'Not set')}
-            {row('Unit cost', p.costCents != null ? `$${(p.costCents / 100).toFixed(2)}` : '—')}
+            {p.supplierSku && row('Supplier SKU', <span className="font-mono text-[12px]">{p.supplierSku}</span>)}
+            {row('Purchasing collection', p.collection ?? <span className="text-stone">From the store collections</span>)}
+            {row('Production lead time', p.leadTimeDays != null ? `${p.leadTimeDays} days` : <span className="text-stone">Supplier default</span>)}
+            {row('Transit time', p.shippingDays != null ? `${p.shippingDays} days` : <span className="text-stone">Supplier default</span>)}
+            {row('Minimum order / case', `${p.moq ?? '—'} / ${p.caseSize ?? '—'}`)}
+            {p.orderNote && row('Ordering note', p.orderNote)}
           </dl>
         </section>
         <section>
@@ -298,6 +334,78 @@ function ProductPanel({ p, f, status, orders, onClose, onOpenTab }: {
             </ul>
           )}
         </section>
+      </div>
+      {editing && <EditSettings p={p} onClose={() => setEditing(false)} />}
+    </Modal>
+  );
+}
+
+/**
+ * A product's purchasing settings, kept in the CRM (the stores' own data — name, SKU, prices, stock — isn't changed here).
+ * Blank lead and transit times use the supplier's defaults, so a change to the supplier carries through.
+ */
+function EditSettings({ p, onClose }: { p: StockProductDTO; onClose: () => void }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const { data: suppliers } = useQuery({ queryKey: ['stock-suppliers'], queryFn: () => api.get<{ suppliers: SupplierDTO[] }>('/inventory-sync/stock/suppliers').then((r) => r.suppliers), staleTime: 30_000 });
+  const str = (v: number | string | null | undefined) => (v == null ? '' : String(v));
+  const [d, setD] = useState({
+    collection: str(p.collection), supplier: str(p.supplier), supplierSku: str(p.supplierSku), cost: p.costCents != null ? (p.costCents / 100).toFixed(2) : '',
+    lead: str(p.leadTimeDays), ship: str(p.shippingDays), moq: str(p.moq), caseSize: str(p.caseSize), safety: str(p.safetyDays), note: str(p.orderNote), status: p.status,
+  });
+  const [busy, setBusy] = useState(false);
+  const sup = suppliers?.find((x) => x.name === (d.supplier || suppliers.find((y) => y.isDefault)?.name));
+  const num = (v: string) => (v.trim() === '' ? null : Number(v));
+  const bad = ['cost', 'lead', 'ship', 'moq', 'caseSize', 'safety'].filter((k) => { const n = num(d[k as keyof typeof d] as string); return n != null && !(n >= 0); });
+  const f = (k: keyof typeof d) => ({ value: d[k] as string, onChange: (e: { target: { value: string } }) => setD({ ...d, [k]: e.target.value }) });
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api.put('/inventory-sync/stock/products/settings', { rows: [{
+        key: p.key, collection: d.collection.trim() || null, supplier: d.supplier.trim() || null, supplierSku: d.supplierSku.trim() || null,
+        costCents: num(d.cost) == null ? null : Math.round(num(d.cost)! * 100), leadTimeDays: num(d.lead) == null ? null : Math.round(num(d.lead)!), shippingDays: num(d.ship) == null ? null : Math.round(num(d.ship)!),
+        moq: num(d.moq) == null ? null : Math.round(num(d.moq)!), caseSize: num(d.caseSize) ? Math.round(num(d.caseSize)!) : null, safetyDays: num(d.safety) == null ? null : Math.round(num(d.safety)!),
+        orderNote: d.note.trim() || null, status: d.status,
+      }] });
+      for (const k of ['stock-products', 'stock-forecast', 'stock-prices', 'stock-suppliers']) void qc.invalidateQueries({ queryKey: [k] });
+      toast('Saved');
+      onClose();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const g = 'mb-1 mt-3 text-[12px] font-semibold uppercase tracking-wide text-stone first:mt-0';
+  return (
+    <Modal open onClose={onClose} title={`Settings · ${p.label}`} footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={bad.length > 0} onClick={save}>Save</Button></>}>
+      <div className="text-[14px]">
+        <p className={g}>Collection &amp; supplier</p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Purchasing collection" hint="Groups it in To order and suggested orders. Blank = the store collections."><input className="field" {...f('collection')} /></Field>
+          <Field label="Supplier"><input className="field" list="edit-supplier-names" {...f('supplier')} placeholder={suppliers?.find((y) => y.isDefault)?.name ?? ''} /><datalist id="edit-supplier-names">{(suppliers ?? []).map((x) => <option key={x.name} value={x.name} />)}</datalist></Field>
+          <Field label="Supplier SKU"><input className="field font-mono" {...f('supplierSku')} /></Field>
+          <Field label="Our cost ($)" hint="What we pay. Never shown to customers."><input className="field num" inputMode="decimal" {...f('cost')} /></Field>
+        </div>
+        <p className={g}>Lead times</p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label="Production (days)" hint={sup?.leadTimeDays != null ? `Blank = ${sup.name}’s ${sup.leadTimeDays}` : 'Blank = the default'}><input className="field num" inputMode="numeric" placeholder={str(sup?.leadTimeDays)} {...f('lead')} /></Field>
+          <Field label="Transit (days)" hint={sup?.shippingDays != null ? `Blank = ${sup.name}’s ${sup.shippingDays}` : 'Blank = none'}><input className="field num" inputMode="numeric" placeholder={str(sup?.shippingDays)} {...f('ship')} /></Field>
+          <Field label="Total lead time"><p className="py-2 text-ink">{(num(d.lead) ?? sup?.leadTimeDays ?? 0) + (num(d.ship) ?? sup?.shippingDays ?? 0)} days</p></Field>
+        </div>
+        <p className={g}>Ordering</p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label="Minimum order" hint={sup?.defaultMoq != null ? `Blank = ${sup.defaultMoq}` : undefined}><input className="field num" inputMode="numeric" placeholder={str(sup?.defaultMoq)} {...f('moq')} /></Field>
+          <Field label="Case size"><input className="field num" inputMode="numeric" {...f('caseSize')} /></Field>
+          <Field label="Safety stock (days)"><input className="field num" inputMode="numeric" {...f('safety')} /></Field>
+        </div>
+        <Field label="Ordering note" className="mt-3"><input className="field" maxLength={500} {...f('note')} /></Field>
+        <Field label="Status" className="mt-3">
+          <select className="field w-auto" value={d.status} onChange={(e) => setD({ ...d, status: e.target.value as StockProductStatus })}>
+            <option value="active">Active</option><option value="discontinued">Discontinued</option><option value="not_tracked">Not tracked</option>
+          </select>
+        </Field>
+        {bad.length > 0 && <p className="mt-2 text-[13px] text-rose">Numbers can’t be negative.</p>}
       </div>
     </Modal>
   );

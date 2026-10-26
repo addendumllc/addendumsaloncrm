@@ -125,13 +125,15 @@ const SEARCH_HINT = 'Search name, colour, collection or SKU (e.g. aperol 18")';
 const Collections = ({ p }: { p: StockProductDTO }) => (p.collections.length ? <span className="block truncate text-[12px] text-stone">{p.collections.slice(0, 3).join(' · ')}</span> : null);
 
 // ---------------- Products: edit all, update by SKU, spreadsheet ----------------
-type Draft = { sku?: string; count?: string; online?: string; supplier?: string; cost?: string; lead?: string; safety?: string; moq?: string; caseSize?: string; status?: StockProductStatus };
+type Draft = { sku?: string; count?: string; online?: string; supplier?: string; cost?: string; lead?: string; ship?: string; safety?: string; moq?: string; caseSize?: string; collection?: string; status?: StockProductStatus };
 
 /** `only="shopify"`: the products that aren't in Square (sold online only), synced between the Shopify stores. */
 /** Products. `setup`: Inventory → Products, with the reorder details (supplier, cost, lead time…) shown; All inventory keeps them tucked away. */
 export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolean } = {}) {
   const N = useStoreNames();
   const fallbackSupplier = useDefaultSupplier();
+  const { data: supplierList } = useSuppliers();
+  const supplierOf = (p: StockProductDTO) => supplierList?.find((x) => x.name === (p.supplier ?? fallbackSupplier)) ?? null;
   const { data, isLoading, error, refetch } = useProducts();
   const toast = useToast();
   const refresh = useRefresh();
@@ -153,9 +155,18 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
   // Collections (from Square and Shopify) to narrow the list fast, and ticking products to change many at once.
   const [coll, setColl] = useState('');
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [bulkSupplier, setBulkSupplier] = useState('');
   const collectionList = useMemo(() => [...new Set(scoped.flatMap((p) => p.collections))].sort((a, b) => a.localeCompare(b)), [scoped]);
-  const shown = useMemo(() => filterProducts(scoped, q, status).filter((p) => !coll || p.collections.includes(coll)), [scoped, q, status, coll]);
+  // Needs setup: active products missing a supplier, a cost, a lead time or a minimum order (their own or the supplier's).
+  const [needsSetup, setNeedsSetup] = useState(false);
+  const missing = (p: StockProductDTO) => {
+    const sup = supplierOf(p);
+    return [!(p.supplier ?? fallbackSupplier) && 'supplier', p.costCents == null && 'cost', p.leadTimeDays == null && sup?.leadTimeDays == null && !sup?.leadUntracked && 'lead time', p.moq == null && sup?.defaultMoq == null && 'MOQ'].filter(Boolean) as string[];
+  };
+  const shown = useMemo(() => filterProducts(scoped, q, status).filter((p) => (!coll || p.collections.includes(coll)) && (!needsSetup || (p.status === 'active' && missing(p).length > 0))),
+    [scoped, q, status, coll, needsSetup, supplierList]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Edit selected: one field across the ticked products (shown in yellow until Save, so it can be checked first).
+  const [bulkField, setBulkField] = useState<keyof Draft | ''>('');
+  const [bulkValue, setBulkValue] = useState('');
   if (isLoading) return <PageLoading />;
   if (error || !data) return <ErrorNote error={error} onRetry={refetch} />;
 
@@ -189,6 +200,8 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
       if (d.supplier !== undefined) s.supplier = d.supplier.trim() || null;
       if (d.cost !== undefined) s.costCents = cents(d.cost);
       if (d.lead !== undefined) s.leadTimeDays = intOr(d.lead);
+      if (d.ship !== undefined) s.shippingDays = intOr(d.ship);
+      if (d.collection !== undefined) s.collection = d.collection.trim() || null;
       if (d.safety !== undefined) s.safetyDays = intOr(d.safety);
       if (d.moq !== undefined) s.moq = intOr(d.moq);
       if (d.caseSize !== undefined) s.caseSize = intOr(d.caseSize) || null;
@@ -242,6 +255,7 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
           </select>
         )}
         <Segmented className="max-w-full overflow-x-auto" value={status} onChange={setStatus} options={[{ value: 'active', label: 'Active' }, { value: 'all', label: 'All' }, { value: 'discontinued', label: 'Discontinued' }, { value: 'not_tracked', label: 'Not tracked' }]} />
+        <label className="flex items-center gap-2 text-[13px] text-ink-soft"><input type="checkbox" className="h-4 w-4 accent-plum" checked={needsSetup} onChange={(e) => { setNeedsSetup(e.target.checked); if (e.target.checked) showDetails(true); }} />Needs setup</label>
       </div>
       {/* Select all (what's shown), then change many at once; nothing is saved until Save. */}
       <div className="mb-3 flex flex-wrap items-center gap-2 text-[13px]">
@@ -255,9 +269,22 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
             <option value="">Set status…</option>
             {Object.entries(STATUS_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
-          {details && <>
-            <input className="field h-9 w-40 py-1 text-[13px]" placeholder="Supplier for selected" value={bulkSupplier} onChange={(e) => setBulkSupplier(e.target.value)} aria-label="Supplier for selected" />
-            <Button size="sm" disabled={!bulkSupplier.trim()} onClick={() => { for (const k of picked) set(k, { supplier: bulkSupplier.trim() }); }}>Set supplier</Button>
+          <select className="field h-9 w-auto py-1 text-[13px]" value={bulkField} onChange={(e) => { setBulkField(e.target.value as keyof Draft | ''); setBulkValue(''); }} aria-label="Field to change for selected">
+            <option value="">Edit selected…</option>
+            <option value="supplier">Supplier</option><option value="collection">Purchasing collection</option><option value="cost">Our cost ($)</option>
+            <option value="lead">Production lead time (days)</option><option value="ship">Transit time (days)</option><option value="moq">Minimum order</option>
+            <option value="caseSize">Case size</option><option value="safety">Safety stock (days)</option>
+          </select>
+          {bulkField && <>
+            <input className="field h-9 w-40 py-1 text-[13px]" list={bulkField === 'supplier' ? 'supplier-names' : undefined} inputMode={['supplier', 'collection'].includes(bulkField) ? undefined : 'decimal'}
+              placeholder="Blank = use default" value={bulkValue} onChange={(e) => setBulkValue(e.target.value)} aria-label="New value" />
+            <datalist id="supplier-names">{(supplierList ?? []).map((x) => <option key={x.name} value={x.name} />)}</datalist>
+            <Button size="sm" onClick={() => {
+              if (!['supplier', 'collection'].includes(bulkField) && bulkValue.trim() !== '' && !(Number(bulkValue) >= 0)) { toast('Enter a number (or leave blank).', 'error'); return; }
+              for (const k of picked) set(k, { [bulkField]: bulkValue.trim() } as Draft);
+              if (!details) showDetails(true);
+              toast(`Set for ${picked.size} product${picked.size === 1 ? '' : 's'} — check the yellow cells, then Save.`);
+            }}>Apply to {picked.size}</Button>
           </>}
           <Button size="sm" variant="ghost" onClick={() => setPicked(new Set())}>Clear</Button>
         </>}
@@ -337,7 +364,7 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
             <tr>
               <th className="w-8 pl-4"><span className="sr-only">Select</span></th>
               <th className="px-4 py-2.5 font-medium">Product</th><th className="px-2 py-2.5 font-medium">SKU</th><th className="px-2 py-2.5 font-medium">In stock</th><th className="px-2 py-2.5 font-medium">New count</th>
-              {details && <><th className="px-2 py-2.5 font-medium">Supplier</th><th className="px-2 py-2.5 font-medium">Cost $</th><th className="px-2 py-2.5 font-medium" title="Days from ordering to arriving">Lead days</th><th className="px-2 py-2.5 font-medium" title="Extra days of stock to keep">Safety days</th><th className="px-2 py-2.5 font-medium" title="Minimum order quantity">Min order</th><th className="px-2 py-2.5 font-medium">Case size</th></>}
+              {details && <><th className="px-2 py-2.5 font-medium">Supplier</th><th className="px-2 py-2.5 font-medium">Cost $</th><th className="px-2 py-2.5 font-medium" title="Production days (blank = the supplier's)">Lead days</th><th className="px-2 py-2.5 font-medium" title="Transit days (blank = the supplier's)">Ship days</th><th className="px-2 py-2.5 font-medium" title="Extra days of stock to keep">Safety days</th><th className="px-2 py-2.5 font-medium" title="Minimum order quantity">Min order</th><th className="px-2 py-2.5 font-medium">Case size</th></>}
               <th className="px-2 py-2.5 font-medium" title="Discontinued or Not tracked: left out of syncing and lists">Status</th>
             </tr>
           </thead>
@@ -373,9 +400,12 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
                 {details && <>
                   <td className="w-36 px-2 py-2"><input className={cx(inp, changed(p, 'supplier', p.supplier ?? '') && yellow)} placeholder={fallbackSupplier ?? ''} value={val(p, 'supplier', p.supplier ?? '')} onChange={(e) => set(p.key, { supplier: e.target.value })} /></td>
                   <td className="w-24 px-2 py-2"><input inputMode="decimal" className={cx(inp, 'num', changed(p, 'cost', usd(p.costCents)) && yellow)} value={val(p, 'cost', usd(p.costCents))} onChange={(e) => set(p.key, { cost: e.target.value })} /></td>
-                  {(['lead', 'safety', 'moq', 'caseSize'] as const).map((k) => {
-                    const base = String({ lead: p.leadTimeDays, safety: p.safetyDays, moq: p.moq, caseSize: p.caseSize }[k] ?? '');
-                    return <td key={k} className="w-20 px-2 py-2"><input inputMode="numeric" className={cx(inp, 'num', changed(p, k, base) && yellow)} value={val(p, k, base)} onChange={(e) => set(p.key, { [k]: e.target.value })} /></td>;
+                  {(['lead', 'ship', 'safety', 'moq', 'caseSize'] as const).map((k) => {
+                    const base = String({ lead: p.leadTimeDays, ship: p.shippingDays, safety: p.safetyDays, moq: p.moq, caseSize: p.caseSize }[k] ?? '');
+                    // Blank uses the supplier's default (shown faintly), so a supplier change carries through.
+                    const sup = supplierOf(p);
+                    const def = k === 'lead' ? sup?.leadTimeDays : k === 'ship' ? sup?.shippingDays : k === 'moq' ? sup?.defaultMoq : null;
+                    return <td key={k} className="w-20 px-2 py-2"><input inputMode="numeric" className={cx(inp, 'num', changed(p, k, base) && yellow)} placeholder={def != null ? String(def) : ''} title={def != null ? `Blank = ${sup!.name}’s default (${def})` : undefined} value={val(p, k, base)} onChange={(e) => set(p.key, { [k]: e.target.value })} /></td>;
                   })}
                 </>}
                 <td className="w-36 px-2 py-2">
@@ -954,7 +984,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
   const collSize = new Map<string, number>();
   for (const i of inStore) for (const c of i.collections) collSize.set(c, (collSize.get(c) ?? 0) + 1);
   const groupOf = (i: StockForecastDTO) => by === 'supplier' ? i.supplier ?? fallbackSupplier ?? 'No supplier'
-    : [...i.collections].sort((a, b) => (collSize.get(a) ?? 0) - (collSize.get(b) ?? 0) || a.localeCompare(b))[0] ?? 'No collection';
+    : i.collection ?? [...i.collections].sort((a, b) => (collSize.get(a) ?? 0) - (collSize.get(b) ?? 0) || a.localeCompare(b))[0] ?? 'No collection';
   const groups: [string | null, StockForecastDTO[]][] = by === 'product' ? [[null, items]]
     : [...items.reduce((m, i) => m.set(groupOf(i), [...(m.get(groupOf(i)) ?? []), i]), new Map<string, StockForecastDTO[]>())]
       .sort(([a], [b]) => (a.startsWith('No ') ? 1 : 0) - (b.startsWith('No ') ? 1 : 0) || a.localeCompare(b));
@@ -1610,9 +1640,18 @@ export function SuppliersView() {
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['stock-suppliers'], queryFn: () => api.get<{ suppliers: SupplierDTO[] }>('/inventory-sync/stock/suppliers').then((r) => r.suppliers) });
   const [editing, setEditing] = useState<SupplierDTO | 'new' | null>(null);
   const [assigning, setAssigning] = useState<SupplierDTO | null>(null);
+  // A supplier's products, with each one's own timing and ordering rules.
+  const [openSup, setOpenSup] = useState<string | null>(null);
+  const { data: productData } = useProducts();
+  const { data: fcData } = useQuery({ queryKey: ['stock-forecast'], queryFn: () => api.get<StockForecastResponse>('/inventory-sync/stock/forecast'), enabled: !!openSup });
   if (isLoading) return <PageLoading />;
   if (error || !data) return <ErrorNote error={error} onRetry={refetch} />;
   const again = () => { refresh(); qc.invalidateQueries({ queryKey: ['stock-suppliers'] }); };
+  const fallback = data.find((x) => x.isDefault)?.name ?? null;
+  const merge = async (from: SupplierDTO, into: string) => {
+    if (!window.confirm(`Merge ${from.name} into ${into}? Its ${from.products} product${from.products === 1 ? '' : 's'} and purchase orders move to ${into}. Products using ${from.name}’s lead time, shipping or minimum order keep those values, so no product’s timing changes.`)) return;
+    try { await api.post('/inventory-sync/stock/suppliers/merge', { from: from.name, into }); toast(`${from.name} merged into ${into}`); again(); } catch (e) { toast((e as Error).message, 'error'); }
+  };
   const applyActual = async (s: SupplierDTO) => {
     try {
       const r = await api.put<{ products: number }>('/inventory-sync/stock/suppliers/lead-time', { name: s.name, days: s.actualLeadDays });
@@ -1659,6 +1698,11 @@ export function SuppliersView() {
                     {s.isDefault
                       ? <Button size="sm" variant="ghost" onClick={() => makeDefault(null)}>Not default</Button>
                       : <Button size="sm" variant="ghost" title="Used for products and orders that don’t name a supplier" onClick={() => makeDefault(s)}>Make default</Button>}
+                    {data.length > 1 && (
+                      <select className="field h-8 w-auto py-0 text-[13px]" value="" onChange={(e) => e.target.value && merge(s, e.target.value)} aria-label={`Merge ${s.name} into another supplier`}>
+                        <option value="">Merge into…</option>{data.filter((x) => x.name !== s.name).map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}
+                      </select>
+                    )}
                     <Button size="sm" variant="ghost" aria-label={`Remove ${s.name}`} icon={<Trash2 className="h-4 w-4" />} onClick={() => remove(s)} />
                   </div>
                 </div>
@@ -1670,7 +1714,41 @@ export function SuppliersView() {
                   <span className="text-stone">Orders <b className="num font-medium text-ink">{s.receivedOrders}</b> received · <b className="num font-medium text-ink">{s.openOrders}</b> open</span>
                   {s.spentCents > 0 && <span className="text-stone">Spent <b className="num font-medium text-ink">${(s.spentCents / 100).toFixed(2)}</b></span>}
                   {!s.leadUntracked && s.actualLeadDays != null && s.actualLeadDays !== s.statedLeadDays && s.products > 0 && <Button size="sm" variant="ghost" onClick={() => applyActual(s)}>Use {s.actualLeadDays} days on its products</Button>}
+                  {s.products > 0 && <button type="button" className="text-plum hover:underline" onClick={() => setOpenSup(openSup === s.name ? null : s.name)}>{openSup === s.name ? 'Hide products' : 'Show products'}</button>}
                 </div>
+                {openSup === s.name && (() => {
+                  const mine = (productData?.products ?? []).filter((p) => (p.supplier ?? fallback) === s.name && p.status !== 'not_tracked');
+                  const fc = new Map((fcData?.items ?? []).map((i) => [i.key, i]));
+                  const own = (v: number | null | undefined, def: number | null | undefined) => (v != null ? <span className="text-ink">{v}</span> : <span className="text-stone" title="Supplier default">{def ?? '—'}</span>);
+                  return (
+                    <div className="mt-3 overflow-x-auto rounded-lg border border-line">
+                      <table className="w-full min-w-[720px] text-left text-[12.5px]">
+                        <thead className="bg-mist/50 text-[11px] uppercase tracking-wide text-stone">
+                          <tr><th className="px-2 py-1.5">Product</th><th className="px-2 py-1.5">Supplier SKU</th><th className="px-2 py-1.5">Collection</th><th className="px-2 py-1.5 text-right">Production</th><th className="px-2 py-1.5 text-right">Transit</th><th className="px-2 py-1.5 text-right">MOQ</th><th className="px-2 py-1.5 text-right">Case</th><th className="px-2 py-1.5 text-right">Cost</th><th className="px-2 py-1.5">Status</th></tr>
+                        </thead>
+                        <tbody className="divide-y divide-line">
+                          {mine.map((p) => {
+                            const f = fc.get(p.key);
+                            return (
+                              <tr key={p.key}>
+                                <td className="px-2 py-1.5 text-ink">{p.label}<span className="block font-mono text-[11px] text-stone">{p.sku}</span></td>
+                                <td className="px-2 py-1.5 font-mono text-stone">{p.supplierSku ?? '—'}</td>
+                                <td className="px-2 py-1.5 text-ink-soft">{p.collection ?? p.collections[0] ?? '—'}</td>
+                                <td className="num px-2 py-1.5 text-right">{own(p.leadTimeDays, s.leadTimeDays)}</td>
+                                <td className="num px-2 py-1.5 text-right">{own(p.shippingDays, s.shippingDays)}</td>
+                                <td className="num px-2 py-1.5 text-right">{own(p.moq, s.defaultMoq)}</td>
+                                <td className="num px-2 py-1.5 text-right">{p.caseSize ?? '—'}</td>
+                                <td className="num px-2 py-1.5 text-right">{p.costCents != null ? `$${(p.costCents / 100).toFixed(2)}` : '—'}</td>
+                                <td className="px-2 py-1.5">{f ? <Badge tone={F_STATUS[f.status].tone}>{F_STATUS[f.status].label}</Badge> : '—'}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                      <p className="px-2 py-1.5 text-[11px] text-stone">Grey numbers are {s.name}’s defaults; dark ones are the product’s own. Change them on Products (Edit selected) or in a product’s settings.</p>
+                    </div>
+                  );
+                })()}
               </li>
             );
           })}

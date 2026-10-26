@@ -7,7 +7,7 @@ import {
   unmarkSeparate,
 } from '../domain/inventorySync.js';
 import { addToSquare, applyNewLength, applyPrices, applyProPrices, newLengthPlan, priceList, proPricePlan, squareCandidates,
-  applyStockChanges, createPurchaseOrders, productSales, skipProducts, suggestPurchaseOrders, suggestedOrderPlan, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
+  applyStockChanges, createPurchaseOrders, mergeSuppliers, productSales, skipProducts, suggestPurchaseOrders, suggestedOrderPlan, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
   assignSupplier, deleteSupplier, refreshShopifySales, renameSupplier, saveProductSettings, saveSupplier, setForecastSettings, setSupplierLeadTime, stockForecast, stockHistory, stockProducts, updatePurchaseOrder,
 } from '../domain/stock.js';
 import { setSquareSku } from '../domain/squareInventory.js';
@@ -141,6 +141,8 @@ inventorySyncRouter.put('/stock/products/settings', ah(async (req, res) => {
     key: z.string().min(1).max(200), supplier: z.string().max(120).nullable().optional(), costCents: intOrNull(10_000_000), leadTimeDays: intOrNull(730),
     safetyDays: intOrNull(365), moq: intOrNull(1_000_000), caseSize: z.number().int().min(1).max(100_000).nullable().optional(),
     status: z.enum(['active', 'discontinued', 'not_tracked']).optional(),
+    shippingDays: intOrNull(365), supplierSku: z.string().trim().max(80).nullable().optional(), orderNote: z.string().trim().max(500).nullable().optional(),
+    collection: z.string().trim().max(120).nullable().optional(),
   })).min(1).max(5000) }), req.body);
   await saveProductSettings(b.rows, req.user!.id);
   await logAction(req, 'stock.product_settings', 'stock', null, { count: b.rows.length });
@@ -313,6 +315,13 @@ inventorySyncRouter.get('/stock/suppliers', ah(async (req, res) => {
     suppliers: supplierDetails(req) ? all : all.map((s) => ({ ...s, companyName: null, email: null, phone: null, website: null, notes: null })),
     canSeeDetails: supplierDetails(req),
   });
+}));
+// Merge a duplicate supplier into another: products, orders and items move over; no product's timing changes.
+inventorySyncRouter.post('/stock/suppliers/merge', ah(async (req, res) => {
+  const b = parse(z.object({ from: z.string().min(1).max(120), into: z.string().min(1).max(120) }), req.body);
+  await mergeSuppliers(b.from, b.into, req.user!.id);
+  await logAction(req, 'stock.supplier_merge', 'stock', null, { from: b.from, into: b.into });
+  res.json({ ok: true });
 }));
 inventorySyncRouter.put('/stock/suppliers/lead-time', ah(async (req, res) => {
   const b = parse(z.object({ name: z.string().min(1).max(120), days: z.number().int().min(0).max(730) }), req.body);

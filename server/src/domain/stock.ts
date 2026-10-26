@@ -70,6 +70,9 @@ async function live(fresh = false): Promise<Live> {
     return {
       ...r, kind, store2: store2BySku.get(norm(r.squareSku) || norm(r.shopifySku)) ?? [], supplier: s?.supplier ?? null, costCents: s?.cost_cents ?? null, leadTimeDays: s?.lead_time_days ?? null, safetyDays: s?.safety_days ?? null,
       moq: s?.moq ?? null, caseSize: s?.case_size ?? null, status: (s?.status ?? 'active') as StockProductStatus,
+      shippingDays: s?.shipping_days ?? null, supplierSku: s?.supplier_sku ?? null, orderNote: s?.order_note ?? null, collection: s?.collection ?? null,
+      // The purchasing collection (when set) comes first, so search and grouping use it.
+      collections: s?.collection ? [s.collection, ...r.collections.filter((c) => c !== s.collection)] : r.collections,
     };
   };
   // Several listings in the main Shopify store can share a SKU (e.g. a PRO listing): they're one product with one stock.
@@ -127,19 +130,25 @@ export async function stockProducts() {
 }
 
 /** Ordering details for products (CRM only). */
-export async function saveProductSettings(rows: { key: string; supplier?: string | null; costCents?: number | null; leadTimeDays?: number | null; safetyDays?: number | null; moq?: number | null; caseSize?: number | null; status?: StockProductStatus }[], staffId: string | null) {
+export async function saveProductSettings(rows: { key: string; supplier?: string | null; costCents?: number | null; leadTimeDays?: number | null; safetyDays?: number | null; moq?: number | null; caseSize?: number | null; status?: StockProductStatus;
+  shippingDays?: number | null; supplierSku?: string | null; orderNote?: string | null; collection?: string | null }[], staffId: string | null) {
   await db().tx(async (q) => {
     for (const r of rows) {
       const cur = await q.query<any>('SELECT * FROM stock_products WHERE product_key = $1', [r.key]);
       const c = cur[0] ?? {};
       const pick = <T>(v: T | undefined, old: T) => (v === undefined ? old : v);
       await q.query(
-        `INSERT INTO stock_products(product_key, supplier, cost_cents, lead_time_days, safety_days, moq, case_size, status, updated_by_staff_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        `INSERT INTO stock_products(product_key, supplier, cost_cents, lead_time_days, safety_days, moq, case_size, status, updated_by_staff_id, shipping_days, supplier_sku, order_note, collection)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
          ON CONFLICT (product_key) DO UPDATE SET supplier = $2, cost_cents = $3, lead_time_days = $4, safety_days = $5, moq = $6, case_size = $7, status = $8,
-           updated_by_staff_id = $9, updated_at = now()`,
+           updated_by_staff_id = $9, shipping_days = $10, supplier_sku = $11, order_note = $12, collection = $13, updated_at = now()`,
         [r.key, pick(r.supplier, c.supplier ?? null)?.trim() || null, pick(r.costCents, c.cost_cents ?? null), pick(r.leadTimeDays, c.lead_time_days ?? null),
-          pick(r.safetyDays, c.safety_days ?? null), pick(r.moq, c.moq ?? null), pick(r.caseSize, c.case_size ?? null), pick(r.status, c.status ?? 'active'), staffId]);
+          pick(r.safetyDays, c.safety_days ?? null), pick(r.moq, c.moq ?? null), pick(r.caseSize, c.case_size ?? null), pick(r.status, c.status ?? 'active'), staffId,
+          pick(r.shippingDays, c.shipping_days ?? null), pick(r.supplierSku, c.supplier_sku ?? null)?.trim() || null, pick(r.orderNote, c.order_note ?? null)?.trim() || null,
+          pick(r.collection, c.collection ?? null)?.trim() || null]);
+        // A new supplier named on a product gets its row (so it can be picked, merged and given defaults).
+        const sup = pick(r.supplier, c.supplier ?? null)?.trim();
+        if (sup) await q.query('INSERT INTO suppliers(name) VALUES ($1) ON CONFLICT (name) DO NOTHING', [sup]);
     }
   });
   forgetStockCache();
@@ -560,7 +569,8 @@ export async function stockForecast(): Promise<StockForecastResponse> {
     const rate = 0.2 * (u7 / 7) + 0.5 * (u30 / 30) + 0.3 * (u90 / since);
     const sup = supRows.get(r.supplier ?? fallback ?? '');
     const noLead = untracked.has(r.supplier ?? fallback ?? '');
-    const shipping = noLead ? 0 : sup?.shipping_days ?? 0;
+    // Each product's own timing: its production lead time and transit days, else its supplier's defaults.
+    const shipping = noLead ? 0 : r.shippingDays ?? sup?.shipping_days ?? 0;
     const lead = noLead ? 0 : (r.leadTimeDays ?? sup?.lead_time_days ?? settings.leadTimeDays) + shipping;
     // Minimum order: the product's own, else its supplier's default, else the overall default (Forecast settings).
     const moq: number | null = r.moq ?? sup?.default_moq ?? (settings.defaultMoq || null);
@@ -621,7 +631,7 @@ export async function stockForecast(): Promise<StockForecastResponse> {
     const stockoutRisk = !discontinued && !skippedUntil && rate > 0 && stock > 0 && daysOfStock != null && daysOfStock < lead;
     if (stockoutRisk) why.push(`Stock-out risk: about ${Math.round(daysOfStock!)} days of stock, but an order takes ${lead} days to arrive.`);
     items.push({
-      key: r.key, label: r.label, sku: r.sku, supplier: r.supplier ?? all.find((x) => x.supplier)?.supplier ?? null, collections: [...new Set(all.flatMap((x) => x.collections ?? []))], stock, incoming: inc, ratePerDay: Math.round(rate * 100) / 100, units7: u7, units30: u30, units90: u90,
+      key: r.key, label: r.label, sku: r.sku, supplier: r.supplier ?? all.find((x) => x.supplier)?.supplier ?? null, collections: [...new Set(all.flatMap((x) => x.collections ?? []))], collection: all.find((x) => x.collection)?.collection ?? null, stock, incoming: inc, ratePerDay: Math.round(rate * 100) / 100, units7: u7, units30: u30, units90: u90,
       leadTimeDays: lead, leadUntracked: noLead, shippingDays: shipping, stockoutRisk, skippedUntil, safetyDays: safety, daysOfStock: daysOfStock == null ? null : Math.round(daysOfStock), orderBy, status, suggestedQty: suggested,
       moq, caseSize: r.caseSize, costCents: r.costCents,
       moqCostCents: moq && r.costCents != null ? moq * r.costCents : null, moqArrivesOn: moq ? addDays(today, lead) : null, moqLastsDays,
@@ -676,18 +686,18 @@ async function lineRows(lines: PoLineInput[]) {
   // Each item's supplier: its lead time (+ shipping) unless one is entered; none when its lead time isn't tracked.
   const sups = new Map((await db().query<any>('SELECT * FROM suppliers')).map((x) => [x.name as string, x]));
   const fallback = await defaultSupplier();
-  const leadFor = (own: number | null, name: string | null) => {
+  const leadFor = (own: number | null, name: string | null, ownShipping: number | null = null) => {
     const sup = name ? sups.get(name) : undefined;
     if (sup?.lead_untracked) return null;
     const base = own ?? sup?.lead_time_days ?? null;
-    return base == null ? null : base + (sup?.shipping_days ?? 0);
+    return base == null ? null : base + (ownShipping ?? sup?.shipping_days ?? 0);
   };
   return lines.map((l) => {
     const r = byKey.get(l.productKey);
     if (!r) throw badRequest('A product on this order wasn’t found. Refresh and try again.');
     if (!Number.isInteger(l.quantity) || l.quantity <= 0) throw badRequest(`Enter how many of ${r.label} to order.`);
     // Its own lead time: as entered, else the product's (which comes from its supplier when not set).
-    return { key: r.key, label: r.label, sku: r.sku, quantity: l.quantity, cost: l.costCents ?? r.costCents, lead: l.leadTimeDays === undefined ? leadFor(r.leadTimeDays, r.supplier ?? fallback) : l.leadTimeDays, supplier: r.supplier ?? fallback };
+    return { key: r.key, label: r.label, sku: r.sku, quantity: l.quantity, cost: l.costCents ?? r.costCents, lead: l.leadTimeDays === undefined ? leadFor(r.leadTimeDays, r.supplier ?? fallback, r.shippingDays ?? null) : l.leadTimeDays, supplier: r.supplier ?? fallback };
   });
 }
 const LINE_INSERT = 'INSERT INTO purchase_order_lines(po_id, product_key, label, sku, quantity, cost_cents, lead_time_days, supplier) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)';
@@ -796,7 +806,8 @@ export async function createPurchaseOrders(lines: PoLineInput[], staffId: string
 function collectionOfEach(items: StockForecastDTO[]) {
   const size = new Map<string, number>();
   for (const i of items) for (const c of i.collections) size.set(c, (size.get(c) ?? 0) + 1);
-  return (i: StockForecastDTO) => [...i.collections].sort((a, b) => (size.get(a) ?? 0) - (size.get(b) ?? 0) || a.localeCompare(b))[0] ?? 'Other';
+  // A purchasing collection set on the product wins; else the most specific store collection.
+  return (i: StockForecastDTO) => i.collection ?? [...i.collections].sort((a, b) => (size.get(a) ?? 0) - (size.get(b) ?? 0) || a.localeCompare(b))[0] ?? 'Other';
 }
 
 /**
@@ -1175,7 +1186,7 @@ export async function analyticsForecast() {
     items: f.items.filter((i) => !i.leadUntracked && !i.skippedUntil).flatMap((i) => {
       const b = bucket(i);
       return b ? [{ key: i.key, label: i.label, sku: i.sku, status: b, stock: i.stock, incoming: i.incoming, ratePerDay: i.ratePerDay, daysOfStock: i.daysOfStock, orderBy: i.orderBy,
-        suggestedQty: i.suggestedQty, costCents: i.costCents, supplier: i.supplier, collections: i.collections, stores: i.stores }] : [];
+        suggestedQty: i.suggestedQty, costCents: i.costCents, supplier: i.supplier, collections: i.collections, collection: i.collection, stores: i.stores }] : [];
     }),
   };
 }
@@ -1264,7 +1275,6 @@ export async function deleteSupplier(name: string, staffId: string | null) {
 export async function assignSupplier(a: SupplierAssign, staffId: string | null) {
   // A supplier typed on a product (before suppliers could be added here) gets its row now.
   await db().query('INSERT INTO suppliers(name) VALUES ($1) ON CONFLICT (name) DO NOTHING', [a.supplier]);
-  const sup = await db().one<any>('SELECT * FROM suppliers WHERE name = $1', [a.supplier]);
   let keys: string[];
   if ('keys' in a) keys = [...new Set(a.keys)];
   else {
@@ -1274,15 +1284,15 @@ export async function assignSupplier(a: SupplierAssign, staffId: string | null) 
   }
   if (!keys.length) return 0;
   await db().query(
-    `INSERT INTO stock_products(product_key, supplier, lead_time_days, updated_by_staff_id)
-       SELECT k, $2, $3, $4 FROM unnest($1::text[]) k
-     ON CONFLICT (product_key) DO UPDATE SET supplier = $2, lead_time_days = COALESCE(stock_products.lead_time_days, $3), updated_by_staff_id = $4, updated_at = now()`,
-    [keys, a.supplier, sup.lead_time_days ?? null, staffId]);
+    `INSERT INTO stock_products(product_key, supplier, updated_by_staff_id)
+       SELECT k, $2, $3 FROM unnest($1::text[]) k
+     ON CONFLICT (product_key) DO UPDATE SET supplier = $2, updated_by_staff_id = $3, updated_at = now()`,
+    [keys, a.supplier, staffId]);
+  // Products keep no copy of the supplier's lead time: one left blank uses the supplier's default, so it follows changes.
   forgetStockCache();
   return keys.length;
 }
 
-/** Sets the lead time on all of a supplier's products (e.g. to what they actually take). */
 /** To order → Skip: leave products out of suggestions and alerts until a date (null = turn them back on). */
 export async function skipProducts(keys: string[], until: string | null, staffId: string | null) {
   await db().query(
@@ -1291,6 +1301,7 @@ export async function skipProducts(keys: string[], until: string | null, staffId
   forgetStockCache();
 }
 
+/** Sets the lead time on all of a supplier's products (e.g. to what they actually take). */
 export async function setSupplierLeadTime(name: string, days: number, staffId: string | null) {
   const r = await db().query<{ product_key: string }>('UPDATE stock_products SET lead_time_days = $2, updated_by_staff_id = $3, updated_at = now() WHERE supplier = $1 RETURNING product_key', [name, days, staffId]);
   forgetStockCache();
@@ -1298,6 +1309,27 @@ export async function setSupplierLeadTime(name: string, days: number, staffId: s
 }
 
 /** Renames a supplier on its products and open purchase orders. */
+/**
+ * Merges a duplicate supplier into another (e.g. two records for the same hair company). Its products, purchase orders
+ * and items move over. Products that used the duplicate's defaults (lead time, shipping, minimum order) keep those
+ * values as their own when the other supplier's differ — so no product's timing changes by merging.
+ */
+export async function mergeSuppliers(from: string, into: string, staffId: string | null) {
+  if (from === into) throw badRequest('Choose two different suppliers.');
+  const [a, b] = await Promise.all([db().one<any>('SELECT * FROM suppliers WHERE name = $1', [from]), db().one<any>('SELECT * FROM suppliers WHERE name = $1', [into])]);
+  if (!b) throw notFound('That supplier');
+  if (a) {
+    for (const [col, def] of [['lead_time_days', 'lead_time_days'], ['shipping_days', 'shipping_days'], ['moq', 'default_moq']] as const) {
+      if (a[def] != null && a[def] !== b[def]) {
+        await db().query(`UPDATE stock_products SET ${col} = $2, updated_by_staff_id = $3, updated_at = now() WHERE supplier = $1 AND ${col} IS NULL`, [from, a[def], staffId]);
+      }
+    }
+  }
+  await renameSupplier(from, into, staffId);
+  await db().query('DELETE FROM suppliers WHERE name = $1', [from]);
+  forgetStockCache();
+}
+
 export async function renameSupplier(from: string, to: string, staffId: string | null) {
   const name = to.trim();
   if (!name) throw badRequest('Enter a name.');

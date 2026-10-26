@@ -35,7 +35,10 @@ describe('Suppliers', () => {
     forgetStockCache();
     const products = (await api.get('/api/inventory-sync/stock/products')).body.products;
     const square = products.filter((p: any) => p.squareVariationId);
-    expect(square.every((p: any) => p.supplier === 'Hair Co' && p.leadTimeDays === 10)).toBe(true);
+    // The products keep no copy of the supplier's lead time: they use its default (and follow it if it changes).
+    expect(square.every((p: any) => p.supplier === 'Hair Co' && p.leadTimeDays == null)).toBe(true);
+    const fc = (await api.get('/api/inventory-sync/stock/forecast')).body.items.find((i: any) => i.key === square[0].key);
+    expect(fc.leadTimeDays).toBe(10);
     expect(products.filter((p: any) => !p.squareVariationId).every((p: any) => p.supplier == null)).toBe(true);
 
     // Chosen products, for another supplier; "only without a supplier" leaves those alone afterwards.
@@ -342,6 +345,30 @@ describe('Suppliers', () => {
     expect(r.months.at(-1).partial).toBe(true);
     expect(r.periods.d365.units).toBeGreaterThanOrEqual(r.periods.d90.units);
     expect((await api.get('/api/inventory-sync/stock/products/nope/sales')).status).toBe(404);
+  });
+
+  it('one supplier, many products with their own timing; merging a duplicate supplier changes no product’s timing', async () => {
+    await api.post('/api/inventory-sync/stock/suppliers', { name: 'Hair Co A', leadTimeDays: 14, shippingDays: 3 });
+    await api.post('/api/inventory-sync/stock/suppliers', { name: 'Hair Co B', leadTimeDays: 30 });
+    const [p1, p2] = (await api.get('/api/inventory-sync/stock/products')).body.products.filter((p: any) => p.squareVariationId);
+    await api.put('/api/inventory-sync/stock/products/settings', { rows: [
+      { key: p1.key, supplier: 'Hair Co A', leadTimeDays: 15, shippingDays: 7, supplierSku: 'HC-001', orderNote: 'Ask for the new batch', collection: 'Redefined Weft' },
+      { key: p2.key, supplier: 'Hair Co A' },
+    ] });
+    forgetStockCache();
+    const lead = async (k: string) => (await api.get('/api/inventory-sync/stock/forecast')).body.items.find((i: any) => i.key === k).leadTimeDays;
+    expect(await lead(p1.key)).toBe(22); // its own 15 + its own 7
+    expect(await lead(p2.key)).toBe(17); // the supplier's 14 + 3
+    const prod = (await api.get('/api/inventory-sync/stock/products')).body.products.find((p: any) => p.key === p1.key);
+    expect(prod).toMatchObject({ supplierSku: 'HC-001', orderNote: 'Ask for the new batch', collection: 'Redefined Weft', shippingDays: 7 });
+    expect(prod.collections[0]).toBe('Redefined Weft');
+    expect((await api.post('/api/inventory-sync/stock/suppliers/merge', { from: 'Hair Co A', into: 'Hair Co B' })).status).toBe(200);
+    forgetStockCache();
+    expect(await lead(p1.key)).toBe(22);
+    expect(await lead(p2.key)).toBe(17);
+    const names = (await api.get('/api/inventory-sync/stock/suppliers')).body.suppliers.map((x: any) => x.name);
+    expect(names).toContain('Hair Co B');
+    expect(names).not.toContain('Hair Co A');
   });
 });
 

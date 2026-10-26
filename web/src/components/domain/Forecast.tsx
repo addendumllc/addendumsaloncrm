@@ -8,7 +8,7 @@ import { EmptyState, ErrorNote, PageLoading, Segmented, cx } from '../ui';
 type Status = 'order_now' | 'soon' | 'watch' | 'healthy';
 interface Item {
   key: string; label: string; sku: string | null; status: Status; stock: number; incoming: number; ratePerDay: number; daysOfStock: number | null;
-  orderBy: string | null; suggestedQty: number; costCents: number | null; supplier: string | null; collections: string[]; stores: { salon: boolean; online: boolean };
+  orderBy: string | null; suggestedQty: number; costCents: number | null; supplier: string | null; collections: string[]; collection: string | null; stores: { salon: boolean; online: boolean };
 }
 
 const STATUSES: { value: Status; label: string; tone: string }[] = [
@@ -37,7 +37,7 @@ export function ForecastWidget({ scope }: { scope: 'all' | 'salon' | 'online' })
   // A product in several collections counts once, under its most specific one (the one with the fewest products).
   const size = new Map<string, number>();
   for (const i of inShop) for (const c of i.collections) size.set(c, (size.get(c) ?? 0) + 1);
-  const groupOf = (i: Item) => (by === 'supplier' ? i.supplier ?? 'No supplier' : [...i.collections].sort((a, b) => (size.get(a) ?? 0) - (size.get(b) ?? 0) || a.localeCompare(b))[0] ?? 'No collection');
+  const groupOf = (i: Item) => (by === 'supplier' ? i.supplier ?? 'No supplier' : i.collection ?? [...i.collections].sort((a, b) => (size.get(a) ?? 0) - (size.get(b) ?? 0) || a.localeCompare(b))[0] ?? 'No collection');
   const inColl = inShop.filter((i) => !coll || i.collections.includes(coll));
   const groups = by === 'product' ? [] : [...inColl.reduce((m, i) => m.set(groupOf(i), [...(m.get(groupOf(i)) ?? []), i]), new Map<string, Item[]>())]
     .map(([name, list]) => {

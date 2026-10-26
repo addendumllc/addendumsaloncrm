@@ -2168,6 +2168,12 @@ export interface StockProductDTO {
   kind: ProductKind | null;
   /** Collections and categories (Shopify collections and product type, Square categories), for search. */
   collections: string[];
+  /** Purchasing settings kept in the CRM: transit days (null = the supplier's), supplier's SKU, an ordering note, and the
+   *  purchasing collection it's ordered in (null = from the store collections). */
+  shippingDays?: number | null;
+  supplierSku?: string | null;
+  orderNote?: string | null;
+  collection?: string | null;
   /** The listing's photo: Square's, else Shopify's (null when neither has one). */
   imageUrl: string | null;
 }
@@ -2211,6 +2217,8 @@ export interface StockForecastDTO {
   supplier: string | null;
   /** Shopify collections / product type and Square categories (To order can be grouped by them). */
   collections: string[];
+  /** Its purchasing collection when set (groups it in To order, suggested orders and Analytics). */
+  collection: string | null;
   /** Its supplier's lead time isn't tracked (Suppliers): timed on safety stock alone, and left out of Analytics → Forecast. */
   leadUntracked: boolean;
   /** The supplier's shipping days (included in leadTimeDays). */
