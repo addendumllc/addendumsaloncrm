@@ -24,7 +24,6 @@ import { ClientProfilePage } from './pages/ClientProfile';
 import { LeadsPage } from './pages/Leads';
 import { MessagesPage } from './pages/Messages';
 const AnalyticsPage = lazy(() => import('./pages/Analytics').then((m) => ({ default: m.AnalyticsPage })));
-const PurchasesPage = lazy(() => import('./pages/Purchases').then((m) => ({ default: m.PurchasesPage })));
 const InventoryPage = lazy(() => import('./pages/Inventory').then((m) => ({ default: m.InventoryPage })));
 const TimeClockPage = lazy(() => import('./pages/TimeClock').then((m) => ({ default: m.TimeClockPage })));
 const SettingsPage = lazy(() => import('./pages/Settings').then((m) => ({ default: m.SettingsPage })));
@@ -158,8 +157,9 @@ function SignedIn() {
       <Route path="/hair" element={<Navigate to="/tasks?hair=todo" replace />} />
       <Route path="/my-commission" element={guard(['commission:own'], <MyCommissionPage />)} />
       <Route path="/commission" element={guard(['commission:team', 'commission:approve'], <TeamCommissionPage />)} />
-      <Route path="/analytics" element={guard(['analytics:read', 'revenue:projections'], <AnalyticsPage />)} />
-      <Route path="/purchases" element={guard(['analytics:read', 'inventory:sync', 'hair:manage'], <PurchasesPage />)} />
+      <Route path="/analytics" element={guard(['analytics:read', 'revenue:projections', 'inventory:sync', 'hair:manage'], <AnalyticsPage />)} />
+      {/* Purchases is an Analytics sub-tab now; older links land there. */}
+      <Route path="/purchases" element={<Navigate to="/analytics?scope=purchases" replace />} />
       <Route path="/time-clock" element={guard(['timeclock:use'], <TimeClockPage />)} />
       {/* Everyone has Settings: their own profile, display and password, plus whatever salon settings they're allowed. */}
       <Route path="/settings" element={<SettingsPage />} />

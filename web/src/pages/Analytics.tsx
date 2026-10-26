@@ -7,7 +7,9 @@ import { useCanDo, useIntegrations } from '../api/hooks';
 import { ProjectionsSection } from '../components/domain/Projections';
 import { ProductSales } from '../components/domain/ProductSales';
 import { ForecastWidget } from '../components/domain/Forecast';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { InventoryOverview } from '../components/domain/InventoryOverview';
+import { PurchasesPage } from './Purchases';
 import { SectionPicker } from '../components/layout/subNav';
 import { useStoreNames } from '../lib/storeNames';
 import { dateShort, money, pct } from '../lib/format';
@@ -42,10 +44,13 @@ const AXIS = { fontSize: 12, fill: 'rgb(var(--stone))' };
 export function AnalyticsPage() {
   const canDo = useCanDo();
   const N = useStoreNames();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
+  const nav = useNavigate();
+  // Sub-tabs: Addendum Salon · Addendum Hair · Both, then What to order, Inventory & Replenishment and Purchases.
+  const page = (['order', 'inventory', 'purchases'] as const).find((p) => p === params.get('scope')) ?? null;
   const scope = params.get('scope') === 'salon' ? 'salon' : params.get('scope') === 'online' ? 'online' : 'all';
   const online = [N.shopify, N.shopify2].filter(Boolean).join(' + ');
-  const title = scope === 'salon' ? `Analytics · ${N.square}` : scope === 'online' ? `Analytics · Online` : 'Analytics';
+  const title = scope === 'salon' ? 'Analytics · Addendum Salon' : scope === 'online' ? 'Analytics · Addendum Hair' : 'Analytics';
   const salon = scope !== 'online';
   const bookings = salon && canDo('analytics:read');
   // One period for the bookings & clients widgets.
@@ -68,11 +73,27 @@ export function AnalyticsPage() {
   if (canDo('analytics:read')) defs.push({ id: 'forecast', title: 'Forecast: what to order', size: 'full', node: <ForecastWidget key={scope} scope={scope} /> });
   if (canDo('analytics:read')) defs.push({ id: 'product_sales', title: 'Product sales', size: 'full', ownHeading: true, node: <div className="[&>section]:mt-0"><ProductSales key={scope} scope={scope} /></div> });
 
+  if (page === 'purchases') return <div className="animate-rise"><SectionPicker path="/analytics" names={N} can={canDo} className="mb-4" /><PurchasesPage /></div>;
+  if (page) {
+    const store = (['salon', 'hair'] as const).find((s) => s === params.get('for')) ?? 'all';
+    const pick = (v: string) => setParams((p) => { const n = new URLSearchParams(p); if (v === 'all') n.delete('for'); else n.set('for', v); return n; });
+    return (
+      <div className="animate-rise">
+        <PageHeader title={page === 'order' ? 'What to order' : 'Inventory & Replenishment'}
+          subtitle={page === 'order' ? 'By urgency, collection or supplier — from sales, lead times and what’s on order.' : 'Stock in the salon (Square) and online (Shopify), kept separate. Open a product for its sales, pricing and reorder details.'}
+          actions={page === 'inventory' && <Segmented size="sm" value={store} onChange={pick} options={[{ value: 'all', label: 'All stores' }, { value: 'salon', label: 'Addendum Salon' }, { value: 'hair', label: 'Addendum Hair' }]} />} />
+        <SectionPicker path="/analytics" names={N} can={canDo} className="mb-4" />
+        {page === 'order'
+          ? <ForecastWidget scope={store === 'salon' ? 'salon' : store === 'hair' ? 'online' : 'all'} />
+          : <InventoryOverview store={store} onOpenTab={(view, extra = {}) => nav(`/inventory-sync?${new URLSearchParams({ ...(view === 'overview' ? {} : { view }), ...extra })}`)} />}
+      </div>
+    );
+  }
   return (
     <div className="animate-rise">
       <PageHeader
         title={title}
-        subtitle={scope === 'salon' ? 'The salon: revenue, bookings, clients and salon product sales.' : scope === 'online' ? `Online sales (${online}).` : `The salon and online (${online}) together.`}
+        subtitle={scope === 'salon' ? 'Addendum Salon: revenue, bookings, clients and salon product sales.' : scope === 'online' ? `Addendum Hair: online sales (${online}).` : `Addendum Salon and Addendum Hair (${online}) together.`}
         actions={bookings && <Segmented value={days} onChange={setDays} options={[{ value: '30', label: '30 days' }, { value: '90', label: '90 days' }, { value: '365', label: '12 months' }]} />}
       />
       <SectionPicker path="/analytics" names={N} can={canDo} className="mb-4" />

@@ -31,13 +31,14 @@ const result = (N: StoreNames): Record<InventorySyncRunDTO['details'][number]['r
  * purchase orders, suppliers) and the stock activity log. The Square ↔ Shopify sync is under More.
  */
 const TABS = [
-  { value: 'overview', label: 'Overview' }, { value: 'items', label: 'Products' }, { value: 'stock', label: 'Stock counts' }, { value: 'pricing', label: 'Pricing' },
-  { value: 'reorder', label: 'To order' }, { value: 'orders', label: 'Purchase orders' }, { value: 'suppliers', label: 'Suppliers' }, { value: 'activity', label: 'Activity' },
+  // Inventory: the products with their stock — searchable by product, SKU or collection, counted or adjusted in place.
+  { value: 'stock', label: 'Inventory' }, { value: 'reorder', label: 'To order' }, { value: 'orders', label: 'Purchase orders' }, { value: 'items', label: 'Products' },
+  { value: 'pricing', label: 'Pricing' }, { value: 'suppliers', label: 'Suppliers' }, { value: 'activity', label: 'Activity' },
 ];
 const ABOUT: Record<string, string> = {
   overview: 'Stock in the salon (Square) and online (Shopify), kept separate. Open a product for its details.',
   items: 'Each store’s products. All stores: pair products, set SKUs and types, and add products.',
-  stock: 'Count or adjust stock. Every change is logged under Activity.',
+  stock: 'Every product’s stock — search by product, SKU or collection, then count or adjust it. Every change is logged under Activity.',
   pricing: 'Unit cost and each store’s price.',
   reorder: 'What needs ordering, from sales, lead times and what’s on order.',
   orders: 'Orders to suppliers. Receiving adds the stock.',
@@ -67,13 +68,13 @@ export function InventorySyncPage() {
   // Older links still land in the right place (?view=square / shopify / all / inventory = a store's products, etc.).
   const view = raw === 'stock' && params.get('part') === 'reorder' ? 'reorder'
     : ({ all: 'items', square: 'items', shopify: 'items', inventory: 'items', 'orders-online': 'orders', preorders: 'reorder', toorder: 'reorder' } as Record<string, string>)[raw]
-    ?? (['items', 'pricing', 'orders', 'stock', 'reorder', 'products', 'suppliers', 'activity', 'sync'].includes(raw) ? raw : 'overview');
+    ?? (['overview', 'items', 'pricing', 'orders', 'stock', 'reorder', 'products', 'suppliers', 'activity', 'sync'].includes(raw) ? raw : 'stock');
   // The page's own choice (?for=), else the business workspace they're in.
   const ws = useWorkspace();
   const forHair = raw === 'shopify' || raw === 'orders-online' || raw === 'preorders' || pageBusiness(params, 'for', ws.current?.id ?? 'salon') === 'hair';
   const setView = (v: string, extra: Record<string, string> = {}) => setParams((p) => {
     const n = new URLSearchParams(p); n.delete('part'); n.delete('q'); n.delete('show');
-    if (v === 'overview') n.delete('view'); else n.set('view', v);
+    if (v === 'stock') n.delete('view'); else n.set('view', v);
     for (const [k, x] of Object.entries(extra)) n.set(k, x);
     return n;
   });

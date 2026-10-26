@@ -24,11 +24,11 @@ export const SUB_NAV: Record<string, SubNav> = {
     params: ['view'],
     collapsible: true,
     items: [
-      { to: '/inventory-sync', label: 'Inventory', also: ['/inventory-sync?view=items'] },
+      // Inventory and stock counts in one: every product's stock, searchable, counted in place (and its Activity).
+      { to: '/inventory-sync', label: 'Inventory', also: ['/inventory-sync?view=stock', '/inventory-sync?view=activity', '/inventory-sync?view=overview'] },
       { to: '/inventory-sync?view=reorder', label: 'To order', also: ['/inventory-sync?view=toorder', '/inventory-sync?view=preorders'] },
       { to: '/inventory-sync?view=orders', label: 'Purchase orders' },
-      { to: '/inventory-sync?view=stock', label: 'Stock counts', also: ['/inventory-sync?view=activity'] },
-      { to: '/inventory-sync?view=products', label: 'Products' },
+      { to: '/inventory-sync?view=products', label: 'Products', also: ['/inventory-sync?view=items'] },
       { to: '/inventory-sync?view=pricing', label: 'Pricing' },
       { to: '/inventory-sync?view=suppliers', label: 'Suppliers' },
       { to: '/inventory-sync?view=sync', label: 'Sync' },
@@ -91,9 +91,13 @@ export const SUB_NAV: Record<string, SubNav> = {
   '/analytics': {
     params: ['scope'],
     items: [
-      { to: '/analytics?scope=salon', label: (n) => n.square },
-      { to: '/analytics?scope=online', label: (n) => `Online (${[n.shopify, n.shopify2].filter(Boolean).join(' + ')})` },
+      { to: '/analytics?scope=salon', label: 'Addendum Salon' },
+      { to: '/analytics?scope=online', label: 'Addendum Hair' },
       { to: '/analytics', label: 'Both' },
+      // Inventory reports live here too: what to order, the inventory overview, and every store's purchases.
+      { to: '/analytics?scope=order', label: 'What to order', anyOf: ['analytics:read'] },
+      { to: '/analytics?scope=inventory', label: 'Inventory & Replenishment', anyOf: ['inventory:sync'] },
+      { to: '/analytics?scope=purchases', label: 'Purchases', anyOf: ['analytics:read', 'inventory:sync', 'hair:manage'] },
     ],
   },
 };

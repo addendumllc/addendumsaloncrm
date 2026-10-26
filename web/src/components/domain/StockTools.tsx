@@ -749,8 +749,13 @@ export function StockView({ store = 'all', initialQuery = '' }: { store?: 'all' 
   const [note, setNote] = useState('');
   const [fill, setFill] = useState('');
   const [busy, setBusy] = useState(false);
+  // Search by product, SKU or collection, or pick a collection (the salon's inventory collections when it has any).
+  const [coll, setColl] = useState('');
+  const { data: internal } = useInternalCollections();
+  const collFilter = useMemo(() => collectionFilter(internal, [...new Set((data?.products ?? []).flatMap((p) => p.collections))].sort((a, b) => a.localeCompare(b))), [internal, data]);
   const shown = useMemo(() => filterProducts(data?.products ?? [], q, 'active').filter((p) => (p.squareQty != null || p.shopifyQty != null)
-    && (store === 'all' || (store === 'salon' ? !!p.squareVariationId : !!p.shopifyInventoryItemId || p.store2.length > 0))), [data, q, store]);
+    && (!coll || collFilter.matches(p, coll))
+    && (store === 'all' || (store === 'salon' ? !!p.squareVariationId : !!p.shopifyInventoryItemId || p.store2.length > 0))), [data, q, store, coll, collFilter]);
   if (isLoading) return <PageLoading />;
   if (error || !data) return <ErrorNote error={error} onRetry={refetch} />;
   const entered = Object.entries(vals).filter(([, v]) => v.trim() !== '');
@@ -779,8 +784,13 @@ export function StockView({ store = 'all', initialQuery = '' }: { store?: 'all' 
           <Segmented value={mode} onChange={(m) => { setMode(m); setVals({}); setReason(m === 'count' ? 'Stock count' : 'Damaged'); }} options={[{ value: 'count', label: 'Enter counts' }, { value: 'adjust', label: 'Add or remove' }]} />
           <div className="relative min-w-[200px] flex-1">
             <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-stone" />
-            <input className="field pl-8 text-[16px] sm:text-[14px]" type="search" placeholder={SEARCH_HINT} value={q} onChange={(e) => setQ(e.target.value)} />
+            <input className="field pl-8 text-[16px] sm:text-[14px]" type="search" placeholder={SEARCH_HINT} value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search products, SKUs or collections" />
           </div>
+          {collFilter.options.length > 0 && (
+            <select className="field w-auto max-w-[14rem]" value={coll} onChange={(e) => setColl(e.target.value)} aria-label="Collection">
+              <option value="">All collections</option>{collFilter.options.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+          )}
           <input className="field num w-20" placeholder={mode === 'count' ? '0' : '+6'} value={fill} onChange={(e) => setFill(e.target.value)} />
           <Button size="sm" disabled={fill.trim() === ''} onClick={() => setVals((v) => ({ ...v, ...Object.fromEntries(shown.map((p) => [p.key, fill.trim()])) }))}>Fill all shown</Button>
         </div>

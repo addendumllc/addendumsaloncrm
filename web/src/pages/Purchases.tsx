@@ -63,7 +63,8 @@ export function PurchasesPage() {
   }, [data?.stores]);
   const pickItem = (i: Item) => { if (!items.some((x) => x.key === i.key)) setItems([...items, i]); setItemQ(''); setLimit(50); setOpen(null); };
   const filtered = store !== 'all' || range !== '30' || !!q || items.length > 0 || sort !== 'new';
-  const reset = () => { setParams({}, { replace: true }); setQ(''); setItems([]); setLimit(50); };
+  // Clears the filters only (inside Analytics the page's own ?scope= stays).
+  const reset = () => { setParams((p) => { const n = new URLSearchParams(); if (p.get('scope')) n.set('scope', p.get('scope')!); return n; }, { replace: true }); setQ(''); setItems([]); setLimit(50); };
   const exportCsv = async () => {
     try {
       const all = await api.get<Result>(`/purchases?${qs({ limit: '5000' })}`);
