@@ -54,6 +54,13 @@ export function InventoryOverview({ store, onOpenTab }: { store: Store; onOpenTa
   const [sort, setSort] = useState<'name' | 'stock' | 'status'>('name');
   const [shown, setShown] = useState(PAGE);
   const [open, setOpen] = useState<string | null>(null);
+  // Ticked products (any page of the list), to put in an inventory collection together.
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [target, setTarget] = useState('');
+  const [newName, setNewName] = useState('');
+  const [moving, setMoving] = useState(false);
+  const toast = useToast();
+  const qc = useQueryClient();
 
   // A product's forecast: by key, else by SKU (a SKU in both stores without being paired is forecast once).
   const fc = useMemo(() => {
@@ -89,6 +96,7 @@ export function InventoryOverview({ store, onOpenTab }: { store: Store; onOpenTa
     </button>
   );
   const pick = (s: '' | Simple) => { setStatus(status === s ? '' : s); setShown(PAGE); };
+  const togglePick = (k: string) => setPicked((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const salonCol = store !== 'hair';
   const onlineCol = store !== 'salon';
   const opened = all.find((p) => p.key === open) ?? null;
@@ -117,6 +125,34 @@ export function InventoryOverview({ store, onOpenTab }: { store: Store; onOpenTa
           <option value="name">Sort by name</option><option value="stock">Sort by stock (low first)</option><option value="status">Sort by status</option>
         </select>
       </div>
+      {/* Select all (everything matching the search and filters), then put them in an inventory collection. */}
+      <div className="mb-2 flex flex-wrap items-center gap-2 text-[13px]">
+        <label className="flex items-center gap-2 text-ink-soft">
+          <input type="checkbox" className="h-4 w-4 accent-plum" checked={rows.length > 0 && rows.every((p) => picked.has(p.key))}
+            onChange={(e) => setPicked(e.target.checked ? new Set(rows.map((p) => p.key)) : new Set())} aria-label="Select all shown" />
+          {picked.size ? `${picked.size} selected` : `Select all ${rows.length}`}
+        </label>
+        {picked.size > 0 && <>
+          <select className="field h-9 w-auto py-1 text-[13px]" value={target} onChange={(e) => setTarget(e.target.value)} aria-label="Inventory collection">
+            <option value="">Put in collection…</option>
+            {(internal?.collections ?? []).map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+            <option value="__new">New collection…</option>
+            <option value="__none">No collection (take out)</option>
+          </select>
+          {target === '__new' && <input className="field h-9 w-48 py-1 text-[13px]" placeholder="Collection name" value={newName} onChange={(e) => setNewName(e.target.value)} aria-label="New collection name" />}
+          <Button size="sm" variant="primary" loading={moving} disabled={!target || (target === '__new' && !newName.trim())} onClick={async () => {
+            const collection = target === '__none' ? null : target === '__new' ? newName.trim() : target;
+            setMoving(true);
+            try {
+              const r = await api.post<{ count: number }>('/inventory-sync/stock/collections/assign', { collection, keys: [...picked] });
+              toast(`${r.count} product${r.count === 1 ? '' : 's'} ${collection ? `put in ${collection}` : 'taken out of their collection'}`);
+              setPicked(new Set()); setTarget(''); setNewName('');
+              for (const k of ['stock-products', 'stock-collections', 'stock-forecast']) void qc.invalidateQueries({ queryKey: [k] });
+            } catch (e) { toast((e as Error).message, 'error'); } finally { setMoving(false); }
+          }}>Apply to {picked.size}</Button>
+          <Button size="sm" variant="ghost" onClick={() => setPicked(new Set())}>Clear</Button>
+        </>}
+      </div>
       <p className="mb-2 text-[12px] text-stone">{rows.length} product{rows.length === 1 ? '' : 's'}{salonCol && onlineCol ? ` · Salon = ${N.square}, Online = ${[N.shopify, N.shopify2].filter(Boolean).join(' + ')} (kept separate)` : ''}</p>
 
       {!rows.length ? <EmptyState title="No products match">Try another search or filter.</EmptyState> : (
@@ -125,6 +161,8 @@ export function InventoryOverview({ store, onOpenTab }: { store: Store; onOpenTa
           <ul className="divide-y divide-line overflow-hidden rounded-xl2 border border-line bg-white sm:hidden">
             {rows.slice(0, shown).map((p) => (
               <li key={p.key}>
+                <div className="flex items-center gap-1 pl-3">
+                <input type="checkbox" className="h-5 w-5 shrink-0 accent-plum" checked={picked.has(p.key)} onChange={() => togglePick(p.key)} aria-label={`Select ${p.label}`} />
                 <button type="button" onClick={() => setOpen(p.key)} className="flex w-full items-center gap-3 px-3 py-3 text-left">
                   <span className="min-w-0 flex-1">
                     <span className="block text-[15px] leading-snug text-ink">{p.label}</span>
@@ -135,6 +173,7 @@ export function InventoryOverview({ store, onOpenTab }: { store: Store; onOpenTa
                     <Badge tone={SIMPLE[statusOf.get(p.key)!].tone}>{SIMPLE[statusOf.get(p.key)!].label}</Badge>
                   </span>
                 </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -142,7 +181,7 @@ export function InventoryOverview({ store, onOpenTab }: { store: Store; onOpenTa
             <table className="w-full min-w-[720px] text-left text-[13px]">
               <thead className="border-b border-line bg-mist/50 text-[11px] uppercase tracking-wide text-stone">
                 <tr>
-                  <th className="px-3 py-2">Product</th><th className="px-2 py-2">SKU</th>
+                  <th className="w-8 pl-3" /><th className="px-3 py-2">Product</th><th className="px-2 py-2">SKU</th>
                   {salonCol && <th className="px-2 py-2 text-right">Salon</th>}{onlineCol && <th className="px-2 py-2 text-right">Online</th>}
                   <th className="px-2 py-2 text-right" title="Order when it's down to this">Reorder at</th><th className="px-2 py-2">Supplier</th><th className="px-3 py-2">Status</th>
                 </tr>
@@ -153,7 +192,8 @@ export function InventoryOverview({ store, onOpenTab }: { store: Store; onOpenTa
                   const at = f && f.ratePerDay > 0 ? Math.ceil(f.ratePerDay * (f.leadTimeDays + f.safetyDays)) : null;
                   return (
                     <tr key={p.key} className="cursor-pointer hover:bg-mist/40" onClick={() => setOpen(p.key)}>
-                      <td className="px-3 py-2 text-ink">{p.label}</td>
+                      <td className="pl-3" onClick={(e) => e.stopPropagation()}><input type="checkbox" className="h-4 w-4 accent-plum" checked={picked.has(p.key)} onChange={() => togglePick(p.key)} aria-label={`Select ${p.label}`} /></td>
+                      <td className="px-3 py-2 text-ink">{p.label}{p.collection && <span className="ml-2 text-[11px] text-stone">{p.collection}</span>}</td>
                       <td className="px-2 py-2 font-mono text-[12px] text-stone">{p.sku ?? '—'}</td>
                       {salonCol && <td className="num px-2 py-2 text-right">{p.squareQty ?? '—'}</td>}
                       {onlineCol && <td className="num px-2 py-2 text-right">{p.shopifyQty ?? '—'}</td>}
