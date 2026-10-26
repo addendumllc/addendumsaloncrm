@@ -970,6 +970,71 @@ function mergeByName(lines: { key: string }[], names: Map<string, { label: strin
   return { also, into };
 }
 
+/**
+ * One product's sales (Inventory → a product): units and revenue over 7, 30, 90 days and 12 months, the 30 days before,
+ * month by month (the current month marked partial) and by store. It follows the SKU — every listing of it in Square and
+ * both Shopify stores — so a rename or a new collection keeps the history. Square returns subtract; cancelled Shopify
+ * orders don't count. `hasSales` false = no sales recorded (not the same as zero demand).
+ */
+export async function productSales(key: string) {
+  const tz = (await getSettings()).business.timezone;
+  const today = localDate(new Date(), tz);
+  const L = await live();
+  const row = L.rows.find((r) => r.key === key);
+  if (!row) throw notFound('That product');
+  const group = norm(row.sku) ? L.rows.filter((r) => norm(r.sku) === norm(row.sku)) : [row];
+  const sqIds = group.map((r) => r.squareVariationId).filter((x): x is string => !!x);
+  const shIds = group.flatMap((r) => [r.shopifyInventoryItemId, ...r.store2.map((e) => e.inventoryItemId), ...(r.siblings ?? []).map((e) => e.inventoryItemId)]).filter((x): x is string => !!x);
+  const monthStart = (() => { const [y, m] = today.split('-').map(Number); return new Date(Date.UTC(y, m - 1 - 12, 1)).toISOString().slice(0, 10); })();
+  type Line = { d: string; n: number; cents: number; ch: 'square' | 'shopify' | 'shopify2' };
+  const lines: Line[] = [];
+  const money = `coalesce((x->'gross_sales_money'->>'amount')::numeric, 0) - coalesce((x->'total_discount_money'->>'amount')::numeric, 0)`;
+  if (sqIds.length) {
+    for (const [path, sign] of [[`coalesce(o.raw->'line_items', '[]'::jsonb)`, 1], [`(SELECT coalesce(jsonb_agg(rl), '[]'::jsonb) FROM jsonb_array_elements(coalesce(o.raw->'returns', '[]'::jsonb)) rt, jsonb_array_elements(coalesce(rt->'return_line_items', '[]'::jsonb)) rl)`, -1]] as const) {
+      const rows = await db().query<any>(
+        `SELECT to_char(o.closed_at AT TIME ZONE $2, 'YYYY-MM-DD') AS d, sum((x->>'quantity')::numeric) AS n, sum(${money}) AS c
+           FROM commission_orders o, jsonb_array_elements(${path}) x
+          WHERE o.state = 'COMPLETED' AND o.closed_at >= ($1::date - 1) AND x->>'catalog_object_id' = ANY($3::text[]) GROUP BY 1`, [monthStart, tz, sqIds]);
+      for (const r of rows) lines.push({ d: r.d, n: sign * Number(r.n), cents: sign * Number(r.c), ch: 'square' });
+    }
+  }
+  if (shIds.length) {
+    const rows = await db().query<any>(
+      `SELECT store, to_char(ordered_at AT TIME ZONE $2, 'YYYY-MM-DD') AS d, sum(quantity) AS n, sum(quantity * coalesce(unit_price_cents, 0)) AS c
+         FROM shopify_order_lines WHERE NOT cancelled AND ordered_at >= ($1::date - 1) AND inventory_item_id = ANY($3::text[]) GROUP BY 1, 2`, [monthStart, tz, shIds]);
+    for (const r of rows) lines.push({ d: r.d, n: Number(r.n), cents: Number(r.c), ch: r.store === 'shopify2' ? 'shopify2' : 'shopify' });
+  }
+  const sum = (from: string, to = today) => {
+    const l = lines.filter((x) => x.d >= from && x.d <= to);
+    return { units: l.reduce((a, x) => a + x.n, 0), revenueCents: Math.round(l.reduce((a, x) => a + x.cents, 0)) };
+  };
+  const months: { month: string; square: number; shopify: number; shopify2: number; total: number; partial: boolean }[] = [];
+  for (let i = 12; i >= 0; i--) {
+    const [y, m] = today.split('-').map(Number);
+    const month = new Date(Date.UTC(y, m - 1 - i, 1)).toISOString().slice(0, 7);
+    const l = lines.filter((x) => x.d.startsWith(month));
+    const by = (ch: Line['ch']) => l.filter((x) => x.ch === ch).reduce((a, x) => a + x.n, 0);
+    months.push({ month, square: by('square'), shopify: by('shopify'), shopify2: by('shopify2'), total: l.reduce((a, x) => a + x.n, 0), partial: i === 0 });
+  }
+  const done = months.filter((m) => !m.partial);
+  const year = addDays(today, -364);
+  const names = storeNames();
+  return {
+    hasSales: lines.length > 0,
+    lastSaleOn: lines.filter((x) => x.n > 0).map((x) => x.d).sort().pop() ?? null,
+    periods: { d7: sum(addDays(today, -6)), d30: sum(addDays(today, -29)), d90: sum(addDays(today, -89)), d365: sum(year) },
+    previous30: sum(addDays(today, -59), addDays(today, -30)),
+    avgPerDay30: Math.round((sum(addDays(today, -29)).units / 30) * 100) / 100,
+    // Average over the 12 completed months (the current, partial month isn't in it).
+    avgPerMonth: Math.round((done.reduce((a, m) => a + m.total, 0) / done.length) * 10) / 10,
+    months,
+    byChannel: (['square', 'shopify', 'shopify2'] as const).map((ch) => {
+      const l = lines.filter((x) => x.ch === ch && x.d >= year);
+      return { channel: ch, name: ch === 'square' ? names.square : ch === 'shopify' ? shopifyNameOf('shopify') : shopifyNameOf('shopify2'), units: l.reduce((a, x) => a + x.n, 0), revenueCents: Math.round(l.reduce((a, x) => a + x.cents, 0)) };
+    }).filter((c) => c.units !== 0 || c.revenueCents !== 0),
+  };
+}
+
 export async function productAnalytics(period: number | 'year', store: ProductAnalyticsDTO['store'] = 'all'): Promise<ProductAnalyticsDTO> {
   void refreshShopifySales();
   const tz = (await getSettings()).business.timezone;

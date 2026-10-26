@@ -8,6 +8,13 @@ import { useStoreNames } from '../../lib/storeNames';
 import { Badge, Button, EmptyState, ErrorNote, Modal, PageLoading, cx } from '../ui';
 
 type Store = 'all' | 'salon' | 'hair';
+type Sales = {
+  hasSales: boolean; lastSaleOn: string | null; avgPerDay30: number; avgPerMonth: number;
+  periods: Record<'d7' | 'd30' | 'd90' | 'd365', { units: number; revenueCents: number }>; previous30: { units: number; revenueCents: number };
+  months: { month: string; square: number; shopify: number; shopify2: number; total: number; partial: boolean }[];
+  byChannel: { channel: string; name: string; units: number; revenueCents: number }[];
+};
+const usd0 = (c: number) => `$${Math.round(c / 100).toLocaleString()}`;
 type Simple = 'out' | 'low' | 'watch' | 'ok' | 'discontinued' | 'skipped';
 const SIMPLE: Record<Simple, { label: string; tone: 'rose' | 'amber' | 'neutral' | 'sage' | 'plum' }> = {
   out: { label: 'Out of stock', tone: 'rose' }, low: { label: 'Low stock', tone: 'amber' }, watch: { label: 'Watch', tone: 'neutral' },
@@ -167,6 +174,9 @@ function ProductPanel({ p, f, status, orders, onClose, onOpenTab }: {
 }) {
   const N = useStoreNames();
   const history = useQuery({ queryKey: ['stock-history', 'product', p.key], queryFn: () => api.get<{ entries: StockTxnDTO[] }>(`/inventory-sync/stock/history?key=${encodeURIComponent(p.key)}`).then((r) => r.entries) });
+  const sales = useQuery({ queryKey: ['product-sales', p.key], queryFn: () => api.get<Sales>(`/inventory-sync/stock/products/${encodeURIComponent(p.key)}/sales`) });
+  const [monthsOpen, setMonthsOpen] = useState(false);
+  const stockoutOn = f && f.daysOfStock != null && f.ratePerDay > 0 ? (() => { const d = new Date(); d.setDate(d.getDate() + f.daysOfStock); return dateShort(d.toISOString()); })() : null;
   const [why, setWhy] = useState(false);
   const row = (label: string, value: React.ReactNode) => <div className="flex justify-between gap-3 py-1"><dt className="text-stone">{label}</dt><dd className="text-right text-ink">{value}</dd></div>;
   const h = 'mb-1 text-[12px] font-semibold uppercase tracking-wide text-stone';
@@ -182,6 +192,49 @@ function ProductPanel({ p, f, status, orders, onClose, onOpenTab }: {
           <Button size="sm" variant="primary" onClick={() => onOpenTab('stock', p.sku ? { q: p.sku } : {})}>Count or adjust stock</Button>
           <Button size="sm" onClick={() => onOpenTab('products')}>Edit product details</Button>
         </div>
+        {/* Performance first: what sold, how fast, when it runs out and what to order. */}
+        <section>
+          <h3 className={h}>Performance</h3>
+          {sales.isLoading ? <PageLoading /> : !sales.data ? <p className="text-[13px] text-stone">Sales couldn’t be loaded.</p> : !sales.data.hasSales ? (
+            <p className="text-[13px] text-stone">No sales recorded in the last 12 months — usage can’t be estimated yet (this isn’t the same as zero demand).</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {([['7 days', 'd7'], ['30 days', 'd30'], ['90 days', 'd90'], ['12 months', 'd365']] as const).map(([l, k]) => (
+                  <div key={k} className="rounded-lg border border-line px-2.5 py-1.5">
+                    <p className="text-[11px] text-stone">Sold · {l}</p>
+                    <p className="num text-[18px] font-medium text-ink">{sales.data!.periods[k].units}</p>
+                    <p className="num text-[11px] text-stone">{usd0(sales.data!.periods[k].revenueCents)}</p>
+                  </div>
+                ))}
+              </div>
+              <dl className="mt-2 divide-y divide-line">
+                {row('Average', `${sales.data.avgPerDay30} a day (30 days) · ${sales.data.avgPerMonth} a month (12 full months)`)}
+                {row('Last 30 days vs the 30 before', `${sales.data.periods.d30.units} vs ${sales.data.previous30.units}`)}
+                {row('Last sale', sales.data.lastSaleOn ? labelOfKey(sales.data.lastSaleOn, { month: 'short', day: 'numeric', year: 'numeric' }) : '—')}
+                {f && row('Runs out', stockoutOn ? `about ${stockoutOn}` : f.stock <= 0 ? 'Out of stock now' : '—')}
+                {f && row('Suggested order', f.suggestedQty ? `${f.suggestedQty}${f.orderBy ? ` · order by ${labelOfKey(f.orderBy, { month: 'short', day: 'numeric' })}` : ''}` : 'Nothing to order now')}
+              </dl>
+              {sales.data.byChannel.length > 1 && (
+                <ul className="mt-2 space-y-0.5 text-[13px]">{sales.data.byChannel.map((c) => <li key={c.channel} className="flex justify-between"><span className="text-stone">{c.name} · 12 months</span><span className="num text-ink">{c.units} sold · {usd0(c.revenueCents)}</span></li>)}</ul>
+              )}
+              <button type="button" className="mt-2 text-[13px] text-plum hover:underline" onClick={() => setMonthsOpen(!monthsOpen)}>{monthsOpen ? 'Hide sales by month' : 'Sales by month'}</button>
+              {monthsOpen && (
+                <table className="mt-1 w-full text-[13px]">
+                  <thead className="text-[11px] uppercase tracking-wide text-stone"><tr><th className="py-1 text-left font-medium">Month</th><th className="py-1 text-right font-medium">Salon</th><th className="py-1 text-right font-medium">Online</th><th className="py-1 text-right font-medium">Total</th></tr></thead>
+                  <tbody className="divide-y divide-line">
+                    {[...sales.data.months].reverse().map((m) => (
+                      <tr key={m.month}>
+                        <td className="py-1">{labelOfKey(`${m.month}-01`, { month: 'short', year: 'numeric' })}{m.partial && <span className="text-stone"> · so far</span>}</td>
+                        <td className="num py-1 text-right">{m.square}</td><td className="num py-1 text-right">{m.shopify + m.shopify2}</td><td className="num py-1 text-right font-medium">{m.total}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </>
+          )}
+        </section>
         <section>
           <h3 className={h}>Stock</h3>
           <dl className="divide-y divide-line">

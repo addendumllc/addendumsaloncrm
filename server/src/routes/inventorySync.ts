@@ -7,7 +7,7 @@ import {
   unmarkSeparate,
 } from '../domain/inventorySync.js';
 import { addToSquare, applyNewLength, applyPrices, applyProPrices, newLengthPlan, priceList, proPricePlan, squareCandidates,
-  applyStockChanges, createPurchaseOrders, skipProducts, suggestPurchaseOrders, suggestedOrderPlan, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
+  applyStockChanges, createPurchaseOrders, productSales, skipProducts, suggestPurchaseOrders, suggestedOrderPlan, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
   assignSupplier, deleteSupplier, refreshShopifySales, renameSupplier, saveProductSettings, saveSupplier, setForecastSettings, setSupplierLeadTime, stockForecast, stockHistory, stockProducts, updatePurchaseOrder,
 } from '../domain/stock.js';
 import { setSquareSku } from '../domain/squareInventory.js';
@@ -164,6 +164,8 @@ inventorySyncRouter.post('/stock/apply', ah(async (req, res) => {
   res.json(r);
 }));
 
+// One product's sales: 7/30/90 days and 12 months, month by month and by store (follows the SKU).
+inventorySyncRouter.get('/stock/products/:key/sales', ah(async (req, res) => res.json(await productSales(req.params.key))));
 inventorySyncRouter.get('/stock/history', ah(async (req, res) => {
   const q = parse(z.object({ key: z.string().max(200).optional(), kind: z.string().max(20).optional(), q: z.string().max(100).optional(), from: ymd.optional(), to: ymd.optional() }), req.query);
   res.json({ entries: await stockHistory(q) });

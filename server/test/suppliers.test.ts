@@ -329,5 +329,19 @@ describe('Suppliers', () => {
     await api.put('/api/inventory-sync/stock/products/skip', { keys: [key], until: null });
     expect((await api.get('/api/inventory-sync/stock/forecast')).body.items.find((i: any) => i.key === key).skippedUntil).toBeNull();
   });
+
+  it('a product’s sales: periods, months (current month partial) and by store, following its SKU', async () => {
+    await api.post('/api/inventory-sync/stock/sales/refresh');
+    const f = (await api.get('/api/inventory-sync/stock/forecast')).body.items.find((i: any) => i.units90 > 0);
+    const r = (await api.get(`/api/inventory-sync/stock/products/${encodeURIComponent(f.key)}/sales`)).body;
+    expect(r.hasSales).toBe(true);
+    expect(r.periods.d90.units).toBe(f.units90);
+    expect(r.periods.d30.units).toBe(f.units30);
+    expect(r.months).toHaveLength(13);
+    expect(r.months.filter((m: any) => m.partial)).toHaveLength(1);
+    expect(r.months.at(-1).partial).toBe(true);
+    expect(r.periods.d365.units).toBeGreaterThanOrEqual(r.periods.d90.units);
+    expect((await api.get('/api/inventory-sync/stock/products/nope/sales')).status).toBe(404);
+  });
 });
 
