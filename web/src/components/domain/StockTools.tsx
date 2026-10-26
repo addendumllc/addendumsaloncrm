@@ -618,7 +618,10 @@ function SpreadsheetModal({ products, onClose }: { products: StockProductDTO[]; 
     const cHandle = col('handle');
     const cSupplier = col('supplier');
     const cCost = col('cost', 'cost per item');
-    const cLead = col('lead time days');
+    const cLead = col('lead time days', 'production days');
+    const cShip = col('ship days', 'transit days');
+    const cSupSku = col('supplier sku');
+    const cCostIfMissing = col('cost (if missing)');
     const cSafety = col('safety days');
     const cMoq = col('moq');
     const cCase = col('case size');
@@ -626,7 +629,8 @@ function SpreadsheetModal({ products, onClose }: { products: StockProductDTO[]; 
     if (cKey < 0 && cSku < 0 && cName < 0) return { error: 'No SKU, Product or Title column found in the first row.' };
     const byKey = new Map(products.map((p) => [p.key, p]));
     const bySku = new Map<string, StockProductDTO>();
-    for (const p of products) for (const s of [p.squareSku, p.shopifySku]) if (s) bySku.set(norm(s), p);
+    const bySkuAll = new Map<string, StockProductDTO[]>();
+    for (const p of products) for (const s of [p.squareSku, p.shopifySku]) if (s) { bySku.set(norm(s), p); if (!bySkuAll.get(norm(s))?.includes(p)) bySkuAll.set(norm(s), [...(bySkuAll.get(norm(s)) ?? []), p]); }
     const byName = new Map(products.map((p) => [normName(p.label), p]));
     const titles = new Map<string, string>();
     const plan: Plan[] = [];
@@ -649,37 +653,52 @@ function SpreadsheetModal({ products, onClose }: { products: StockProductDTO[]; 
         if (p && sku && norm(sku) !== norm(p.sku)) skuChange = sku; // matched by name, the sheet has a new SKU
       }
       if (!p) { unknown.push(sku || label); continue; }
-      if (seen.has(p.key)) continue;
-      seen.add(p.key);
-      if (get(cKey) && sku && norm(sku) !== norm(p.sku)) skuChange = sku;
-      if (get(cNewSku) && norm(get(cNewSku)) !== norm(p.sku)) skuChange = get(cNewSku);
-      const x: Plan = { p, text: '' };
-      const parts: string[] = [];
-      if (skuChange) { x.sku = skuChange; parts.push(`SKU ${p.sku ?? '—'} → ${skuChange}`); }
-      const qRaw = get(cQty);
-      if (qRaw !== '') {
-        const n = Number(qRaw);
-        if (Number.isInteger(n) && n >= 0 && (n !== p.squareQty || n !== p.shopifyQty) && (p.squareQty != null || p.shopifyQty != null)) {
-          x.quantity = n;
-          parts.push(`Stock ${p.squareQty ?? '—'} / ${p.shopifyQty ?? '—'} → ${n}`);
+      // Matched by SKU: every listing of it (a SKU in Square and online without being paired is two rows).
+      const targets = !get(cKey) && sku && !skuChange ? bySkuAll.get(norm(sku)) ?? [p] : [p];
+      const planFor = (p: StockProductDTO, first: boolean) => {
+        if (seen.has(p.key)) return;
+        seen.add(p.key);
+        if (get(cKey) && sku && norm(sku) !== norm(p.sku)) skuChange = sku;
+        if (get(cNewSku) && norm(get(cNewSku)) !== norm(p.sku)) skuChange = get(cNewSku);
+        const x: Plan = { p, text: '' };
+        const parts: string[] = [];
+        if (skuChange) { x.sku = skuChange; parts.push(`SKU ${p.sku ?? '—'} → ${skuChange}`); }
+        // A stock count goes to the matched listing only (never counted twice across unpaired listings).
+        const qRaw = first ? get(cQty) : '';
+        if (qRaw !== '') {
+          const n = Number(qRaw);
+          if (Number.isInteger(n) && n >= 0 && (n !== p.squareQty || n !== p.shopifyQty) && (p.squareQty != null || p.shopifyQty != null)) {
+            x.quantity = n;
+            parts.push(`Stock ${p.squareQty ?? '—'} / ${p.shopifyQty ?? '—'} → ${n}`);
+          }
         }
-      }
-      const s: Record<string, unknown> = {};
-      const setIf = (i: number, k: string, v: unknown, cur: unknown, label2: string) => { if (i >= 0 && v !== cur) { s[k] = v; parts.push(`${label2} → ${v ?? '—'}`); } };
-      if (cKey >= 0) {
-        setIf(cSupplier, 'supplier', get(cSupplier) || null, p.supplier, 'Supplier');
-        setIf(cCost, 'costCents', cents(get(cCost)), p.costCents, 'Cost (¢)');
-        setIf(cLead, 'leadTimeDays', intOr(get(cLead)), p.leadTimeDays, 'Lead time');
-        setIf(cSafety, 'safetyDays', intOr(get(cSafety)), p.safetyDays, 'Safety days');
-        setIf(cMoq, 'moq', intOr(get(cMoq)), p.moq, 'MOQ');
-        setIf(cCase, 'caseSize', intOr(get(cCase)) || null, p.caseSize, 'Case size');
-        const st = (Object.entries(STATUS_LABEL).find(([, l]) => l.toLowerCase() === get(cStatus).toLowerCase())?.[0] ?? null) as StockProductStatus | null;
-        if (cStatus >= 0 && st && st !== p.status) { s.status = st; parts.push(`Status → ${STATUS_LABEL[st]}`); }
-      } else if (cCost >= 0 && cents(get(cCost)) != null && cents(get(cCost)) !== p.costCents) { s.costCents = cents(get(cCost)); parts.push(`Cost → $${get(cCost)}`); }
-      if (Object.keys(s).length) x.settings = s;
-      if (!parts.length) continue;
-      x.text = parts.join(' · ');
-      plan.push(x);
+        const s: Record<string, unknown> = {};
+        // Without the Key column (a sheet matched by SKU), a blank cell leaves the value as it is.
+        const setIf = (i: number, k: string, v: unknown, cur: unknown, label2: string) => { if (i >= 0 && (cKey >= 0 || get(i) !== '') && v !== cur) { s[k] = v; parts.push(`${label2} → ${v ?? '—'}`); } };
+        // Purchasing columns apply from the CRM's own sheet (Key) or a sheet made for it (Supplier / Production days…,
+        // matched by SKU); a Shopify export's columns of the same names aren't these, so they need one of those.
+        const crmSheet = cKey >= 0 || cLead >= 0 || cShip >= 0 || cSupSku >= 0;
+        if (cCostIfMissing >= 0 && p.costCents == null && cents(get(cCostIfMissing)) != null) { s.costCents = cents(get(cCostIfMissing)); parts.push(`Cost → $${get(cCostIfMissing)}`); }
+        if (crmSheet) {
+          if (cShip >= 0 && get(cShip) !== '' && intOr(get(cShip)) !== (p.shippingDays ?? null)) { s.shippingDays = intOr(get(cShip)); parts.push(`Transit → ${get(cShip)} days`); }
+          if (cSupSku >= 0 && get(cSupSku) && get(cSupSku) !== (p.supplierSku ?? '')) { s.supplierSku = get(cSupSku); parts.push(`Supplier SKU → ${get(cSupSku)}`); }
+        }
+        if (crmSheet) {
+          setIf(cSupplier, 'supplier', get(cSupplier) || null, p.supplier, 'Supplier');
+          setIf(cCost, 'costCents', cents(get(cCost)), p.costCents, 'Cost (¢)');
+          setIf(cLead, 'leadTimeDays', intOr(get(cLead)), p.leadTimeDays, 'Lead time');
+          setIf(cSafety, 'safetyDays', intOr(get(cSafety)), p.safetyDays, 'Safety days');
+          setIf(cMoq, 'moq', intOr(get(cMoq)), p.moq, 'MOQ');
+          setIf(cCase, 'caseSize', intOr(get(cCase)) || null, p.caseSize, 'Case size');
+          const st = (Object.entries(STATUS_LABEL).find(([, l]) => l.toLowerCase() === get(cStatus).toLowerCase())?.[0] ?? null) as StockProductStatus | null;
+          if (cStatus >= 0 && st && st !== p.status) { s.status = st; parts.push(`Status → ${STATUS_LABEL[st]}`); }
+        } else if (cCost >= 0 && cents(get(cCost)) != null && cents(get(cCost)) !== p.costCents) { s.costCents = cents(get(cCost)); parts.push(`Cost → $${get(cCost)}`); }
+        if (Object.keys(s).length) x.settings = s;
+        if (!parts.length) return;
+        x.text = parts.join(' · ');
+        plan.push(x);
+      };
+      for (const t of targets.includes(p) ? targets : [p, ...targets]) planFor(t, t === p);
     }
     return { plan, unknown };
   }, [rows, products]);
