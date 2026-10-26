@@ -2168,6 +2168,8 @@ export interface StockProductDTO {
   kind: ProductKind | null;
   /** Collections and categories (Shopify collections and product type, Square categories), for search. */
   collections: string[];
+  /** Its Shopify collections with their stable ids (for lead-time rules). */
+  collectionRefs?: { id: string; title: string }[];
   /** Purchasing settings kept in the CRM: transit days (null = the supplier's), supplier's SKU, an ordering note, and the
    *  purchasing collection it's ordered in (null = from the store collections). */
   shippingDays?: number | null;
@@ -2223,6 +2225,11 @@ export interface StockForecastDTO {
   leadUntracked: boolean;
   /** The supplier's shipping days (included in leadTimeDays). */
   shippingDays: number;
+  /** Production days alone (leadTimeDays = production + shipping). */
+  productionDays: number;
+  /** Where the lead time comes from: the product's own, a collection rule, the supplier's default — or missing (then
+   *  the forecast default is used and the product is flagged until one is set). */
+  leadSource: { kind: 'product' | 'collection' | 'supplier' | 'missing' | 'untracked'; label: string | null };
   /** Stock-out risk: at this rate it runs out before an order placed today would arrive. */
   stockoutRisk: boolean;
   /** Skipped (not going to order) until this date — '9999-12-31' = until turned back on; left out of suggestions and alerts. */
@@ -2262,6 +2269,8 @@ export interface StockForecastDTO {
 /** `soonDays` / `watchDays`: Reorder soon and Watch windows — days until the order-by date, worked out from how fast each product sells. */
 /** `defaultMoq`: minimum order for products with none of their own or from their supplier (0 = none). */
 export interface StockForecastSettings {
+  /** Several collection rules for one product: the longest (default) or the shortest. */
+  collectionLeadConflict?: 'longest' | 'shortest';
   leadTimeDays: number; safetyDays: number; coverageDays: number; slowToUseDays: number; soonDays: number; watchDays: number; defaultMoq: number;
   /** Collections no longer reordered (a word in the collection or product name, e.g. "Classic"): treated as discontinued. */
   discontinuedCollections: string[];

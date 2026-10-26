@@ -101,6 +101,7 @@ async function live(fresh = false): Promise<Live> {
       squareQty: p.trackInventory ? Math.floor(squareQty.get(p.variationId) ?? 0) : null, shopifyQty: i?.available ?? null, priceCents: p.priceCents,
       siblings: i ? siblingsOf.get(i.inventoryItemId) ?? [] : [],
       collections: [...new Set([...(p.categories ?? []), ...(i?.collections ?? [])])],
+      collectionRefs: i?.collectionRefs ?? [],
       imageUrl: p.imageUrl ?? i?.imageUrl ?? null,
     }));
   }
@@ -111,6 +112,7 @@ async function live(fresh = false): Promise<Live> {
       squareVariationId: null, shopifyInventoryItemId: i.inventoryItemId, linkId: null, squareQty: null, shopifyQty: i.available, priceCents: null,
       siblings: siblingsOf.get(i.inventoryItemId) ?? [],
       collections: i.collections ?? [],
+      collectionRefs: i.collectionRefs ?? [],
       imageUrl: i.imageUrl ?? null,
     }));
   }
@@ -118,6 +120,93 @@ async function live(fresh = false): Promise<Live> {
   const out: Live = { products, squareQty, sqLoc, items, shLoc, items2, sh2Loc, links, rows };
   cache = { at: Date.now(), live: out };
   return out;
+}
+
+// ---------------- Lead times (Suppliers → Lead times) ----------------
+export interface LeadRuleDTO { id: string; supplier: string; ref: string; label: string; productionDays: number; shippingDays: number | null; active: boolean; notes: string | null }
+const ruleDTO = (r: any): LeadRuleDTO => ({ id: r.id, supplier: r.supplier, ref: r.ref, label: r.label, productionDays: r.production_days, shippingDays: r.shipping_days ?? null, active: r.active, notes: r.notes ?? null });
+type LeadSource = StockForecastDTO['leadSource'];
+
+/**
+ * Works out each product's lead time, in this order: the product's own production time; else its supplier's active
+ * collection rules for any collection it's in (the longest by default — Forecast settings can say shortest); else the
+ * supplier's default; else nothing (flagged as missing — never a silent 0 or guess). Shipping: the product's own, the
+ * chosen collection rule's, the supplier's, else none. A supplier whose lead time isn't tracked has none.
+ */
+export async function leadResolver(conflict: 'longest' | 'shortest' = 'longest') {
+  const sups = new Map((await db().query<any>('SELECT * FROM suppliers')).map((x) => [x.name as string, x]));
+  const rules = new Map<string, LeadRuleDTO[]>();
+  for (const r of (await db().query<any>('SELECT * FROM supplier_lead_rules WHERE active')).map(ruleDTO)) rules.set(r.supplier, [...(rules.get(r.supplier) ?? []), r]);
+  const fallback = await defaultSupplier();
+  return (p: Pick<StockProductDTO, 'supplier' | 'leadTimeDays' | 'shippingDays' | 'collection' | 'collections' | 'collectionRefs'>) => {
+    const name = p.supplier ?? fallback ?? '';
+    const sup = sups.get(name);
+    if (sup?.lead_untracked) return { production: 0, shipping: 0, source: { kind: 'untracked', label: name } as LeadSource };
+    const refs = new Set([...(p.collectionRefs ?? []).map((c) => `shopify:${c.id}`), ...(p.collection ? [`internal:${p.collection}`] : []), ...(p.collections ?? []).map((c) => `name:${c}`)]);
+    const hit = (rules.get(name) ?? []).filter((r) => refs.has(r.ref))
+      .sort((a, b) => (conflict === 'shortest' ? a.productionDays - b.productionDays : b.productionDays - a.productionDays))[0];
+    let production: number | null; let source: LeadSource;
+    if (p.leadTimeDays != null) { production = p.leadTimeDays; source = { kind: 'product', label: null }; }
+    else if (hit) { production = hit.productionDays; source = { kind: 'collection', label: hit.label }; }
+    else if (sup?.lead_time_days != null) { production = sup.lead_time_days; source = { kind: 'supplier', label: name }; }
+    else { production = null; source = { kind: 'missing', label: null }; }
+    const shipping = p.shippingDays ?? (source.kind === 'collection' ? hit!.shippingDays : null) ?? sup?.shipping_days ?? 0;
+    return { production, shipping, source };
+  };
+}
+
+/**
+ * Suppliers → Lead times: the supplier's default, its collection rules, its products with their own times, the
+ * collections to choose from (Shopify's by id, the salon's inventory collections, other store collections by name), and
+ * which of its products have no lead time at all.
+ */
+export async function leadTimesFor(supplier: string) {
+  const sup = await db().one<any>('SELECT * FROM suppliers WHERE name = $1', [supplier]);
+  if (!sup) throw notFound('That supplier');
+  const rows = (await live()).rows.filter((r) => r.status !== 'not_tracked');
+  const fallback = await defaultSupplier();
+  const mine = rows.filter((r) => (r.supplier ?? fallback) === supplier);
+  const resolve = await leadResolver((await forecastSettings()).collectionLeadConflict ?? 'longest');
+  const options = new Map<string, string>();
+  for (const r of rows) for (const c of r.collectionRefs ?? []) options.set(`shopify:${c.id}`, `${c.title} (Shopify)`);
+  for (const c of (await internalCollections()).collections) options.set(`internal:${c.name}`, `${c.name} (inventory collection)`);
+  for (const r of rows) for (const c of r.collections) if (![...options.values()].some((v) => v.startsWith(`${c} (`))) options.set(`name:${c}`, c);
+  return {
+    supplier: { name: sup.name, leadTimeDays: sup.lead_time_days ?? null, shippingDays: sup.shipping_days ?? null, leadUntracked: !!sup.lead_untracked },
+    rules: await leadRules(supplier),
+    products: mine.map((r) => ({ key: r.key, label: r.label, sku: r.sku, collection: r.collection ?? null, leadTimeDays: r.leadTimeDays, shippingDays: r.shippingDays ?? null, source: resolve(r).source })),
+    collections: [...options].map(([ref, label]) => ({ ref, label })).sort((a, b) => a.label.localeCompare(b.label)),
+  };
+}
+
+/** A supplier's default lead and shipping times (nothing else about it changes). */
+export async function setSupplierLeadDefault(name: string, leadTimeDays: number | null, shippingDays: number | null) {
+  const r = await db().query('UPDATE suppliers SET lead_time_days = $2, shipping_days = $3, updated_at = now() WHERE name = $1 RETURNING name', [name, leadTimeDays, shippingDays]);
+  if (!r.length) throw notFound('That supplier');
+  forgetStockCache();
+}
+
+export async function leadRules(supplier: string) {
+  return (await db().query<any>('SELECT * FROM supplier_lead_rules WHERE supplier = $1 ORDER BY lower(label)', [supplier])).map(ruleDTO);
+}
+/** Adds or changes a collection rule (one per collection per supplier). */
+export async function saveLeadRule(r: { id?: string; supplier: string; ref: string; label: string; productionDays: number; shippingDays: number | null; active: boolean; notes: string | null }) {
+  if (!/^(shopify|internal|name):.+/.test(r.ref)) throw badRequest('Choose a collection.');
+  const clash = await db().one<{ id: string }>('SELECT id FROM supplier_lead_rules WHERE supplier = $1 AND ref = $2 AND id::text <> $3', [r.supplier, r.ref, r.id ?? '']);
+  if (clash) throw badRequest(`${r.supplier} already has a lead time for ${r.label}. Edit that one instead.`);
+  if (r.id) {
+    const done = await db().query('UPDATE supplier_lead_rules SET ref = $2, label = $3, production_days = $4, shipping_days = $5, active = $6, notes = $7, updated_at = now() WHERE id = $1 RETURNING id',
+      [r.id, r.ref, r.label, r.productionDays, r.shippingDays, r.active, r.notes]);
+    if (!done.length) throw notFound('That lead time');
+  } else {
+    await db().query('INSERT INTO supplier_lead_rules(supplier, ref, label, production_days, shipping_days, active, notes) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [r.supplier, r.ref, r.label, r.productionDays, r.shippingDays, r.active, r.notes]);
+  }
+  forgetStockCache();
+}
+export async function deleteLeadRule(id: string) {
+  await db().query('DELETE FROM supplier_lead_rules WHERE id = $1', [id]);
+  forgetStockCache();
 }
 
 // ---------------- Internal collections (Inventory → Products → Collections) ----------------
@@ -577,6 +666,7 @@ export async function stockForecast(): Promise<StockForecastResponse> {
   // Each product's supplier (products without one follow the default): lead time tracked or not, usual lead time,
   // shipping days and default minimum order.
   const supRows = new Map((await db().query<any>('SELECT * FROM suppliers')).map((x) => [x.name as string, x]));
+  const resolveLead = await leadResolver(settings.collectionLeadConflict ?? 'longest');
   const untracked = new Set([...supRows.values()].filter((x) => x.lead_untracked).map((x) => x.name as string));
   const fallback = await defaultSupplier();
   // Skipped products (To order → Skip): not suggested or alerted until the date passes.
@@ -622,8 +712,12 @@ export async function stockForecast(): Promise<StockForecastResponse> {
     const sup = supRows.get(r.supplier ?? fallback ?? '');
     const noLead = untracked.has(r.supplier ?? fallback ?? '');
     // Each product's own timing: its production lead time and transit days, else its supplier's defaults.
-    const shipping = noLead ? 0 : r.shippingDays ?? sup?.shipping_days ?? 0;
-    const lead = noLead ? 0 : (r.leadTimeDays ?? sup?.lead_time_days ?? settings.leadTimeDays) + shipping;
+    // Lead time: the product's own, a collection rule, the supplier's default — or missing (flagged; the forecast default
+    // stands in until one is set, so reorder timing still shows).
+    const res = resolveLead({ ...r, supplier: r.supplier ?? all.find((x) => x.supplier)?.supplier ?? null });
+    const shipping = noLead ? 0 : res.shipping;
+    const production = noLead ? 0 : res.production ?? settings.leadTimeDays;
+    const lead = production + shipping;
     // Minimum order: the product's own, else its supplier's default, else the overall default (Forecast settings).
     const moq: number | null = r.moq ?? sup?.default_moq ?? (settings.defaultMoq || null);
     const moqFrom = r.moq != null ? '' : sup?.default_moq != null ? `${sup.name}’s default` : 'the default minimum order';
@@ -636,6 +730,7 @@ export async function stockForecast(): Promise<StockForecastResponse> {
     // Discontinued: set on the product, or in a discontinued collection (Forecast settings, e.g. Classic).
     const goneWith = discontinuedWord(r);
     const discontinued = r.status === 'discontinued' || !!goneWith;
+    if (res.source.kind === 'missing' && !discontinued) why.push(`No lead time set for this product, its collections or its supplier — using the ${settings.leadTimeDays}-day default until one is set (Suppliers → Lead times).`);
     if (discontinued) {
       status = 'discontinued';
       why.push(goneWith ? `In a discontinued collection (${goneWith}): no reorders.` : 'Discontinued: no reorders.');
@@ -649,6 +744,7 @@ export async function stockForecast(): Promise<StockForecastResponse> {
       status = stock <= 0 ? 'out' : daysUntil <= 0 ? 'order_now' : daysUntil <= settings.soonDays ? 'soon' : daysUntil <= settings.watchDays ? 'watch' : 'healthy';
       why.push(`Selling about ${rate.toFixed(2)} a day (${u7} in 7 days, ${u30} in 30, ${u90} in 90).`);
       why.push(`${stock} in stock${inc ? ` + ${inc} on order` : ''} lasts about ${Math.round(daysOfStock!)} days.`);
+      if (res.source.kind === 'collection') why.push(`Production lead time from the ${res.source.label} rule.`);
       if (shipping) why.push(`Lead time includes ${shipping} days of shipping.`);
       why.push(noLead ? `Lead time not tracked for ${r.supplier ?? fallback} · ${safety} days of safety stock = order when it’s down to ${Math.ceil(cover)}.` : `Lead time ${lead} days + ${safety} days of safety stock = order when it’s down to ${Math.ceil(cover)}.`);
       if (status !== 'healthy' && status !== 'watch') {
@@ -684,7 +780,7 @@ export async function stockForecast(): Promise<StockForecastResponse> {
     if (stockoutRisk) why.push(`Stock-out risk: about ${Math.round(daysOfStock!)} days of stock, but an order takes ${lead} days to arrive.`);
     items.push({
       key: r.key, label: r.label, sku: r.sku, supplier: r.supplier ?? all.find((x) => x.supplier)?.supplier ?? null, collections: [...new Set(all.flatMap((x) => x.collections ?? []))], collection: all.find((x) => x.collection)?.collection ?? null, stock, incoming: inc, ratePerDay: Math.round(rate * 100) / 100, units7: u7, units30: u30, units90: u90,
-      leadTimeDays: lead, leadUntracked: noLead, shippingDays: shipping, stockoutRisk, skippedUntil, safetyDays: safety, daysOfStock: daysOfStock == null ? null : Math.round(daysOfStock), orderBy, status, suggestedQty: suggested,
+      leadTimeDays: lead, productionDays: production, leadSource: res.source, leadUntracked: noLead, shippingDays: shipping, stockoutRisk, skippedUntil, safetyDays: safety, daysOfStock: daysOfStock == null ? null : Math.round(daysOfStock), orderBy, status, suggestedQty: suggested,
       moq, caseSize: r.caseSize, costCents: r.costCents,
       moqCostCents: moq && r.costCents != null ? moq * r.costCents : null, moqArrivesOn: moq ? addDays(today, lead) : null, moqLastsDays,
       slowToUse: moqLastsDays != null && moqLastsDays > settings.slowToUseDays, why, preorders,
@@ -736,20 +832,16 @@ async function lineRows(lines: PoLineInput[]) {
   const L = await live();
   const byKey = new Map(L.rows.map((r) => [r.key, r]));
   // Each item's supplier: its lead time (+ shipping) unless one is entered; none when its lead time isn't tracked.
-  const sups = new Map((await db().query<any>('SELECT * FROM suppliers')).map((x) => [x.name as string, x]));
   const fallback = await defaultSupplier();
-  const leadFor = (own: number | null, name: string | null, ownShipping: number | null = null) => {
-    const sup = name ? sups.get(name) : undefined;
-    if (sup?.lead_untracked) return null;
-    const base = own ?? sup?.lead_time_days ?? null;
-    return base == null ? null : base + (ownShipping ?? sup?.shipping_days ?? 0);
-  };
+  const resolveLead = await leadResolver((await forecastSettings()).collectionLeadConflict ?? 'longest');
+  // The same lead time as To order (product, collection rule, supplier); none when untracked or missing.
+  const leadFor = (r: StockProductDTO) => { const x = resolveLead(r); return x.source.kind === 'untracked' || x.production == null ? null : x.production + x.shipping; };
   return lines.map((l) => {
     const r = byKey.get(l.productKey);
     if (!r) throw badRequest('A product on this order wasn’t found. Refresh and try again.');
     if (!Number.isInteger(l.quantity) || l.quantity <= 0) throw badRequest(`Enter how many of ${r.label} to order.`);
     // Its own lead time: as entered, else the product's (which comes from its supplier when not set).
-    return { key: r.key, label: r.label, sku: r.sku, quantity: l.quantity, cost: l.costCents ?? r.costCents, lead: l.leadTimeDays === undefined ? leadFor(r.leadTimeDays, r.supplier ?? fallback, r.shippingDays ?? null) : l.leadTimeDays, supplier: r.supplier ?? fallback };
+    return { key: r.key, label: r.label, sku: r.sku, quantity: l.quantity, cost: l.costCents ?? r.costCents, lead: l.leadTimeDays === undefined ? leadFor(r) : l.leadTimeDays, supplier: r.supplier ?? fallback };
   });
 }
 const LINE_INSERT = 'INSERT INTO purchase_order_lines(po_id, product_key, label, sku, quantity, cost_cents, lead_time_days, supplier) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)';

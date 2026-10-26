@@ -7,7 +7,7 @@ import {
   unmarkSeparate,
 } from '../domain/inventorySync.js';
 import { addToSquare, applyNewLength, applyPrices, applyProPrices, newLengthPlan, priceList, proPricePlan, squareCandidates,
-  applyStockChanges, assignCollection, createPurchaseOrders, internalCollections, mergeSuppliers, renameCollection, saveCollectionList, productSales, skipProducts, suggestPurchaseOrders, suggestedOrderPlan, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
+  applyStockChanges, assignCollection, createPurchaseOrders, deleteLeadRule, setSupplierLeadDefault, leadRules, leadTimesFor, saveLeadRule, internalCollections, mergeSuppliers, renameCollection, saveCollectionList, productSales, skipProducts, suggestPurchaseOrders, suggestedOrderPlan, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
   assignSupplier, deleteSupplier, refreshShopifySales, renameSupplier, saveProductSettings, saveSupplier, setForecastSettings, setSupplierLeadTime, stockForecast, stockHistory, stockProducts, updatePurchaseOrder,
 } from '../domain/stock.js';
 import { setSquareSku } from '../domain/squareInventory.js';
@@ -248,7 +248,7 @@ inventorySyncRouter.put('/stock/prices', ah(async (req, res) => {
 inventorySyncRouter.get('/stock/forecast', ah(async (_req, res) => res.json(await stockForecast())));
 inventorySyncRouter.put('/stock/forecast/settings', ah(async (req, res) => {
   const b = parse(z.object({ leadTimeDays: z.number().int().min(0).max(730), safetyDays: z.number().int().min(0).max(365), coverageDays: z.number().int().min(7).max(365), slowToUseDays: z.number().int().min(7).max(730).default(120),
-    soonDays: z.number().int().min(0).max(180).default(7), watchDays: z.number().int().min(0).max(365).default(21), defaultMoq: z.number().int().min(0).max(100_000).default(0),
+    soonDays: z.number().int().min(0).max(180).default(7), watchDays: z.number().int().min(0).max(365).default(21), defaultMoq: z.number().int().min(0).max(100_000).default(0), collectionLeadConflict: z.enum(['longest', 'shortest']).default('longest'),
     discontinuedCollections: z.array(z.string().trim().min(1).max(80)).max(50).default(['Classic']) }).refine((x) => x.watchDays >= x.soonDays, 'the Watch window must be at least the Reorder soon window'), req.body);
   await setForecastSettings(b);
   res.json({ settings: await forecastSettings() });
@@ -343,6 +343,29 @@ inventorySyncRouter.post('/stock/suppliers/merge', ah(async (req, res) => {
   const b = parse(z.object({ from: z.string().min(1).max(120), into: z.string().min(1).max(120) }), req.body);
   await mergeSuppliers(b.from, b.into, req.user!.id);
   await logAction(req, 'stock.supplier_merge', 'stock', null, { from: b.from, into: b.into });
+  res.json({ ok: true });
+}));
+// Lead times: the supplier's default, collection rules and products' own times (product → collection → default).
+inventorySyncRouter.get('/stock/suppliers/lead-times', ah(async (req, res) => res.json(await leadTimesFor(parse(z.object({ name: z.string().min(1).max(120) }), req.query).name))));
+// The supplier's default lead and shipping times only (contacts and the rest aren't touched).
+inventorySyncRouter.put('/stock/suppliers/lead-default', ah(async (req, res) => {
+  const b = parse(z.object({ name: z.string().min(1).max(120), leadTimeDays: z.number().int().min(0).max(730).nullable(), shippingDays: z.number().int().min(0).max(365).nullable() }), req.body);
+  await setSupplierLeadDefault(b.name, b.leadTimeDays, b.shippingDays);
+  await logAction(req, 'stock.supplier_lead_default', 'stock', null, b);
+  res.json({ ok: true });
+}));
+inventorySyncRouter.post('/stock/suppliers/lead-rules', ah(async (req, res) => {
+  const b = parse(z.object({
+    id: z.string().uuid().optional(), supplier: z.string().min(1).max(120), ref: z.string().min(3).max(300), label: z.string().trim().min(1).max(200),
+    productionDays: z.number().int().min(0).max(730), shippingDays: z.number().int().min(0).max(365).nullable(), active: z.boolean().default(true), notes: z.string().trim().max(500).nullable().default(null),
+  }), req.body);
+  await saveLeadRule(b);
+  await logAction(req, 'stock.lead_rule_save', 'stock', null, { supplier: b.supplier, collection: b.label, days: b.productionDays });
+  res.json({ rules: await leadRules(b.supplier) });
+}));
+inventorySyncRouter.delete('/stock/suppliers/lead-rules/:id', ah(async (req, res) => {
+  await deleteLeadRule(req.params.id);
+  await logAction(req, 'stock.lead_rule_delete', 'stock', null, { id: req.params.id });
   res.json({ ok: true });
 }));
 inventorySyncRouter.put('/stock/suppliers/lead-time', ah(async (req, res) => {

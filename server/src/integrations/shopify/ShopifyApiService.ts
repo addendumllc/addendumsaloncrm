@@ -163,7 +163,7 @@ export class ShopifyApiService implements ShopifyService {
         `query($loc: ID!, $after: String) {
           productVariants(first: 50, after: $after) {
             pageInfo { hasNextPage endCursor }
-            nodes { sku displayName image { url(transform: { maxWidth: 160, maxHeight: 160 }) } product { status productType collections(first: 5) { nodes { title } } featuredMedia { preview { image { url(transform: { maxWidth: 160, maxHeight: 160 }) } } } } inventoryItem { id tracked inventoryLevel(locationId: $loc) { quantities(names: ["available"]) { name quantity } } } }
+            nodes { sku displayName image { url(transform: { maxWidth: 160, maxHeight: 160 }) } product { status productType collections(first: 20) { nodes { id title } } featuredMedia { preview { image { url(transform: { maxWidth: 160, maxHeight: 160 }) } } } } inventoryItem { id tracked inventoryLevel(locationId: $loc) { quantities(names: ["available"]) { name quantity } } } }
           }
         }`,
         { loc: locationId, after },
@@ -174,6 +174,7 @@ export class ShopifyApiService implements ShopifyService {
         const available = level?.quantities?.find((q: any) => q.name === 'available')?.quantity;
         out.push({ sku: String(v.sku), inventoryItemId: v.inventoryItem.id, label: v.displayName, tracked: !!v.inventoryItem.tracked, available: level ? Number(available ?? 0) : null, status: v.product?.status,
           collections: [...new Set([v.product?.productType, ...(v.product?.collections?.nodes ?? []).map((c: any) => c.title)].filter(Boolean))] as string[],
+          collectionRefs: (v.product?.collections?.nodes ?? []).map((c: any) => ({ id: c.id, title: c.title })),
           imageUrl: v.image?.url ?? v.product?.featuredMedia?.preview?.image?.url ?? null });
       }
       after = d.productVariants.pageInfo.hasNextPage ? d.productVariants.pageInfo.endCursor : null;

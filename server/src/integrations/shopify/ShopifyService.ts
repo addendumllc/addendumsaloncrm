@@ -32,6 +32,8 @@ export interface ShopifyInventoryEntry {
   status?: 'ACTIVE' | 'DRAFT' | 'ARCHIVED';
   /** The product's collections and product type, for search. */
   collections?: string[];
+  /** Its Shopify collections with their stable ids (lead-time rules refer to these, not the names). */
+  collectionRefs?: { id: string; title: string }[];
   /** The listing's photo (the variant's own, else the product's), a small thumbnail on Shopify's CDN. */
   imageUrl?: string | null;
 }

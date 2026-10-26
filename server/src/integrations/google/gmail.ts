@@ -31,7 +31,9 @@ export async function gmailAuthorizeUrl(account: string) {
   await setKV('gmail.oauthState', { state, createdAt: Date.now() });
   return `https://accounts.google.com/o/oauth2/v2/auth?${new URLSearchParams({
     client_id: c.GOOGLE_CLIENT_ID, redirect_uri: gmailRedirectUri(), response_type: 'code', scope: GMAIL_SCOPES.join(' '),
-    access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', login_hint: account, state,
+    // select_account: always show Google's account chooser (a browser signed in to another Google account would
+    // otherwise be used without asking); consent: so Google gives a lasting (refresh) token.
+    access_type: 'offline', prompt: 'select_account consent', include_granted_scopes: 'true', login_hint: account, state,
   })}`;
 }
 

@@ -396,5 +396,50 @@ describe('Suppliers', () => {
     list = (await api.post('/api/inventory-sync/stock/collections/rename', { from: 'Hand-Tied Wefts', to: null })).body;
     expect(list.collections.map((c: any) => c.name)).toEqual(['Care']);
   });
+
+  it('lead times: product → collection rule (longest of several, or shortest) → supplier default → flagged as missing', async () => {
+    await api.post('/api/inventory-sync/stock/suppliers', { name: 'Factory', leadTimeDays: 14, shippingDays: 7 });
+    await api.post('/api/inventory-sync/stock/suppliers', { name: 'No Default Co' });
+    const prods = (await api.get('/api/inventory-sync/stock/products')).body.products.filter((p: any) => p.squareVariationId);
+    const [a, b, c, d] = prods;
+    await api.put('/api/inventory-sync/stock/products/settings', { rows: [
+      { key: a.key, supplier: 'Factory', leadTimeDays: 28, collection: 'Wefts' }, // its own
+      { key: b.key, supplier: 'Factory', leadTimeDays: null, collection: 'Wefts' }, // collection rule
+      { key: c.key, supplier: 'Factory', leadTimeDays: null, collection: null }, // supplier default
+      { key: d.key, supplier: 'No Default Co', leadTimeDays: null, collection: null }, // nothing
+    ] });
+    const save = (label: string, ref: string, productionDays: number, shippingDays: number | null = null) => api.post('/api/inventory-sync/stock/suppliers/lead-rules', { supplier: 'Factory', ref, label, productionDays, shippingDays });
+    expect((await save('Wefts', 'internal:Wefts', 21, 10)).status).toBe(200);
+    expect((await save('Wefts again', 'internal:Wefts', 30)).status).toBe(400); // one rule per collection
+    // b is also in a store collection with a longer rule.
+    const storeColl = b.collections.find((x: string) => x !== 'Wefts');
+    if (storeColl) await save(storeColl, `name:${storeColl}`, 35);
+    forgetStockCache();
+    const fc = async () => new Map<string, any>((await api.get('/api/inventory-sync/stock/forecast')).body.items.map((i: any) => [i.key, i]));
+    let f = await fc();
+    expect(f.get(a.key)).toMatchObject({ productionDays: 28, shippingDays: 7, leadSource: { kind: 'product' } });
+    expect(f.get(b.key)).toMatchObject({ productionDays: storeColl ? 35 : 21, leadSource: { kind: 'collection' } });
+    expect(f.get(c.key)).toMatchObject({ productionDays: 14, shippingDays: 7, leadSource: { kind: 'supplier', label: 'Factory' } });
+    expect(f.get(d.key).leadSource.kind).toBe('missing');
+    expect(f.get(d.key).why.join(' ')).toMatch(/No lead time set/);
+    if (storeColl) {
+      const base = (await api.get('/api/inventory-sync/stock/forecast')).body.settings;
+      await api.put('/api/inventory-sync/stock/forecast/settings', { ...base, collectionLeadConflict: 'shortest' });
+      forgetStockCache();
+      f = await fc();
+      expect(f.get(b.key)).toMatchObject({ productionDays: 21, shippingDays: 10 });
+      await api.put('/api/inventory-sync/stock/forecast/settings', { ...base, collectionLeadConflict: 'longest' });
+    }
+    const view = (await api.get('/api/inventory-sync/stock/suppliers/lead-times?name=Factory')).body;
+    expect(view.rules.map((r: any) => r.label)).toContain('Wefts');
+    expect(view.products.find((p: any) => p.key === a.key)).toMatchObject({ leadTimeDays: 28 });
+    expect(view.collections.some((c: any) => c.ref === 'internal:Wefts')).toBe(true);
+    // A rule switched off no longer applies.
+    const wefts = view.rules.find((r: any) => r.ref === 'internal:Wefts');
+    await api.post('/api/inventory-sync/stock/suppliers/lead-rules', { ...wefts, active: false });
+    if (storeColl) await api.del(`/api/inventory-sync/stock/suppliers/lead-rules/${view.rules.find((r: any) => r.ref !== 'internal:Wefts').id}`);
+    forgetStockCache();
+    expect((await fc()).get(b.key)).toMatchObject({ productionDays: 14, leadSource: { kind: 'supplier' } });
+  });
 });
 
