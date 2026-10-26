@@ -918,7 +918,8 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
   const fallbackSupplier = useDefaultSupplier();
   const refresh = useRefresh();
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['stock-forecast'], queryFn: () => api.get<StockForecastResponse>('/inventory-sync/stock/forecast') });
-  const [filter, setFilter] = useState<'reorder' | 'alerts' | 'all'>(initialFilter);
+  type Filter = 'reorder' | 'alerts' | 'all' | 'skipped' | StockForecastDTO['status'];
+  const [filter, setFilter] = useState<Filter>(initialFilter);
   const [qty, setQty] = useState<Record<string, string>>({});
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<string | null>(null);
@@ -938,9 +939,17 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
   const isOut = (i: StockForecastDTO) => i.status !== 'discontinued' && i.stock <= 0 && i.ratePerDay > 0;
   const outN = inStore.filter(isOut).length;
   const riskN = inStore.filter((i) => i.stockoutRisk).length;
-  const items = (filter === 'all' ? inStoreAll : inStore).filter((i) => filter === 'all' || (filter === 'alerts' ? isOut(i) || i.stockoutRisk : ['out', 'order_now', 'soon'].includes(i.status)));
-  const counts = { out: 0, order_now: 0, soon: 0, watch: 0 } as Record<string, number>;
-  for (const i of inStore) counts[i.status] = (counts[i.status] ?? 0) + 1;
+  // Each list's rule (live counts beside each): needs ordering = out of stock, order now or reorder soon. A product with
+  // no sales history is its own list — never counted as healthy.
+  const matches = (i: StockForecastDTO, f: Filter) => (f === 'all' ? true : f === 'skipped' ? !!i.skippedUntil : i.skippedUntil ? false
+    : f === 'alerts' ? isOut(i) || i.stockoutRisk : f === 'reorder' ? ['out', 'order_now', 'soon'].includes(i.status) : i.status === f);
+  const items = inStoreAll.filter((i) => matches(i, filter));
+  const FILTERS: { value: Filter; label: string }[] = [
+    { value: 'reorder', label: 'Needs ordering' }, { value: 'out', label: 'Out of stock' }, { value: 'order_now', label: 'Order now' }, { value: 'soon', label: 'Reorder soon' },
+    { value: 'watch', label: 'Watchlist' }, { value: 'healthy', label: 'Healthy' }, { value: 'no_sales', label: 'No sales history' }, { value: 'alerts', label: 'Stock alerts' },
+    { value: 'skipped', label: 'Skipped' }, { value: 'discontinued', label: 'Discontinued' }, { value: 'all', label: 'All products' },
+  ];
+  const countOf = (f: Filter) => inStoreAll.filter((i) => matches(i, f)).length;
   // A product in several collections is shown under its most specific one (the one with the fewest products).
   const collSize = new Map<string, number>();
   for (const i of inStore) for (const c of i.collections) collSize.set(c, (collSize.get(c) ?? 0) + 1);
@@ -1007,13 +1016,24 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
           {filter !== 'alerts' && <button type="button" className="ml-auto text-[13px] font-medium text-plum hover:underline" onClick={() => setFilter('alerts')}>Show them</button>}
         </div>
       )}
-      <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {([['Out of stock', counts.out, 'text-rose'], ['Order now', counts.order_now, 'text-rose'], ['Reorder soon', counts.soon, 'text-amber'], ['Watch', counts.watch, '']] as const).map(([l, n, c]) => (
-          <div key={l} className="rounded-xl2 border border-line bg-white px-3 py-2"><p className="text-[12px] text-stone">{l}</p><p className={cx('num font-display text-[24px] leading-tight', n > 0 && c)}>{n}</p></div>
-        ))}
+      {/* The lists, with live counts (a dropdown on phones). */}
+      <div className="mb-3">
+        <select className="field h-11 w-full text-[16px] sm:hidden" value={filter} onChange={(e) => setFilter(e.target.value as Filter)} aria-label="Which products">
+          {FILTERS.map((f) => <option key={f.value} value={f.value}>{f.label} ({countOf(f.value)})</option>)}
+        </select>
+        <div className="hidden flex-wrap gap-1.5 sm:flex" role="tablist">
+          {FILTERS.map((f) => {
+            const n = countOf(f.value);
+            return (
+              <button key={f.value} type="button" role="tab" aria-selected={filter === f.value} onClick={() => setFilter(f.value)}
+                className={cx('rounded-full border px-3 py-1 text-[13px] transition-colors', filter === f.value ? 'border-plum bg-plum text-white' : 'border-line bg-white text-ink-soft hover:border-line-strong')}>
+                {f.label} <span className={cx('num ml-0.5', filter === f.value ? 'text-white/80' : 'text-stone')}>{n}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <Segmented value={filter} onChange={setFilter} options={[{ value: 'reorder', label: 'To reorder' }, { value: 'alerts', label: `Alerts${outN + riskN ? ` (${outN + riskN})` : ''}` }, { value: 'all', label: 'All products' }]} />
         <select className="field h-9 w-auto py-1 text-sm" value={by} onChange={(e) => setBy(e.target.value as typeof by)} aria-label="View by">
           <option value="product">View by product</option><option value="collection">View by collection</option><option value="supplier">View by supplier</option>
         </select>
@@ -1106,7 +1126,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
       <div className="hidden overflow-x-auto rounded-xl2 border border-line bg-white sm:block">
         <table className="w-full min-w-[980px] text-left text-[13px]">
           <thead className="border-b border-line bg-mist/50 text-[11px] uppercase tracking-wide text-stone">
-            <tr><th className="w-8 px-3 py-2" /><th className="px-2 py-2">Product</th><th className="px-2 py-2">Status</th><th className="px-2 py-2 text-right">Stock</th><th className="px-2 py-2 text-right">On order</th><th className="px-2 py-2 text-right">Per day</th><th className="px-2 py-2 text-right">Days left</th><th className="px-2 py-2">Order by</th><th className="w-24 px-2 py-2">Order qty</th>{showMoq && <><th className="px-2 py-2 text-right">MOQ</th><th className="px-2 py-2">MOQ arrives</th><th className="px-2 py-2 text-right">MOQ lasts</th></>}<th className="px-2 py-2">Supplier</th></tr>
+            <tr><th className="w-8 px-3 py-2" /><th className="px-2 py-2">Product</th><th className="px-2 py-2">Status</th><th className="px-2 py-2 text-right">Stock</th><th className="px-2 py-2 text-right">On order</th><th className="px-2 py-2 text-right">Per day</th><th className="px-2 py-2 text-right">Days left</th><th className="px-2 py-2">Order by</th><th className="w-24 px-2 py-2">Order qty</th>{showMoq && <><th className="px-2 py-2 text-right" title="Minimum order quantity">MOQ</th><th className="px-2 py-2" title="If ordered today: lead time, with shipping when set">Arrives in</th><th className="px-2 py-2 text-right" title="How long the minimum order lasts at the current sales rate">Lasts</th></>}<th className="px-2 py-2">Supplier</th></tr>
           </thead>
           <tbody className="divide-y divide-line">
             {groups.map(([name, list]) => <Fragment key={name ?? 'all'}>
@@ -1136,9 +1156,10 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
             </Fragment>)}
           </tbody>
         </table>
-        {!items.length && <EmptyState title={filter === 'reorder' ? 'Nothing needs reordering right now' : filter === 'alerts' ? 'No stock alerts' : 'No products'} />}
+        {!items.length && <EmptyState title={filter === 'reorder' ? 'Nothing needs reordering right now' : filter === 'alerts' ? 'No stock alerts' : 'No products in this list'} />}
       </div>
       <p className="mt-2 text-[12px] text-stone">The sales rate blends the last 7 days (20%), 30 days (50%) and 90 days (30%). Ordered and shipped purchase orders count as incoming stock. Suggested amounts round up to practical numbers (7 → 10, 23 → 25), then to the minimum order and full cases. Lead time includes the supplier’s shipping days. Set each product’s supplier, cost, lead time, MOQ and case size on Products.</p>
+      {showMoq && <p className="mt-1 text-[12px] text-stone"><b className="font-medium text-ink-soft">MOQ timing:</b> <i>Arrives in</i> — the lead time if the minimum order were placed today (shipping included when set). <i>Lasts</i> — how long the minimum order covers at the current sales rate. <i>Slow to use</i> — it lasts longer than {data.settings.slowToUseDays} days (change this in Forecast settings). Products with no sales history show no estimate rather than a guess.</p>}
     </div>
   );
 }
