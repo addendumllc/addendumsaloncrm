@@ -9,6 +9,8 @@ import { highLevelService, integrationStatus, isDemo, shopifyService } from '../
 import { SHOPIFY_SCOPES } from '../integrations/shopify/ShopifyApiService.js';
 import { buildAuthorizeUrl, disconnectSquare, handleCallback, SQUARE_SCOPES } from '../integrations/square/auth.js';
 import { ah, logAction, parse } from './util.js';
+import { disconnectGmail, gmailAuthorizeUrl, gmailCallback } from '../integrations/google/gmail.js';
+import { listStaffForPicker, processShowit, resolveShowit, saveShowitSettings, showitCandidates, showitOverview, showitSettings } from '../domain/showit.js';
 
 export const integrationsRouter = Router();
 
@@ -56,6 +58,52 @@ integrationsRouter.get('/square/callback', requirePermission('integrations:manag
   }
 }));
 
+// ---------------- Website Inquiries (Showit → Gmail) ----------------
+// Connecting the mailbox: Google's own sign-in (never a password or token typed into the CRM); owners re-enter theirs first.
+integrationsRouter.get('/gmail/connect', requireOwnerReauth('integrations:manage'), ah(async (_req, res) => {
+  res.json({ url: await gmailAuthorizeUrl((await showitSettings()).account) });
+}));
+integrationsRouter.get('/gmail/callback', requirePermission('integrations:manage'), ah(async (req, res) => {
+  const { code, state, error } = req.query as Record<string, string>;
+  if (error || !code) return res.redirect('/settings?tab=inquiries&gmail=denied');
+  try {
+    const email = await gmailCallback(code, state, (await showitSettings()).account);
+    await logAction(req, 'integration.gmail_connected', undefined, undefined, { email });
+    res.redirect('/settings?tab=inquiries&gmail=connected');
+  } catch (e) {
+    console.error('[gmail] oauth callback failed', e instanceof IntegrationError ? e.technical ?? e.userMessage : e);
+    res.redirect(`/settings?tab=inquiries&gmail=failed&reason=${encodeURIComponent(e instanceof IntegrationError ? e.userMessage : 'The connection didn’t complete.')}`);
+  }
+}));
+integrationsRouter.post('/gmail/disconnect', requireOwnerReauth('integrations:manage'), ah(async (req, res) => {
+  await disconnectGmail();
+  await logAction(req, 'integration.gmail_disconnected');
+  res.json({ ok: true });
+}));
+// Setup, history and review — administrators only (the mailbox's content isn't shared beyond them; inquiries are,
+// through the usual new-client permissions).
+integrationsRouter.get('/showit', requirePermission('integrations:manage'), ah(async (_req, res) => res.json({ ...(await showitOverview()), staff: await listStaffForPicker() })));
+integrationsRouter.get('/showit/candidates', requirePermission('integrations:manage'), ah(async (_req, res) => res.json({ candidates: await showitCandidates() })));
+integrationsRouter.put('/showit/settings', requirePermission('integrations:manage'), ah(async (req, res) => {
+  const b = parse(z.object({
+    senders: z.array(z.string().trim().toLowerCase().email()).max(10).optional(), label: z.string().trim().min(1).max(80).optional(),
+    extensionAssigneeId: z.string().uuid().nullable().optional(), frontDeskAssigneeId: z.string().uuid().nullable().optional(), enabled: z.boolean().optional(),
+  }), req.body);
+  const s = await saveShowitSettings(b);
+  await logAction(req, 'integration.showit_settings', undefined, undefined, { senders: s.senders, label: s.label });
+  res.json({ settings: s });
+}));
+integrationsRouter.post('/showit/check', requirePermission('integrations:manage'), ah(async (req, res) => {
+  const r = await processShowit();
+  await logAction(req, 'integration.showit_check', undefined, undefined, r);
+  res.json({ result: r });
+}));
+integrationsRouter.post('/showit/:id/resolve', requirePermission('integrations:manage'), ah(async (req, res) => {
+  const b = parse(z.object({ action: z.enum(['extension', 'general', 'ignore']), name: z.string().trim().max(120).optional(), email: z.string().trim().max(200).optional(), phone: z.string().trim().max(40).optional() }), req.body);
+  const leadId = await resolveShowit(req.params.id, b.action, req.user!.id, { name: b.name, email: b.email, phone: b.phone });
+  await logAction(req, 'integration.showit_resolve', 'lead', leadId, { action: b.action });
+  res.json({ leadId });
+}));
 integrationsRouter.post('/square/sync', requirePermission('square:sync'), ah(async (req, res) => {
   const { full } = parse(z.object({ full: z.boolean().optional() }), req.body ?? {});
   const result = await runSquareSync({ full });

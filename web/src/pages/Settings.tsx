@@ -7,6 +7,7 @@ import { ArrowLeft, ChevronRight } from 'lucide-react';
 import { PageHeader, PageLoading, Toggle, cx, useToast } from '../components/ui';
 import { useCan } from './settings/shared';
 import { AiSettings, HighLevelSettings, SmsSettings, SquareSettings } from './settings/IntegrationTabs';
+import { WebsiteInquiriesSettings } from './settings/WebsiteInquiries';
 import { BusinessSettings, NotificationSettings, RemindersSettings, RulesSettings } from './settings/RulesTabs';
 import { TagSettings } from './settings/TagsTab';
 import { AppearanceSettings } from './settings/AppearanceTab';
@@ -89,6 +90,8 @@ const TABS: Tab[] = [
   { id: 'commission', label: 'Commission', group: 'Administration', perm: ['commission:manage', 'commission:approve'], render: () => <CommissionSettings /> },
   { id: 'square', label: 'Square', group: 'Connections', perm: ['settings:read', 'integrations:manage', 'square:sync'], render: () => <SquareSettings /> },
   { id: 'replies', label: 'Saved Replies', group: 'Connections', perm: 'settings:read', shared: 'replies', render: () => <RepliesSettings /> },
+  // Showit website forms from the salon's Gmail → new-client inquiries (administrators: the mailbox stays private).
+  { id: 'inquiries', label: 'Website Inquiries', group: 'Connections', perm: 'integrations:manage', render: () => <WebsiteInquiriesSettings /> },
   { id: 'highlevel', label: 'GoHighLevel', group: 'Connections', perm: 'settings:read', render: () => <HighLevelSettings /> },
   { id: 'ai', label: 'AI Assistance', group: 'Connections', perm: 'settings:read', render: () => <AiSettings /> },
   { id: 'rules', label: 'Follow-Up Rules', group: 'Automation', perm: 'settings:read', shared: 'rules', render: () => <RulesSettings /> },

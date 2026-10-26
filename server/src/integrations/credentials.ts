@@ -12,7 +12,7 @@ import { setRedactedSecrets } from '../lib/redact.js';
  *   uses them with no other changes. A saved value wins over the environment.
  * - Secret fields are write-only from the admin screen: it can see whether one is set and where from, never the value.
  */
-export type CredentialProvider = 'square' | 'shopify' | 'shopify2' | 'highlevel' | 'highlevel_hair' | 'email' | 'ai';
+export type CredentialProvider = 'square' | 'shopify' | 'shopify2' | 'highlevel' | 'highlevel_hair' | 'email' | 'ai' | 'google';
 
 export interface CredentialField {
   key: string; // environment variable name
@@ -100,6 +100,14 @@ export const CREDENTIAL_SPECS: Record<CredentialProvider, { label: string; field
       { key: 'SMTP_USER', label: 'Username', secret: false, required: true, placeholder: 'info@addendumsalon.com' },
       { key: 'SMTP_PASS', label: 'Password / app password', secret: true, required: true, help: 'Microsoft 365 and Google need SMTP sending allowed for the mailbox (or an app password).' },
       { key: 'EMAIL_FROM', label: 'Send as', secret: false, placeholder: 'Addendum Salon <info@addendumsalon.com>' },
+    ],
+  },
+  google: {
+    label: 'Google (Gmail website inquiries)',
+    requirement: 'A Google Cloud OAuth client (Web application). The mailbox itself is connected with Google’s sign-in under Settings → Website Inquiries — never with a password here.',
+    fields: [
+      { key: 'GOOGLE_CLIENT_ID', label: 'OAuth client ID', secret: false, required: true, validate: noSpaces, placeholder: '…apps.googleusercontent.com', help: 'Google Cloud console → APIs & Services → Credentials → Create OAuth client ID (Web application). Enable the Gmail API. Authorized redirect URI: https://<your CRM address>/api/integrations/gmail/callback' },
+      { key: 'GOOGLE_CLIENT_SECRET', label: 'OAuth client secret', secret: true, required: true, validate: noSpaces },
     ],
   },
   ai: {

@@ -1,7 +1,7 @@
 import { db } from '../db/index.js';
 import { decrypt, encrypt } from '../lib/crypto.js';
 
-export type Provider = 'square' | 'highlevel' | 'sms';
+export type Provider = 'square' | 'highlevel' | 'sms' | 'gmail';
 
 export interface IntegrationRow {
   provider: Provider;

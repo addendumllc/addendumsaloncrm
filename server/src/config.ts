@@ -106,6 +106,9 @@ const schema = z.object({
 
   // ---- AI ----
   ANTHROPIC_API_KEY: z.string().optional(),
+  // Website inquiries from Gmail (Settings → Website Inquiries): a Google Cloud OAuth client (web application).
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
   AI_MODEL: z.string().default('claude-haiku-5-5'),
 });
 

@@ -106,6 +106,9 @@ async function run(p: CredentialProvider): Promise<TestResult> {
       const r = await hl.testConnection();
       return { ok: true, message: `Connected to HighLevel${r.locationName ? ` · ${r.locationName}` : ''}.`, warnings };
     }
+    case 'google':
+      // Nothing to call yet: the client is used when an administrator connects the mailbox (Google’s sign-in).
+      return { ok: true, message: 'Saved. Now connect the mailbox under Settings → Website Inquiries (Google’s sign-in).', warnings };
     case 'highlevel_hair': {
       const hl = new HighLevelApiService(c.HIGHLEVEL_HAIR_PRIVATE_TOKEN!, c.HIGHLEVEL_HAIR_LOCATION_ID!);
       const r = await hl.testConnection();

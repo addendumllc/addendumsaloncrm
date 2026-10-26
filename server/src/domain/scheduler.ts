@@ -9,6 +9,7 @@ import { maybeAutoSync } from './inventorySync.js';
 import { runRules } from './rulesEngine.js';
 import { maybePurgeOldInternalTasks } from './tasks.js';
 import { checkPreorders, checkStockAlerts } from './preorderAlerts.js';
+import { maybeProcessShowit } from './showit.js';
 import { syncSquareInventory } from './squareInventory.js';
 import { runSquareSync } from './squareSync.js';
 
@@ -31,6 +32,7 @@ export function startScheduler() {
     if (tick % 5 === 0) {
       await guard('rules', () => runRules());
       await guard('hair-highlevel', () => maybeAutoPullHairClients()); // hourly, only when turned on
+      await guard('showit', () => maybeProcessShowit()); // website inquiries from Gmail, when connected and a sender is verified
       await guard('task-retention', () => maybePurgeOldInternalTasks()); // daily: finished internal tasks past the chosen months
       await guard('preorders', () => checkPreorders()); // new online pre-orders → bell for inventory managers
       await guard('stock-alerts', () => checkStockAlerts()); // selling products out of stock or at risk → bell
