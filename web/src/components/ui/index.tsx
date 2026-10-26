@@ -179,8 +179,9 @@ export function PageTabs<T extends string>({ value, onChange, options, aside, cl
 }
 
 // ---------- Modal / drawer ----------
-export function Modal({ open, onClose, title, children, footer, wide, side }: {
-  open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; wide?: boolean; side?: boolean;
+/** `wide`: a wider centred popup; `xl`: wider still (two columns, e.g. a new hair order); `side`: a panel from the right. */
+export function Modal({ open, onClose, title, children, footer, wide, xl, side }: {
+  open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; wide?: boolean; xl?: boolean; side?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -203,7 +204,7 @@ export function Modal({ open, onClose, title, children, footer, wide, side }: {
         aria-modal="true"
         className={cx(
           'flex max-h-[100dvh] w-full flex-col bg-white shadow-pop',
-          side ? 'h-full max-w-xl animate-slide-in' : cx('rounded-t-2xl sm:rounded-2xl sm:max-h-[90vh] animate-rise', wide ? 'sm:max-w-3xl' : 'sm:max-w-lg'),
+          side ? 'h-full max-w-xl animate-slide-in' : cx('rounded-t-2xl sm:rounded-2xl sm:max-h-[90vh] animate-rise', xl ? 'sm:max-w-5xl' : wide ? 'sm:max-w-3xl' : 'sm:max-w-lg'),
         )}
       >
         <div className="flex items-center justify-between gap-4 border-b border-line px-5 py-4">
@@ -213,7 +214,8 @@ export function Modal({ open, onClose, title, children, footer, wide, side }: {
           </button>
         </div>
         <div className="app-content flex-1 overflow-y-auto px-5 py-4">{children}</div>
-        {footer && <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">{footer}</div>}
+        {/* modal-footer: its buttons keep one compact size whatever the button size setting (index.css). */}
+        {footer && <div className="modal-footer flex flex-wrap items-center justify-end gap-2 border-t border-line px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">{footer}</div>}
       </div>
     </div>,
     document.body,

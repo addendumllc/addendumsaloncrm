@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { INVENTORY_STATUS_LABELS, hairParts, type OrderHairLayout, type InventoryItemDTO, type InventoryRequestDTO, type InventoryStatus } from '@addendum/shared';
-import { AlertCircle, ArrowLeft, ArrowLeftRight, CheckCircle2, ChevronRight, Clock, Mail, Minus, Package, PackageCheck, Plus, RotateCw, Search, Send, ShoppingBag, Trash2, Truck, X } from 'lucide-react';
+import { AlertCircle, ArrowLeftRight, CheckCircle2, ChevronRight, Clock, Mail, Minus, Package, PackageCheck, Plus, RotateCw, Search, Send, ShoppingBag, Trash2, Truck, X } from 'lucide-react';
 import { api, ApiError } from '../api/client';
 import { useCanDo, useInventory, useInventorySuggestions, useIntegrations, useMe, useRefreshAll, useStaff } from '../api/hooks';
 import { addDaysKey, dateShort, dateTime, dayKey, relative } from '../lib/format';
@@ -36,10 +36,10 @@ export function InventoryPage() {
   };
 
   const ws = useWorkspace();
-  // Ordering is its own page (not a side panel): collection → length → colour → quantity, with the order beside it.
-  if (composing) return <ComposeRequest onClose={() => { setComposing(false); set('new', null); }} />;
   return (
     <div className="animate-rise">
+      {/* A new order: a centred popup (collection → length → colour → quantity, with the order beside it). */}
+      {composing && <ComposeRequest onClose={() => { setComposing(false); set('new', null); }} />}
       {/* Order Hair wears Addendum Hair's look, but it's the salon ordering: say so. */}
       <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-stone">{ws.names.salon.name} · ordering from {ws.names.hair.name}</p>
       <PageHeader
@@ -289,10 +289,13 @@ function ComposeRequest({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="animate-rise">
-      <button type="button" onClick={onClose} className="mb-3 inline-flex items-center gap-1 text-sm text-stone hover:text-ink"><ArrowLeft className="h-4 w-4" />Order Hair</button>
-      <PageHeader title="New hair order" subtitle={<span className="inline-flex items-center gap-1.5"><Mail className="h-4 w-4" />Sent to Addendum Hair{integ?.demoMode ? ' · Demo Mode, not actually sent' : ''}</span>} />
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)]">
+    <Modal open xl onClose={onClose} title="New hair order" footer={<>
+      <span className="mr-auto text-[13px] text-stone">{filled.length ? `${plural(filled.length, 'item')} · ${plural(units, 'unit')}` : 'Add hair to order'}</span>
+      <Button variant="ghost" onClick={onClose}>Cancel</Button>
+      <Button variant="primary" icon={<Send className="h-4 w-4" />} loading={sending} disabled={!filled.length || missingDate} onClick={send}>Submit order</Button>
+    </>}>
+      <p className="mb-4 inline-flex items-center gap-1.5 text-[13px] text-stone"><Mail className="h-4 w-4" />Sent to Addendum Hair{integ?.demoMode ? ' · Demo Mode, not actually sent' : ''}</p>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)]">
         {/* Choose hair: collection → length → colour → quantity (or search). */}
         <section className="min-w-0 space-y-4">
           {shopify.data && !shopify.data.connected
@@ -302,7 +305,7 @@ function ComposeRequest({ onClose }: { onClose: () => void }) {
           <HairPicker shopify={shopify.data} loading={shopify.isLoading} onPick={pick} added={added} />
         </section>
         {/* The order: who it's for, when, the items, notes and Submit. */}
-        <aside className="self-start border border-line bg-white p-4 lg:sticky lg:top-4">
+        <aside className="self-start border border-line bg-white p-4">
           <Field label="For stylist">
             {forOthers ? (
               <select className="field" value={who} onChange={(e) => setForStaffId(e.target.value)}>
@@ -361,14 +364,9 @@ function ComposeRequest({ onClose }: { onClose: () => void }) {
         <textarea className="field min-h-[70px]" value={note} maxLength={1000} onChange={(e) => setNote(e.target.value)} placeholder="Special instructions, e.g. For Sarah's install on the 14th" />
       </Field>
       {error && <p className="mt-3 flex items-start gap-2 rounded-lg border border-rose/30 bg-rose-tint px-3 py-2 text-[14px] text-rose" role="alert"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</p>}
-          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3">
-            <span className="mr-auto text-[13px] text-stone">{filled.length ? `${plural(filled.length, 'item')} · ${plural(units, 'unit')}` : 'Add hair to order'}</span>
-            <Button variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button variant="primary" icon={<Send className="h-4 w-4" />} loading={sending} disabled={!filled.length || missingDate} onClick={send}>Submit order</Button>
-          </div>
         </aside>
       </div>
-    </div>
+    </Modal>
   );
 }
 
