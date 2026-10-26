@@ -811,7 +811,7 @@ function collectionOfEach(items: StockForecastDTO[]) {
 }
 
 /**
- * Suggested orders: a draft purchase order per collection with what needs ordering (out of stock with sales or
+ * Suggested orders: a draft purchase order per collection and supplier with what needs ordering (out of stock with sales or
  * pre-orders, order now, reorder soon) at the suggested amounts — named "Suggested · <collection>". Earlier suggested
  * drafts for the same store are replaced, so it can be run again after stock changes. Nothing is ordered.
  */
@@ -828,8 +828,10 @@ export async function suggestedOrderPlan(store: 'salon' | 'shopify' | 'all'): Pr
   const inStore = (i: StockForecastDTO) => store === 'all' || (store === 'salon' ? i.stores.salon : i.stores.online);
   const need = f.items.filter((i) => i.suggestedQty > 0 && !i.skippedUntil && ['out', 'order_now', 'soon'].includes(i.status) && inStore(i));
   const coll = collectionOfEach(f.items.filter(inStore));
+  // One draft per collection and supplier — never two suppliers on one order; products without one are "Supplier needed".
   const groups = new Map<string, StockForecastDTO[]>();
-  for (const i of need) groups.set(coll(i), [...(groups.get(coll(i)) ?? []), i]);
+  const keyOf = (i: StockForecastDTO) => `${coll(i)} · ${i.supplier ?? fallback ?? 'Supplier needed'}`;
+  for (const i of need) groups.set(keyOf(i), [...(groups.get(keyOf(i)) ?? []), i]);
   return [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([collection, list]) => ({
     collection,
     suppliers: [...new Set(list.map((i) => i.supplier ?? fallback).filter((x): x is string => !!x))],

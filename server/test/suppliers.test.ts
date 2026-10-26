@@ -253,6 +253,7 @@ describe('Suppliers', () => {
     // Preview first: nothing is saved.
     const preview = (await api.get('/api/inventory-sync/stock/purchase-orders/suggest?store=all')).body.groups;
     expect(preview.length).toBeGreaterThan(0);
+    expect(preview.every((g: any) => g.suppliers.length <= 1)).toBe(true); // never two suppliers on one draft
     expect((await api.get('/api/inventory-sync/stock/purchase-orders')).body.orders.some((o: any) => o.name?.startsWith('Suggested · '))).toBe(false);
     // Create with one amount changed.
     const g0 = preview[0];
