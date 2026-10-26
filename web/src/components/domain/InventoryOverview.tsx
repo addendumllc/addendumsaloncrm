@@ -5,6 +5,7 @@ import type { PurchaseOrderDTO, StockForecastDTO, StockForecastResponse, StockPr
 import { api } from '../../api/client';
 import { dateShort, labelOfKey } from '../../lib/format';
 import { useStoreNames } from '../../lib/storeNames';
+import { collectionFilter, useInternalCollections } from './Collections';
 import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, cx, useToast } from '../ui';
 
 type Store = 'all' | 'salon' | 'hair';
@@ -65,7 +66,8 @@ export function InventoryOverview({ store, onOpenTab }: { store: Store; onOpenTa
   const all = useMemo(() => (products.data?.products ?? []).filter((p) => p.status !== 'not_tracked' && (p.squareQty != null || p.shopifyQty != null) && inStore(p)),
     [products.data, store]); // eslint-disable-line react-hooks/exhaustive-deps
   const statusOf = useMemo(() => new Map(all.map((p) => [p.key, simpleOf(p, fc(p))])), [all, fc]);
-  const collections = useMemo(() => [...new Set(all.flatMap((p) => p.collections))].sort((a, b) => a.localeCompare(b)), [all]);
+  const { data: internal } = useInternalCollections();
+  const collFilter = useMemo(() => collectionFilter(internal, [...new Set(all.flatMap((p) => p.collections))].sort((a, b) => a.localeCompare(b))), [internal, all]);
 
   if (products.isLoading || forecast.isLoading) return <PageLoading />;
   if (products.error || !products.data) return <ErrorNote error={products.error} onRetry={products.refetch} />;
@@ -76,7 +78,7 @@ export function InventoryOverview({ store, onOpenTab }: { store: Store; onOpenTa
   const order: Simple[] = ['out', 'low', 'watch', 'ok', 'skipped', 'discontinued'];
   const stockOf = (p: StockProductDTO) => (store === 'salon' ? p.squareQty ?? 0 : store === 'hair' ? p.shopifyQty ?? 0 : Math.max(p.squareQty ?? 0, p.shopifyQty ?? 0));
   const rows = all
-    .filter((p) => (!status || statusOf.get(p.key) === status) && (!coll || p.collections.includes(coll))
+    .filter((p) => (!status || statusOf.get(p.key) === status) && (!coll || collFilter.matches(p, coll))
       && words.every((w) => `${p.label} ${p.sku ?? ''} ${p.collections.join(' ')}`.toLowerCase().includes(w)))
     .sort((a, b) => (sort === 'stock' ? stockOf(a) - stockOf(b) : sort === 'status' ? order.indexOf(statusOf.get(a.key)!) - order.indexOf(statusOf.get(b.key)!) : 0) || a.label.localeCompare(b.label));
   const tile = (label: string, n: number, active: boolean, onClick: () => void, tone?: string) => (
@@ -109,7 +111,7 @@ export function InventoryOverview({ store, onOpenTab }: { store: Store; onOpenTa
           <option value="">All statuses</option>{order.map((s) => <option key={s} value={s}>{SIMPLE[s].label}</option>)}
         </select>
         <select className="field h-11 w-auto max-w-[12rem]" value={coll} onChange={(e) => { setColl(e.target.value); setShown(PAGE); }} aria-label="Collection">
-          <option value="">All collections</option>{collections.map((c) => <option key={c}>{c}</option>)}
+          <option value="">All collections</option>{collFilter.options.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
         </select>
         <select className="field h-11 w-auto" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Sort">
           <option value="name">Sort by name</option><option value="stock">Sort by stock (low first)</option><option value="status">Sort by status</option>

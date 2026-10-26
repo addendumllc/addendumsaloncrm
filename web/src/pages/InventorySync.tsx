@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { InventorySeparateDTO, InventorySyncLinkDTO, InventorySyncOverviewDTO, InventorySyncRunDTO } from '@addendum/shared';
+import type { StockProductDTO, InventorySeparateDTO, InventorySyncLinkDTO, InventorySyncOverviewDTO, InventorySyncRunDTO } from '@addendum/shared';
 import { AlertTriangle, ArrowLeftRight, CheckCircle2, CircleDashed, Link2, Pencil, RefreshCw, RotateCcw, Search, Tag, Unlink, X, XCircle } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ProductsView, PurchaseOrdersView, ReorderView, StockHistory, StockView, SuppliersView } from '../components/domain/StockTools';
 import { InventoryOverview } from '../components/domain/InventoryOverview';
+import { CollectionsButton } from '../components/domain/Collections';
 import { api } from '../api/client';
 import { ShopifySyncSwitch } from '../components/domain/ShopifySyncSwitch';
 import { relative } from '../lib/format';
@@ -56,6 +57,8 @@ export function InventorySyncPage() {
     refetchInterval: (q) => (q.state.data?.running ? 1500 : 30_000),
   });
   const [tab, setTab] = useState<'attention' | 'all' | 'unmatched' | 'last'>('attention');
+  // The products (for Collections: the store collections to pick from).
+  const { data: productList } = useQuery({ queryKey: ['stock-products'], queryFn: () => api.get<{ products: StockProductDTO[] }>('/inventory-sync/stock/products'), staleTime: 20_000 }); // same shape as Inventory's other lists (shared cache)
   // Sections (the side menu): the stores' inventory first, then the sync and the stock tools. Salon inventory opens first.
   const [params, setParams] = useSearchParams();
   // Inventory opens first. Per-store pages pick the store with ?for=hair (Addendum Hair = Shopify); older links
@@ -130,7 +133,7 @@ export function InventorySyncPage() {
       {view === 'overview' && <InventoryOverview store={storePick} onOpenTab={setView} />}
       {view === 'items' && (forHair ? <ProductsView key="online" only="shopify" /> : <SquareInventoryView />)}
       {view === 'pricing' && <PricingView store={storePick} />}
-      {view === 'products' && <div className="mb-3 flex flex-wrap justify-end gap-2"><AddLengthButton /><AddToSquareButton /></div>}
+      {view === 'products' && <div className="mb-3 flex flex-wrap justify-end gap-2"><CollectionsButton products={productList?.products ?? []} /><AddLengthButton /><AddToSquareButton /></div>}
       {view === 'products' && <ProductsView setup />}
       {view === 'stock' && <StockView key={params.get('q') ?? ''} store={storePick} initialQuery={params.get('q') ?? ''} />}
       {view === 'reorder' && <WaitingForStock store={storePick} />}

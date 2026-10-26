@@ -31,14 +31,17 @@ export function ForecastWidget({ scope }: { scope: 'all' | 'salon' | 'online' })
   const [by, setBy] = useState<'product' | 'collection' | 'supplier'>('product');
   const [group, setGroup] = useState<string | null>(null);
   const inShop = useMemo(() => (data?.items ?? []).filter((i) => shop === 'all' || i.stores[shop]), [data, shop]);
-  const collections = useMemo(() => [...new Set(inShop.flatMap((i) => i.collections))].sort((a, b) => a.localeCompare(b)), [inShop]);
+  // The salon's own inventory collections when products have them (plus "No collection"), else the stores'.
+  const own = useMemo(() => [...new Set(inShop.map((i) => i.collection).filter((c): c is string => !!c))].sort((a, b) => a.localeCompare(b)), [inShop]);
+  const collections = useMemo(() => (own.length ? [...own, 'No collection'] : [...new Set(inShop.flatMap((i) => i.collections))].sort((a, b) => a.localeCompare(b))), [inShop, own]);
+  const inCollection = (i: Item, c: string) => (own.length ? (c === 'No collection' ? !i.collection : i.collection === c) : i.collections.includes(c));
   if (isLoading) return <PageLoading />;
   if (error || !data) return <ErrorNote error={error} onRetry={refetch} />;
   // A product in several collections counts once, under its most specific one (the one with the fewest products).
   const size = new Map<string, number>();
   for (const i of inShop) for (const c of i.collections) size.set(c, (size.get(c) ?? 0) + 1);
   const groupOf = (i: Item) => (by === 'supplier' ? i.supplier ?? 'No supplier' : i.collection ?? [...i.collections].sort((a, b) => (size.get(a) ?? 0) - (size.get(b) ?? 0) || a.localeCompare(b))[0] ?? 'No collection');
-  const inColl = inShop.filter((i) => !coll || i.collections.includes(coll));
+  const inColl = inShop.filter((i) => !coll || inCollection(i, coll));
   const groups = by === 'product' ? [] : [...inColl.reduce((m, i) => m.set(groupOf(i), [...(m.get(groupOf(i)) ?? []), i]), new Map<string, Item[]>())]
     .map(([name, list]) => {
       const toOrder = list.filter((i) => i.status === 'order_now' || i.status === 'soon');

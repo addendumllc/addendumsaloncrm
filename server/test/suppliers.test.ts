@@ -371,5 +371,30 @@ describe('Suppliers', () => {
     expect(names).toContain('Hair Co B');
     expect(names).not.toContain('Hair Co A');
   });
+
+  it('internal collections: put products in by rule (preview first), rename and remove — the stores’ collections untouched', async () => {
+    const before = (await api.get('/api/inventory-sync/stock/products')).body.products;
+    const weft = before.filter((p: any) => /weft/i.test(p.label));
+    await api.put('/api/inventory-sync/stock/collections', { names: ['Wefts', 'Care'] });
+    const pv = (await api.post('/api/inventory-sync/stock/collections/assign', { collection: 'Wefts', nameContains: 'weft', preview: true })).body;
+    expect(pv.count).toBe(weft.length);
+    expect((await api.get('/api/inventory-sync/stock/collections')).body.collections.find((c: any) => c.name === 'Wefts').products).toBe(0); // preview changes nothing
+    expect((await api.post('/api/inventory-sync/stock/collections/assign', { collection: 'Wefts', nameContains: 'weft' })).body.count).toBe(weft.length);
+    forgetStockCache();
+    let list = (await api.get('/api/inventory-sync/stock/collections')).body;
+    expect(list.collections.map((c: any) => [c.name, c.products])).toEqual([['Wefts', weft.length], ['Care', 0]]);
+    const after = (await api.get('/api/inventory-sync/stock/products')).body.products;
+    for (const p of weft) {
+      const now = after.find((x: any) => x.key === p.key);
+      expect(now.collection).toBe('Wefts');
+      expect(now.collections.slice(1)).toEqual(p.collections.filter((c: string) => c !== 'Wefts')); // store collections kept
+    }
+    // Only products without one: nothing more to do.
+    expect((await api.post('/api/inventory-sync/stock/collections/assign', { collection: 'Care', nameContains: 'weft', onlyWithout: true, preview: true })).body.count).toBe(0);
+    list = (await api.post('/api/inventory-sync/stock/collections/rename', { from: 'Wefts', to: 'Hand-Tied Wefts' })).body;
+    expect(list.collections[0]).toMatchObject({ name: 'Hand-Tied Wefts', products: weft.length });
+    list = (await api.post('/api/inventory-sync/stock/collections/rename', { from: 'Hand-Tied Wefts', to: null })).body;
+    expect(list.collections.map((c: any) => c.name)).toEqual(['Care']);
+  });
 });
 

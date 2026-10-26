@@ -120,6 +120,58 @@ async function live(fresh = false): Promise<Live> {
   return out;
 }
 
+// ---------------- Internal collections (Inventory → Products → Collections) ----------------
+/**
+ * The salon's own collections for inventory (e.g. K-Tips, Tapes, 18" Redefined), separate from the stores'
+ * storefront collections — set on each product as its purchasing collection. Changing them never touches Shopify or
+ * Square. The list keeps their order; each product is in at most one.
+ */
+const COLLECTIONS_KEY = 'stock.collections';
+export async function internalCollections() {
+  const names = (await getKV<string[]>(COLLECTIONS_KEY)) ?? [];
+  const counts = new Map((await db().query<{ c: string; n: number }>(`SELECT collection AS c, count(*)::int AS n FROM stock_products WHERE collection IS NOT NULL GROUP BY 1`)).map((r) => [r.c, r.n]));
+  // Collections set on products before the list existed are kept in it.
+  const all = [...names, ...[...counts.keys()].filter((c) => !names.includes(c)).sort((a, b) => a.localeCompare(b))];
+  const tracked = (await live().catch(() => null))?.rows.filter((r) => r.status !== 'not_tracked') ?? [];
+  return { collections: all.map((name) => ({ name, products: counts.get(name) ?? 0 })), withoutCollection: tracked.filter((r) => !r.collection).length };
+}
+export async function saveCollectionList(names: string[]) {
+  await setKV(COLLECTIONS_KEY, [...new Set(names.map((n) => n.trim()).filter(Boolean))]);
+}
+/** Renames a collection on every product in it (null = removes it from them). */
+export async function renameCollection(from: string, to: string | null, staffId: string | null) {
+  const target = to?.trim() || null;
+  await db().query('UPDATE stock_products SET collection = $2, updated_by_staff_id = $3, updated_at = now() WHERE collection = $1', [from, target, staffId]);
+  const list = (await getKV<string[]>(COLLECTIONS_KEY)) ?? [];
+  await saveCollectionList(target ? list.map((n) => (n === from ? target : n)) : list.filter((n) => n !== from));
+  forgetStockCache();
+}
+/**
+ * Puts products into a collection: chosen ones, or those matching a rule — in a store collection, a word in the name,
+ * or a SKU start (e.g. "18-" + "CI"). `onlyWithout` skips products already in a collection. `preview` changes nothing.
+ */
+export async function assignCollection(a: { collection: string | null; keys?: string[]; storeCollection?: string; nameContains?: string; skuStarts?: string; skuContains?: string; onlyWithout?: boolean; preview?: boolean }, staffId: string | null) {
+  const rows = (await live()).rows.filter((r) => r.status !== 'not_tracked');
+  const words = (a.nameContains ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+  const hit = rows.filter((r) => (a.keys ? a.keys.includes(r.key) : true)
+    && (!a.storeCollection || r.collections.includes(a.storeCollection))
+    && words.every((w) => r.label.toLowerCase().includes(w))
+    && (!a.skuStarts || norm(r.sku).startsWith(a.skuStarts.trim().toLowerCase()))
+    && (!a.skuContains || norm(r.sku).includes(a.skuContains.trim().toLowerCase()))
+    && (!a.onlyWithout || !r.collection)
+    && (a.keys || a.storeCollection || words.length || a.skuStarts || a.skuContains));
+  if (a.preview) return { count: hit.length, sample: hit.slice(0, 8).map((r) => r.label) };
+  const name = a.collection?.trim() || null;
+  if (hit.length) {
+    await db().query(
+      `INSERT INTO stock_products(product_key, collection, updated_by_staff_id) SELECT k, $2, $3 FROM unnest($1::text[]) k
+       ON CONFLICT (product_key) DO UPDATE SET collection = $2, updated_by_staff_id = $3, updated_at = now()`, [hit.map((r) => r.key), name, staffId]);
+  }
+  if (name) { const list = (await getKV<string[]>(COLLECTIONS_KEY)) ?? []; if (!list.includes(name)) await saveCollectionList([...list, name]); }
+  forgetStockCache();
+  return { count: hit.length, sample: [] as string[] };
+}
+
 /** The products as listed now (for other parts of the CRM, e.g. Purchases & Transactions). */
 export const stockRows = async () => (await live()).rows;
 

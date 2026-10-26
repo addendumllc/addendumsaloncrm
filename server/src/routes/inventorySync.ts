@@ -7,7 +7,7 @@ import {
   unmarkSeparate,
 } from '../domain/inventorySync.js';
 import { addToSquare, applyNewLength, applyPrices, applyProPrices, newLengthPlan, priceList, proPricePlan, squareCandidates,
-  applyStockChanges, createPurchaseOrders, mergeSuppliers, productSales, skipProducts, suggestPurchaseOrders, suggestedOrderPlan, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
+  applyStockChanges, assignCollection, createPurchaseOrders, internalCollections, mergeSuppliers, renameCollection, saveCollectionList, productSales, skipProducts, suggestPurchaseOrders, suggestedOrderPlan, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
   assignSupplier, deleteSupplier, refreshShopifySales, renameSupplier, saveProductSettings, saveSupplier, setForecastSettings, setSupplierLeadTime, stockForecast, stockHistory, stockProducts, updatePurchaseOrder,
 } from '../domain/stock.js';
 import { setSquareSku } from '../domain/squareInventory.js';
@@ -129,6 +129,28 @@ const intOrNull = (max: number) => z.number().int().min(0).max(max).nullable().o
 /** Every product in Square and Shopify, with stock in each and ordering details. */
 inventorySyncRouter.get('/stock/products', ah(async (_req, res) => res.json(await stockProducts())));
 
+// Internal collections: the salon's own list, renamed or removed everywhere, and products put into one (with a preview).
+inventorySyncRouter.get('/stock/collections', ah(async (_req, res) => res.json(await internalCollections())));
+inventorySyncRouter.put('/stock/collections', ah(async (req, res) => {
+  const b = parse(z.object({ names: z.array(z.string().trim().min(1).max(120)).max(200) }), req.body);
+  await saveCollectionList(b.names);
+  res.json(await internalCollections());
+}));
+inventorySyncRouter.post('/stock/collections/rename', ah(async (req, res) => {
+  const b = parse(z.object({ from: z.string().min(1).max(120), to: z.string().trim().max(120).nullable() }), req.body);
+  await renameCollection(b.from, b.to, req.user!.id);
+  await logAction(req, 'stock.collection_rename', 'stock', null, b);
+  res.json(await internalCollections());
+}));
+inventorySyncRouter.post('/stock/collections/assign', ah(async (req, res) => {
+  const b = parse(z.object({
+    collection: z.string().trim().max(120).nullable(), keys: z.array(z.string().min(1).max(200)).max(5000).optional(), storeCollection: z.string().max(200).optional(),
+    nameContains: z.string().max(100).optional(), skuStarts: z.string().max(40).optional(), skuContains: z.string().max(40).optional(), onlyWithout: z.boolean().optional(), preview: z.boolean().optional(),
+  }), req.body);
+  const r = await assignCollection(b, req.user!.id);
+  if (!b.preview) await logAction(req, 'stock.collection_assign', 'stock', null, { collection: b.collection, count: r.count });
+  res.json(r);
+}));
 // To order → Skip: not going to order these (until a date, or until turned back on with until = null).
 inventorySyncRouter.put('/stock/products/skip', ah(async (req, res) => {
   const b = parse(z.object({ keys: z.array(z.string().min(1).max(200)).min(1).max(1000), until: ymd.nullable() }), req.body);

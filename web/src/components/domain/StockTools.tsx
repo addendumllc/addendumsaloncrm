@@ -8,6 +8,7 @@ import { AlertTriangle, ArrowLeftRight, Settings2, ChevronDown, ChevronRight, Do
 import { api } from '../../api/client';
 import { useCanDo } from '../../api/hooks';
 import { downloadCsv, parseCsv } from '../../lib/csv';
+import { collectionFilter, useInternalCollections } from './Collections';
 import { dateShort, dateTime, dayKey, labelOfKey, relative } from '../../lib/format';
 import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, Segmented, Toggle, cx, useToast } from '../ui';
 import { useStoreNames } from '../../lib/storeNames';
@@ -155,15 +156,17 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
   // Collections (from Square and Shopify) to narrow the list fast, and ticking products to change many at once.
   const [coll, setColl] = useState('');
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const collectionList = useMemo(() => [...new Set(scoped.flatMap((p) => p.collections))].sort((a, b) => a.localeCompare(b)), [scoped]);
+  // The salon's own inventory collections when it has any (else the stores' collections).
+  const { data: internal } = useInternalCollections();
+  const collFilter = useMemo(() => collectionFilter(internal, [...new Set(scoped.flatMap((p) => p.collections))].sort((a, b) => a.localeCompare(b))), [internal, scoped]);
   // Needs setup: active products missing a supplier, a cost, a lead time or a minimum order (their own or the supplier's).
   const [needsSetup, setNeedsSetup] = useState(false);
   const missing = (p: StockProductDTO) => {
     const sup = supplierOf(p);
     return [!(p.supplier ?? fallbackSupplier) && 'supplier', p.costCents == null && 'cost', p.leadTimeDays == null && sup?.leadTimeDays == null && !sup?.leadUntracked && 'lead time', p.moq == null && sup?.defaultMoq == null && 'MOQ'].filter(Boolean) as string[];
   };
-  const shown = useMemo(() => filterProducts(scoped, q, status).filter((p) => (!coll || p.collections.includes(coll)) && (!needsSetup || (p.status === 'active' && missing(p).length > 0))),
-    [scoped, q, status, coll, needsSetup, supplierList]); // eslint-disable-line react-hooks/exhaustive-deps
+  const shown = useMemo(() => filterProducts(scoped, q, status).filter((p) => (!coll || collFilter.matches(p, coll)) && (!needsSetup || (p.status === 'active' && missing(p).length > 0))),
+    [scoped, q, status, coll, needsSetup, supplierList, collFilter]); // eslint-disable-line react-hooks/exhaustive-deps
   // Edit selected: one field across the ticked products (shown in yellow until Save, so it can be checked first).
   const [bulkField, setBulkField] = useState<keyof Draft | ''>('');
   const [bulkValue, setBulkValue] = useState('');
@@ -248,10 +251,10 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone" />
           <input className="field h-11 pl-9 text-[16px] sm:text-[14px]" type="search" placeholder={SEARCH_HINT} value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
-        {collectionList.length > 0 && (
+        {collFilter.options.length > 0 && (
           <select className="field h-11 w-auto max-w-full py-1 text-[14px]" value={coll} onChange={(e) => setColl(e.target.value)} aria-label="Collection">
             <option value="">All collections</option>
-            {collectionList.map((c) => <option key={c} value={c}>{c}</option>)}
+            {collFilter.options.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
           </select>
         )}
         <Segmented className="max-w-full overflow-x-auto" value={status} onChange={setStatus} options={[{ value: 'active', label: 'Active' }, { value: 'all', label: 'All' }, { value: 'discontinued', label: 'Discontinued' }, { value: 'not_tracked', label: 'Not tracked' }]} />
