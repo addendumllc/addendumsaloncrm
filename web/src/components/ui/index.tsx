@@ -12,8 +12,9 @@ const VARIANTS: Record<Variant, string> = {
   // The person's accent (their own User Color, or the salon's): every button follows it.
   primary: 'bg-plum text-white hover:bg-plum-dark disabled:bg-stone-light',
   secondary: 'bg-white text-plum border border-plum/30 hover:border-plum/60 hover:bg-plum-tint',
-  ghost: 'text-plum hover:bg-plum-tint',
-  quiet: 'text-plum hover:bg-plum-tint',
+  // Text-only (link-style) buttons: the links font, a size smaller than filled buttons (index.css .btn-link).
+  ghost: 'btn-link text-plum hover:bg-plum-tint',
+  quiet: 'btn-link text-plum hover:bg-plum-tint',
   danger: 'bg-rose text-white hover:bg-rose/90',
 };
 export function Button({

@@ -96,6 +96,10 @@
 [data-btn-height] .btn-md { height: var(--btn-h); }
 [data-btn-height] .btn-sm { height: max(1.25rem, calc(var(--btn-h) - 8px)); }
 [data-buttons="large"] .btn-sm { height: 2.5rem; padding-left: 0.875rem; padding-right: 0.875rem; font-size: 14px; }
+/* Link-style (text-only) buttons: the links font, a step smaller than filled buttons at every button size. */
+.btn-link { font-family: var(--font-link, var(--font-button, inherit)); }
+.btn-link.btn-md, [data-buttons] .btn-link.btn-md { font-size: 13px; }
+.btn-link.btn-sm, [data-buttons] .btn-link.btn-sm { font-size: 12px; }
 /* Small text and labels (the theme's "small text" size). */
 :is(.label, .text-xs, .text-\[11px\], .text-\[12px\], .text-\[13px\]) { zoom: var(--size-small, 1); }
 
@@ -118,14 +122,15 @@
 .font-nav { zoom: var(--size-nav, 1); }
 
 /* Font styles (Theme Management → Font styles): a font, weight and capitals for each kind of text. */
-:is(h2, h3, h4):is(.h-display, .font-display) { font-family: var(--font-subheading, var(--font-display)); font-weight: var(--w-subheading, var(--heading-weight, 400)); }
-:is(h1).h-display, h1.font-display { font-weight: var(--w-heading, var(--heading-weight, 400)); }
+:is(h3, h4):is(.h-display, .font-display) { font-family: var(--font-subheading, var(--font-display)); font-weight: var(--w-subheading, var(--heading-weight, 400)); }
+/* Page titles and section titles (e.g. the cards in Settings) are headings; smaller titles inside them are subheadings. */
+:is(h1, h2):is(.h-display, .font-display) { font-weight: var(--w-heading, var(--heading-weight, 400)); }
 .label, thead th { font-family: var(--font-label, var(--font-body)); font-weight: var(--w-label, 500); }
 body { font-weight: var(--w-body, var(--body-weight, 400)); }
 .font-nav { font-weight: var(--w-menu, inherit); }
 .font-button { font-weight: var(--w-button, 500); }
-[data-caps-heading] :is(h1.h-display, h1.font-display),
-[data-caps-subheading] :is(h2, h3, h4):is(.h-display, .font-display),
+[data-caps-heading] :is(h1, h2):is(.h-display, .font-display),
+[data-caps-subheading] :is(h3, h4):is(.h-display, .font-display),
 [data-caps-menu] .font-nav a,
 [data-caps-button] .font-button,
 [data-caps-label] :is(.label, thead th),
