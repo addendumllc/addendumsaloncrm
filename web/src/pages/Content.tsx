@@ -29,6 +29,12 @@ export function ContentPage() {
     void api.get<{ post: ContentPostDTO }>(`/content/posts/${focus}`).then((r) => setEditing({ post: r.post })).catch(() => undefined);
     const p = new URLSearchParams(params); p.delete('post'); setParams(p, { replace: true });
   }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Open a post another part of the page asks for (e.g. a blog draft just made from a post).
+  useEffect(() => {
+    const h = (e: Event) => setEditing({ post: (e as CustomEvent<ContentPostDTO>).detail });
+    window.addEventListener('content:open', h);
+    return () => window.removeEventListener('content:open', h);
+  }, []);
   if (b.loading) return <PageLoading />;
   const open = (post: ContentPostDTO) => setEditing({ post });
   const create = (prefill?: Prefill) => setEditing({ post: null, prefill });

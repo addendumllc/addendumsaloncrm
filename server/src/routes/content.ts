@@ -2,7 +2,7 @@ import express, { Router } from 'express';
 import { z } from 'zod';
 import { CONTENT_PLATFORMS, CONTENT_FORMATS } from '@addendum/shared';
 import {
-  accountsFor, addComment, analytics, campaignTimeline, createLaunch, crossPost, comments, contentAccounts, contentSettings, createPosts, deleteAsset, deleteCampaign, deleteIdea, deletePost, favoriteIdea, generate,
+  accountsFor, addComment, analytics, campaignTimeline, companionBlog, createLaunch, crossPost, comments, contentAccounts, contentSettings, createPosts, deleteAsset, deleteCampaign, deleteIdea, deletePost, favoriteIdea, generate,
   getPost, importMetrics, keepIdea, suggestIdeas, linkOptions, listAssets, listCampaigns, listIdeas, listPosts, MEDIA_LIMITS, planning, readMedia, repurpose, reschedule, saveCampaign,
   saveContentAccounts, saveContentSettings, saveIdea, saveMedia, setMetrics, transition, updateAsset, updatePost,
 } from '../domain/content.js';
@@ -77,6 +77,7 @@ contentRouter.post('/posts/:id/crosspost', ah(async (req, res) => {
   const b = parse(z.object({ targets: z.array(z.object({ account, scheduledAt: when })).min(1).max(2) }), req.body);
   res.status(201).json({ posts: await crossPost(who(req), req.params.id, b.targets as any) });
 }));
+contentRouter.post('/posts/:id/blog', ah(async (req, res) => res.status(201).json({ post: await companionBlog(who(req), req.params.id) })));
 contentRouter.post('/posts/:id/repurpose', ah(async (req, res) => {
   const b = parse(z.object({ targets: z.array(z.object({ account, platform, type: format })).min(1).max(6) }), req.body);
   res.status(201).json({ posts: await repurpose(who(req), req.params.id, b.targets as any) });

@@ -157,7 +157,7 @@ describe('Content calendar', () => {
     const r = await api.post('/api/content/launches', { product: 'The Bond – Keratin Application Tool Pro', releaseOn: null, accounts: ['a2', 'a3'] });
     expect(r.status).toBe(201);
     const c = r.body.campaign;
-    expect(c).toMatchObject({ kind: 'launch', product: 'The Bond – Keratin Application Tool Pro', posts: 19, startsOn: null });
+    expect(c).toMatchObject({ kind: 'launch', product: 'The Bond – Keratin Application Tool Pro', posts: 21, startsOn: null });
     const all = async () => (await db().query<any>('SELECT id, account, title, scheduled_at, launch_offset, status FROM content_posts WHERE campaign_id = $1 ORDER BY launch_offset', [c.id]));
     let posts = await all();
     expect(posts.every((p: any) => p.scheduled_at === null)).toBe(true);
@@ -213,5 +213,18 @@ describe('Content calendar', () => {
     await api.post(`/api/content/posts/${follow.id}/reschedule`, { scheduledAt: new Date(Date.parse(launchDay.scheduledAt) + 3600_000).toISOString() });
     t = (await api.get(`/api/content/campaigns/${c.id}/timeline`)).body;
     expect(t.conflicts.some((x: any) => /emails/.test(x.reason))).toBe(true);
+  });
+
+  it('blog: ideas per account, an article to go with a social post (linked, same day), and blog ideas each week', async () => {
+    const ideas = (await api.get('/api/content/ideas')).body.ideas;
+    for (const a of ['a1', 'a2', 'a3']) expect(ideas.some((i: any) => i.platform === 'blog' && i.format === 'article' && i.accounts.includes(a))).toBe(true);
+    const src = (await api.post('/api/content/posts', base({ accounts: ['a1'], title: 'Balayage vs highlights', scheduledAt: new Date(Date.now() + 3 * 86400_000).toISOString(), caption: 'Which colour technique is right for you?' }))).body.posts[0];
+    const r = await api.post(`/api/content/posts/${src.id}/blog`);
+    expect(r.status).toBe(201);
+    expect(r.body.post).toMatchObject({ platform: 'blog', type: 'article', account: 'a1', status: 'draft', sourcePostId: src.id, scheduledAt: src.scheduledAt });
+    expect(r.body.post.caption.length).toBeGreaterThan(20);
+    const { suggestIdeas } = await import('../src/domain/content.js');
+    await suggestIdeas(['a2'], 4, new Date(Date.now() + 40 * 86400_000));
+    expect((await api.get('/api/content/ideas')).body.ideas.some((i: any) => i.suggested && i.platform === 'blog')).toBe(true);
   });
 });

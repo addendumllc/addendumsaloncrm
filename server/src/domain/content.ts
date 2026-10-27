@@ -10,7 +10,7 @@ import { InstagramApi, instagramAccounts, type IgSlot } from '../integrations/in
 import { badRequest, forbidden, notFound } from '../lib/errors.js';
 import { iso } from '../lib/time.js';
 import { getKV, getSettings, setKV } from '../repos/settings.js';
-import { BUILTIN_IDEAS, EMAIL_IDEAS } from './contentIdeas.js';
+import { BLOG_IDEAS, BUILTIN_IDEAS, EMAIL_IDEAS } from './contentIdeas.js';
 
 /**
  * Content calendar for the three social accounts (@addendum.salon, @addendumhair, @addendumhairpro): planning,
@@ -341,6 +341,22 @@ export async function crossPost(u: Who, id: string, targets: { account: ContentA
 }
 
 /**
+ * A blog article to go with a social post: a linked draft (same campaign, same day) that takes the post's topic in
+ * depth — written with AI when set up, else from the closest blog template. The post itself isn't changed.
+ */
+export async function companionBlog(u: Who, id: string) {
+  const src = await getPost(u, id);
+  const g = await generate({ account: src.account, platform: 'blog', format: 'article', pillar: src.pillar, tone: null, objective: null, campaign: src.campaignName, kind: 'blog',
+    brief: `Write the blog article that goes with this ${src.platform} post — the same topic, in depth.\nTitle: ${src.title}\nHook: ${src.headline ?? ''}\nCaption: ${src.caption}` });
+  const [p] = await createPosts(u, [src.account], {
+    platform: 'blog', type: 'article', title: g.ai ? g.title : `Blog: ${src.title}`.slice(0, 200), scheduledAt: src.scheduledAt, dueAt: src.dueAt, headline: g.headline, caption: g.caption, cta: g.cta,
+    hashtags: g.hashtags, pillar: src.pillar, autoPost: false, mediaIds: src.media.map((m) => m.id), externalLinks: [], link: src.link, campaignId: src.campaignId,
+    assignedStaffId: src.assignedStaffId, reviewerStaffId: src.reviewerStaffId, publisherStaffId: src.publisherStaffId, notes: [g.extra, `Goes with “${src.title}” (${src.platform}).`].filter(Boolean).join('\n\n'),
+  }, 'draft', src.id, {}, src.groupId);
+  return p;
+}
+
+/**
  * Repurpose: new drafts for other accounts or platforms from a post — the original isn't changed. Each new draft is
  * rewritten for its account's audience and CTA (with AI when available, else the account's CTA and the same copy).
  */
@@ -482,7 +498,7 @@ const REMOVED_IDEAS_KEY = 'content.ideas.removed';
 export async function seedContentIdeas() {
   const removed = new Set((await getKV<string[]>(REMOVED_IDEAS_KEY)) ?? []);
   const have = new Set((await db().query<{ key: string }>('SELECT key FROM content_ideas WHERE key IS NOT NULL')).map((r) => r.key));
-  for (const i of [...BUILTIN_IDEAS, ...EMAIL_IDEAS]) {
+  for (const i of [...BUILTIN_IDEAS, ...EMAIL_IDEAS, ...BLOG_IDEAS]) {
     if (have.has(i.key) || removed.has(i.key)) continue;
     await db().query(
       `INSERT INTO content_ideas(key, accounts, title, pillar, audience, platform, format, hook, visual, shot_list, caption, cta, hashtags, season, effort, builtin, also_story, subject, preview_text, send_timing)
@@ -545,8 +561,8 @@ export async function suggestIdeas(accounts: ContentAccountId[] = ACCOUNT_IDS, p
       try {
         const text = await ai.write(
           `You plan Instagram content for ${acc.name}. Voice: ${acc.voice} Primary CTA: ${acc.cta}. Pillars: ${acc.pillars.join('; ')}. Reply with ONLY a JSON array.`,
-          `Suggest ${perAccount} fresh post ideas for this week (season: ${season}). Mix formats (reel, carousel, story, feed); at least one Reel that also works as a Story (alsoStory: true). Don't repeat these existing titles: ${[...taken].slice(0, 80).join(' | ')}.
-Each: {"title","pillar" (one of the pillars),"format" (reel|carousel|story|feed),"hook","visual","shotList","caption","cta","hashtags","alsoStory"}.`, 2500);
+          `Suggest ${perAccount} fresh post ideas for this week (season: ${season}). Mix formats (reel, carousel, story, feed); at least one Reel that also works as a Story (alsoStory: true); and one blog article (format "article") that goes with the week's posts. Don't repeat these existing titles: ${[...taken].slice(0, 80).join(' | ')}.
+Each: {"title","pillar" (one of the pillars),"format" (reel|carousel|story|feed|article),"hook","visual","shotList","caption","cta","hashtags","alsoStory"}.`, 2500);
         ideas = JSON.parse(text.slice(text.indexOf('['), text.lastIndexOf(']') + 1));
       } catch (e) { console.warn('[content] idea suggestions:', (e as Error).message); }
     }
@@ -558,14 +574,17 @@ Each: {"title","pillar" (one of the pillars),"format" (reel|carousel|story|feed)
         const [angle, hook, format, story] = ANGLES[(week + k * 3 + id.charCodeAt(1)) % ANGLES.length];
         return { title: `${angle}: ${pillar}`, pillar, format, hook, visual: 'Vertical, natural light, captions on screen', shotList: '1. Hook (2s)\n2. The point, shown\n3. Proof or result\n4. Call to action', caption: `${hook} ${pillar} — our take.`, cta: acc.cta, hashtags: '', alsoStory: story };
       });
+      // …and a blog article on the week's first topic, to go with the posts.
+      const topic = ideas[0].pillar;
+      ideas.push({ title: `The guide: ${topic}`, pillar: topic, format: 'article', hook: `Everything you need to know about ${topic.toLowerCase()}`, visual: 'Images from this week’s posts', shotList: '1. Intro\n2. The basics\n3. Common questions\n4. Our advice\n5. Call to action', caption: `Our in-depth guide to ${topic.toLowerCase()}, to go with this week’s posts.`, cta: acc.cta, hashtags: '', alsoStory: false });
     }
-    for (const i of ideas.slice(0, perAccount)) {
+    for (const i of ideas.slice(0, perAccount + 1)) {
       if (!i?.title || taken.has(i.title.toLowerCase())) continue;
       taken.add(i.title.toLowerCase());
-      const format = ['reel', 'carousel', 'story', 'feed'].includes(i.format) ? i.format : 'reel';
+      const format = ['reel', 'carousel', 'story', 'feed', 'article'].includes(i.format) ? i.format : 'reel';
       await db().query(`INSERT INTO content_ideas(accounts, title, pillar, platform, format, hook, visual, shot_list, caption, cta, hashtags, season, effort, also_story, status, suggested_on)
-        VALUES ($1,$2,$3,'instagram',$4,$5,$6,$7,$8,$9,$10,$11,'medium',$12,'suggested',$13)`,
-        [[id], String(i.title).slice(0, 200), String(i.pillar || acc.pillars[0]).slice(0, 120), format, i.hook ?? null, i.visual ?? null, i.shotList ?? null, i.caption ?? null, i.cta ?? acc.cta, i.hashtags || null, season, format === 'reel' && i.alsoStory !== false, today]);
+        VALUES ($1,$2,$3,$14,$4,$5,$6,$7,$8,$9,$10,$11,'medium',$12,'suggested',$13)`,
+        [[id], String(i.title).slice(0, 200), String(i.pillar || acc.pillars[0]).slice(0, 120), format, i.hook ?? null, i.visual ?? null, i.shotList ?? null, i.caption ?? null, i.cta ?? acc.cta, i.hashtags || null, season, format === 'reel' && i.alsoStory !== false, today, format === 'article' ? 'blog' : 'instagram']);
       added++;
     }
   }
@@ -595,16 +614,17 @@ const KIND_ASK: Record<string, string> = {
   caption: 'an Instagram caption', reel: 'a Reels script with a shot list (in "extra")', story: 'an Instagram Story sequence, frame by frame (in "extra")',
   carousel: 'a carousel outline with copy for each slide (in "extra")', tiktok: 'a TikTok concept with hook, beats and on-screen text (in "extra")',
   pinterest: 'a Pinterest pin title and description', promo: 'a promotional post', product: 'a product spotlight',
+  blog: 'a blog article for the website: SEO title in "title", meta description (under 160 characters) in "headline", the article (intro, subheadings and short sections) in "caption", SEO keywords (comma-separated) in "hashtags", and suggested images in "extra"',
   email: 'an email campaign for Flodesk: 3 subject line options in "subjects", "previewText", the email body in "caption" (short sections with headings), the button text in "cta", and visual direction in "extra"',
 };
 /** A draft written for the account's voice, audience and CTA — with Claude when set up, else from the closest library idea. Always editable; never posted. */
 export async function generate(i: GenerateInput): Promise<Generated> {
   const acc = (await contentAccounts()).find((a) => a.id === i.account)!;
-  const kind = i.kind ?? (i.platform === 'email' ? 'email' : i.platform === 'tiktok' ? 'tiktok' : i.platform === 'pinterest' ? 'pinterest' : i.format === 'reel' ? 'reel' : i.format === 'story' ? 'story' : i.format === 'carousel' ? 'carousel' : 'caption');
+  const kind = i.kind ?? (i.platform === 'blog' ? 'blog' : i.platform === 'email' ? 'email' : i.platform === 'tiktok' ? 'tiktok' : i.platform === 'pinterest' ? 'pinterest' : i.format === 'reel' ? 'reel' : i.format === 'story' ? 'story' : i.format === 'carousel' ? 'carousel' : 'caption');
   const ai = aiService();
   if (ai.write) {
     const salon = (await getSettings()).business.name;
-    const system = `You write ${kind === 'email' ? 'email marketing (Flodesk)' : 'social media content'} for ${acc.name} (${acc.brand === 'salon' ? `${salon}, a luxury hair salon` : 'Addendum Hair, a professional hair extension brand'}). Voice: ${acc.voice}${acc.id === 'a1' ? ' Luxury editorial tone.' : acc.id === 'a2' ? ' Product-focused brand voice.' : ' Educational, professional tone for stylists.'} Primary call to action: ${acc.cta}. Content pillars: ${acc.pillars.join('; ')}. Never invent prices, discounts or claims that weren't given. Reply with ONLY a JSON object: {"title": short internal title, "headline": string|null, "caption": string, "cta": string, "hashtags": string (space-separated, 5-12, or "" for email), "extra": string|null${kind === 'email' ? ', "subjects": string[], "previewText": string' : ''}}.`;
+    const system = `You write ${kind === 'email' ? 'email marketing (Flodesk)' : kind === 'blog' ? 'blog articles (helpful, SEO-friendly, in the brand voice)' : 'social media content'} for ${acc.name} (${acc.brand === 'salon' ? `${salon}, a luxury hair salon` : 'Addendum Hair, a professional hair extension brand'}). Voice: ${acc.voice}${acc.id === 'a1' ? ' Luxury editorial tone.' : acc.id === 'a2' ? ' Product-focused brand voice.' : ' Educational, professional tone for stylists.'} Primary call to action: ${acc.cta}. Content pillars: ${acc.pillars.join('; ')}. Never invent prices, discounts or claims that weren't given. Reply with ONLY a JSON object: {"title": short internal title, "headline": string|null, "caption": string, "cta": string, "hashtags": string (space-separated, 5-12, or "" for email), "extra": string|null${kind === 'email' ? ', "subjects": string[], "previewText": string' : ''}}.`;
     const user = [`Write ${KIND_ASK[kind] ?? KIND_ASK.caption} for ${i.platform} (${i.format}).`, i.pillar && `Pillar: ${i.pillar}.`, i.objective && `Objective: ${i.objective}.`, i.tone && `Tone: ${i.tone}.`, i.campaign && `Campaign: ${i.campaign}.`, i.brief && `Brief:\n${i.brief}`].filter(Boolean).join('\n');
     try {
       const text = await ai.write(system, user, 1500);
@@ -614,6 +634,12 @@ export async function generate(i: GenerateInput): Promise<Generated> {
     } catch (e) { console.warn('[content] AI draft failed:', (e as Error).message); }
   }
   // Built-in: the closest library idea for this account (pillar and format), with the account's CTA.
+  if (kind === 'blog') {
+    const posts = BLOG_IDEAS.filter((x) => x.accounts.includes(i.account));
+    const words = (i.brief ?? '').toLowerCase().split(/\W+/).filter((w) => w.length > 3);
+    const e = posts.map((x) => ({ x, n: words.filter((w) => `${x.title} ${x.shots} ${x.hashtags}`.toLowerCase().includes(w)).length })).sort((a, b2) => b2.n - a.n)[0]?.x ?? posts.find((x) => x.pillar === i.pillar) ?? posts[0];
+    return { title: e.title, headline: e.caption, caption: [e.caption, '', e.shots].join('\n'), cta: e.cta, hashtags: e.hashtags, extra: e.visual, ai: false };
+  }
   if (kind === 'email') {
     const emails = EMAIL_IDEAS.filter((x) => x.accounts.includes(i.account));
     const e = emails.find((x) => x.pillar === i.pillar) ?? emails[0];

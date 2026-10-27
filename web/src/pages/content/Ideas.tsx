@@ -14,11 +14,12 @@ export function IdeasTab({ b, onUse }: { b: Basics; onUse: (p: Prefill) => void 
   const toast = useToast();
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ['content-ideas'], queryFn: () => api.get<{ ideas: ContentIdeaDTO[] }>('/content/ideas').then((r) => r.ideas) });
-  const [f, setF] = useState({ q: '', account: '', pillar: '', format: '', favorites: false, channel: 'all' as 'all' | 'social' | 'email' });
+  const [f, setF] = useState({ q: '', account: '', pillar: '', format: '', favorites: false, channel: 'all' as 'all' | 'social' | 'email' | 'blog' });
   const [editing, setEditing] = useState<ContentIdeaDTO | 'new' | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [suggesting, setSuggesting] = useState(false);
-  const fresh = (data ?? []).filter((i) => i.suggested && (f.channel === 'all' || (f.channel === 'email') === (i.platform === 'email')) && (!f.account || i.accounts.includes(f.account as ContentAccountId)));
+  const chOf = (pl: string) => (pl === 'email' ? 'email' : pl === 'blog' ? 'blog' : 'social');
+  const fresh = (data ?? []).filter((i) => i.suggested && (f.channel === 'all' || chOf(i.platform) === f.channel) && (!f.account || i.accounts.includes(f.account as ContentAccountId)));
   const suggestMore = async () => {
     setSuggesting(true);
     try {
@@ -30,7 +31,7 @@ export function IdeasTab({ b, onUse }: { b: Basics; onUse: (p: Prefill) => void 
   const keep = async (i: ContentIdeaDTO) => { qc.setQueryData(['content-ideas'], (await api.put<{ ideas: ContentIdeaDTO[] }>(`/content/ideas/${i.id}/keep`)).ideas); toast('Saved to the library'); };
   const dismiss = async (i: ContentIdeaDTO) => { qc.setQueryData(['content-ideas'], (await api.del<{ ideas: ContentIdeaDTO[] }>(`/content/ideas/${i.id}`)).ideas); };
   const words = f.q.toLowerCase().split(/\s+/).filter(Boolean);
-  const list = (data ?? []).filter((i) => !i.suggested && (f.channel === 'all' || (f.channel === 'email') === (i.platform === 'email')) && (!f.account || i.accounts.includes(f.account as ContentAccountId)) && (!f.pillar || i.pillar === f.pillar) && (!f.format || i.format === f.format) && (!f.favorites || i.favorite)
+  const list = (data ?? []).filter((i) => !i.suggested && (f.channel === 'all' || chOf(i.platform) === f.channel) && (!f.account || i.accounts.includes(f.account as ContentAccountId)) && (!f.pillar || i.pillar === f.pillar) && (!f.format || i.format === f.format) && (!f.favorites || i.favorite)
     && words.every((w) => `${i.title} ${i.pillar} ${i.hook ?? ''} ${i.caption ?? ''} ${i.season ?? ''} ${i.subject ?? ''}`.toLowerCase().includes(w)))
     .sort((a, x) => Number(x.favorite) - Number(a.favorite));
   const pillars = [...new Set((data ?? []).map((i) => i.pillar))].sort();
@@ -62,7 +63,7 @@ export function IdeasTab({ b, onUse }: { b: Basics; onUse: (p: Prefill) => void 
         <select className="field h-10 w-auto" value={f.account} onChange={(e) => setF({ ...f, account: e.target.value })} aria-label="Account"><option value="">All accounts</option>{b.mine.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
         <select className="field h-10 w-auto" value={f.pillar} onChange={(e) => setF({ ...f, pillar: e.target.value })} aria-label="Pillar"><option value="">All pillars</option>{pillars.map((p) => <option key={p}>{p}</option>)}</select>
         <select className="field h-10 w-auto" value={f.format} onChange={(e) => setF({ ...f, format: e.target.value })} aria-label="Format"><option value="">All formats</option>{CONTENT_FORMATS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</select>
-        <Segmented size="sm" value={f.channel} onChange={(v) => setF({ ...f, channel: v })} options={[{ value: 'all', label: 'All' }, { value: 'social', label: 'Social' }, { value: 'email', label: 'Email' }]} />
+        <Segmented size="sm" value={f.channel} onChange={(v) => setF({ ...f, channel: v })} options={[{ value: 'all', label: 'All' }, { value: 'social', label: 'Social' }, { value: 'email', label: 'Email' }, { value: 'blog', label: 'Blog' }]} />
         <label className="flex items-center gap-1.5 text-[13px] text-ink-soft"><input type="checkbox" className="h-4 w-4 accent-plum" checked={f.favorites} onChange={(e) => setF({ ...f, favorites: e.target.checked })} />Favourites</label>
         <span className="ml-auto flex gap-2">
           <Button icon={<Wand2 className="h-4 w-4" />} loading={suggesting} onClick={suggestMore}>Suggest more</Button>

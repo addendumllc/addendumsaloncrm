@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CopyPlus, ExternalLink, Film, ImagePlus, Library, Link2, Mail, Repeat, Sparkles, Trash2, X } from 'lucide-react';
+import { CopyPlus, ExternalLink, FileText, Film, ImagePlus, Library, Link2, Mail, Repeat, Sparkles, Trash2, X } from 'lucide-react';
 import {
   CONTENT_FORMATS, CONTENT_PLATFORMS, type ContentAccountId, type ContentEmail, type ContentCommentDTO, type ContentMediaDTO, type ContentMetrics, type ContentPlatform, type ContentPostDTO, type ContentPostType, type ContentStatus,
 } from '@addendum/shared';
@@ -36,6 +36,14 @@ export function PostEditor({ post, prefill, b, onClose }: { post: ContentPostDTO
     email: { ...NO_EMAIL, audience: (prefill?.accounts ?? []).flatMap((a) => b.settings?.emailAudiences?.[a] ?? []), ...(prefill?.email ?? {}) },
   });
   const isEmail = d.platform === 'email';
+  const isBlog = d.platform === 'blog';
+  const [blogging, setBlogging] = useState(false);
+  const addBlog = async () => {
+    if (!post) return;
+    setBlogging(true);
+    try { const r = await api.post<{ post: ContentPostDTO }>(`/content/posts/${post.id}/blog`); toast('Blog draft added — it goes with this post'); refresh(); onClose(); setTimeout(() => window.dispatchEvent(new CustomEvent('content:open', { detail: r.post })), 50); }
+    catch (e) { toast((e as Error).message, 'error'); } finally { setBlogging(false); }
+  };
   const setEmail = (p: Partial<ContentEmail>) => setD((x) => ({ ...x, email: { ...x.email, ...p } }));
   const { data: segs } = useQuery({ queryKey: ['flodesk-segments'], enabled: isEmail, staleTime: 300_000, queryFn: () => api.get<{ connected: boolean; segments: { id: string; name: string; subscribers: number | null }[]; error?: string }>('/content/email/segments') });
   const audienceOptions = [...new Map([...(segs?.segments ?? []), ...d.accounts.flatMap((a) => b.settings?.emailAudiences?.[a] ?? []), ...d.email.audience].map((x) => [x.id, { id: x.id, name: x.name }])).values()];
@@ -97,6 +105,7 @@ export function PostEditor({ post, prefill, b, onClose }: { post: ContentPostDTO
     <Modal open xl onClose={onClose} title={post ? d.title || 'Post' : 'New post'} footer={<>
       {post && <Button variant="ghost" icon={<Trash2 className="h-4 w-4" />} onClick={del}>Delete</Button>}
       {post && <Button variant="ghost" icon={<CopyPlus className="h-4 w-4" />} onClick={() => setCrossing(true)}>Cross-post…</Button>}
+      {post && !['blog', 'email'].includes(post.platform) && <Button variant="ghost" icon={<FileText className="h-4 w-4" />} loading={blogging} onClick={addBlog}>Add blog post</Button>}
       {post && <Button variant="ghost" icon={<Repeat className="h-4 w-4" />} className="mr-auto" onClick={() => setRepurposing(true)}>Repurpose…</Button>}
       {!post && <Button variant="ghost" className="mr-auto" loading={busy} onClick={() => save('idea')}>Save as idea</Button>}
       <Button variant="ghost" onClick={onClose}>{post ? 'Close' : 'Cancel'}</Button>
@@ -156,13 +165,13 @@ export function PostEditor({ post, prefill, b, onClose }: { post: ContentPostDTO
                 </Field>
                 <Field label="Objective"><input className="field" maxLength={300} value={d.email.objective ?? ''} onChange={(e) => setEmail({ objective: e.target.value })} placeholder="e.g. Fill December openings" /></Field>
               </div>
-            ) : <Field label="Headline / hook"><input className="field" maxLength={300} value={d.headline} onChange={(e) => set({ headline: e.target.value })} /></Field>}
-            <Field label={isEmail ? 'Email body (outline or copy)' : 'Caption'} hint={d.platform === 'instagram' ? `${igLength} / 2,200 with the CTA and hashtags` : undefined}><textarea className={cx('field min-h-[140px]', d.platform === 'instagram' && igLength > 2200 && 'border-rose')} value={d.caption} onChange={(e) => set({ caption: e.target.value })} /></Field>
+            ) : <Field label={isBlog ? 'Meta description' : 'Headline / hook'} hint={isBlog ? `${d.headline.length} / 160 — shown in search results` : undefined}><input className="field" maxLength={300} value={d.headline} onChange={(e) => set({ headline: e.target.value })} /></Field>}
+            <Field label={isEmail ? 'Email body (outline or copy)' : isBlog ? 'Article (outline or draft)' : 'Caption'} hint={d.platform === 'instagram' ? `${igLength} / 2,200 with the CTA and hashtags` : undefined}><textarea className={cx('field min-h-[140px]', d.platform === 'instagram' && igLength > 2200 && 'border-rose')} value={d.caption} onChange={(e) => set({ caption: e.target.value })} /></Field>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label={isEmail ? 'Button (CTA)' : 'Call to action'}><input className="field" maxLength={300} value={d.cta} onChange={(e) => set({ cta: e.target.value })} placeholder={acc?.cta} /></Field>
               {isEmail
                 ? <Field label="Destination URL"><input className="field" value={d.email.destinationUrl ?? ''} onChange={(e) => setEmail({ destinationUrl: e.target.value })} placeholder="https://" /></Field>
-                : <Field label="Hashtags"><input className="field" maxLength={1000} value={d.hashtags} onChange={(e) => set({ hashtags: e.target.value })} placeholder="#addendumsalon …" /></Field>}
+                : <Field label={isBlog ? 'SEO keywords' : 'Hashtags'}><input className="field" maxLength={1000} value={d.hashtags} onChange={(e) => set({ hashtags: e.target.value })} placeholder={isBlog ? 'balayage san diego, hair colour salon' : '#addendumsalon …'} /></Field>}
             </div>
             {isEmail && (
               <div className="grid gap-3 sm:grid-cols-2">

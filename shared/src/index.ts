@@ -2466,14 +2466,14 @@ export type ContentAccountId = 'a1' | 'a2' | 'a3';
 export interface ContentAccount { id: ContentAccountId; name: string; handle: string; color: string; brand: 'salon' | 'hair'; cta: string; voice: string; pillars: string[]; connected: boolean;
   /** A private account (e.g. @addendumhairpro, stylists only): Instagram doesn't let apps post to it — posted by hand, with a reminder. */
   privateAccount: boolean }
-export type ContentPlatform = 'instagram' | 'facebook' | 'tiktok' | 'pinterest' | 'email';
+export type ContentPlatform = 'instagram' | 'facebook' | 'tiktok' | 'pinterest' | 'email' | 'blog';
 export const CONTENT_PLATFORMS: { value: ContentPlatform; label: string }[] = [
-  { value: 'instagram', label: 'Instagram' }, { value: 'facebook', label: 'Facebook' }, { value: 'tiktok', label: 'TikTok' }, { value: 'pinterest', label: 'Pinterest' }, { value: 'email', label: 'Email' },
+  { value: 'instagram', label: 'Instagram' }, { value: 'facebook', label: 'Facebook' }, { value: 'tiktok', label: 'TikTok' }, { value: 'pinterest', label: 'Pinterest' }, { value: 'email', label: 'Email' }, { value: 'blog', label: 'Blog' },
 ];
-export type ContentPostType = 'feed' | 'carousel' | 'reel' | 'story' | 'video' | 'pin' | 'email' | 'promo';
+export type ContentPostType = 'feed' | 'carousel' | 'reel' | 'story' | 'video' | 'pin' | 'email' | 'promo' | 'article';
 export const CONTENT_FORMATS: { value: ContentPostType; label: string }[] = [
   { value: 'feed', label: 'Post' }, { value: 'carousel', label: 'Carousel' }, { value: 'reel', label: 'Reel' }, { value: 'story', label: 'Story' },
-  { value: 'video', label: 'Video (TikTok)' }, { value: 'pin', label: 'Pin' }, { value: 'email', label: 'Email' }, { value: 'promo', label: 'Promotion' },
+  { value: 'video', label: 'Video (TikTok)' }, { value: 'pin', label: 'Pin' }, { value: 'email', label: 'Email' }, { value: 'promo', label: 'Promotion' }, { value: 'article', label: 'Blog article' },
 ];
 export type ContentStatus = 'idea' | 'draft' | 'in_review' | 'changes_requested' | 'approved' | 'scheduled' | 'publishing' | 'published' | 'failed';
 export const CONTENT_STATUSES: { value: ContentStatus; label: string }[] = [
