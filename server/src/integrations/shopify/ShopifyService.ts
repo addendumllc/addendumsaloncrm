@@ -44,6 +44,13 @@ export interface ShopifyPriceEntry { variantId: string; productId: string; inven
 export interface ShopifyOrderWho { name: string | null; customer: string | null }
 /** A product's variants with their options (e.g. "Length - Density" = "18 inch - 120g"). */
 export interface ShopifyProductVariants { productId: string; variants: { sku: string | null; options: { name: string; value: string }[] }[] }
+/** A customer, as copied between stores (no passwords — new customer accounts sign in with an email code). */
+export interface ShopifyCustomer {
+  id: string; email: string | null; phone: string | null; firstName: string | null; lastName: string | null; tags: string[]; note: string | null;
+  emailConsent: { marketingState: string; marketingOptInLevel: string | null; consentUpdatedAt: string | null } | null;
+  smsConsent: { marketingState: string; marketingOptInLevel: string | null; consentUpdatedAt: string | null } | null;
+  address: { firstName?: string | null; lastName?: string | null; company?: string | null; address1?: string | null; address2?: string | null; city?: string | null; provinceCode?: string | null; countryCode?: string | null; zip?: string | null; phone?: string | null } | null;
+}
 /** A variant to add to an existing product: its option values, SKU and price; stock is tracked and starts at 0. */
 export interface ShopifyNewVariant { options: { name: string; value: string }[]; sku: string; priceCents: number }
 
@@ -101,6 +108,14 @@ export interface ShopifyService {
   productVariants(productIds: string[]): Promise<ShopifyProductVariants[]>;
   /** Adds variants to one product, stocked at the location with 0 (needs write_products). */
   addVariants(productId: string, variants: ShopifyNewVariant[], locationId: string): Promise<{ sku: string; inventoryItemId: string }[]>;
+  /** Every customer (email, phone, name, tags, marketing consent, default address) — needs read_customers. */
+  listCustomers(): Promise<ShopifyCustomer[]>;
+  /** A customer by email (or phone when there's no email) — needs read_customers. */
+  findCustomer(email: string | null, phone: string | null): Promise<{ id: string; tags: string[] } | null>;
+  /** Creates a customer (consent copied as it was) — needs write_customers. Returns its id. */
+  createCustomer(c: ShopifyCustomer): Promise<string>;
+  /** Adds tags to a customer (existing tags kept) — needs write_customers. */
+  addCustomerTags(id: string, tags: string[]): Promise<void>;
   /** Puts one value of an option first (e.g. "Sample Swatch" above "18 inch - 120g"), so it shows first (write_products). */
   moveOptionValueFirst(productId: string, optionName: string, value: string): Promise<void>;
 }
@@ -142,6 +157,15 @@ function demoPriceList(catalog: ShopifyVariantBySku[], prefix: string) {
 
 /** Simulated store for Demo Mode and tests. Like Shopify, a repeated idempotency key is applied only once. */
 export class MockShopifyService implements ShopifyService {
+  /** Demo customers (tests fill these). */
+  static customers: ShopifyCustomer[] = [];
+  async listCustomers() { return MockShopifyService.customers.map((c) => ({ ...c, tags: [...c.tags] })); }
+  async findCustomer(email: string | null, phone: string | null) {
+    const c = MockShopifyService.customers.find((x) => (email && x.email?.toLowerCase() === email.toLowerCase()) || (!email && phone && x.phone === phone));
+    return c ? { id: c.id, tags: [...c.tags] } : null;
+  }
+  async createCustomer(c: ShopifyCustomer) { const id = `gid://shopify/Customer/1${MockShopifyService.customers.length + 1}`; MockShopifyService.customers.push({ ...c, id, tags: [...c.tags] }); return id; }
+  async addCustomerTags(id: string, tags: string[]) { const c = MockShopifyService.customers.find((x) => x.id === id); if (c) c.tags = [...new Set([...c.tags, ...tags])]; }
   readonly mode = 'demo' as const;
   static catalog: ShopifyVariantBySku[] = [
     { sku: 'HTW-20-60', inventoryItemId: 'gid://shopify/InventoryItem/1', label: 'Signature Hand-Tied Weft – 20" / #60 Platinum', tracked: true },
@@ -262,6 +286,15 @@ MockShopifyService.reset();
  * pro store with stylist and retail prices for the same product.
  */
 export class MockShopifyStore2 implements ShopifyService {
+  /** Demo customers (tests fill these). */
+  static customers: ShopifyCustomer[] = [];
+  async listCustomers() { return MockShopifyStore2.customers.map((c) => ({ ...c, tags: [...c.tags] })); }
+  async findCustomer(email: string | null, phone: string | null) {
+    const c = MockShopifyStore2.customers.find((x) => (email && x.email?.toLowerCase() === email.toLowerCase()) || (!email && phone && x.phone === phone));
+    return c ? { id: c.id, tags: [...c.tags] } : null;
+  }
+  async createCustomer(c: ShopifyCustomer) { const id = `gid://shopify/Customer/2${MockShopifyStore2.customers.length + 1}`; MockShopifyStore2.customers.push({ ...c, id, tags: [...c.tags] }); return id; }
+  async addCustomerTags(id: string, tags: string[]) { const c = MockShopifyStore2.customers.find((x) => x.id === id); if (c) c.tags = [...new Set([...c.tags, ...tags])]; }
   readonly mode = 'demo' as const;
   static catalog: ShopifyVariantBySku[] = [
     { sku: 'HTW-20-60', inventoryItemId: 'gid://shopify/InventoryItem/201', label: 'Signature Hand-Tied Weft – 20" / #60 (stylist price)', tracked: true },

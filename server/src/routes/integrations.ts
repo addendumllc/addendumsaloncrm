@@ -58,6 +58,22 @@ integrationsRouter.get('/square/callback', requirePermission('integrations:manag
   }
 }));
 
+// ---------------- Copy the Pro store's customers to Addendum Hair (one-time, administrators) ----------------
+integrationsRouter.get('/customer-copy/preview', requirePermission('integrations:manage'), ah(async (_req, res) => {
+  const { previewCustomerCopy } = await import('../domain/customerCopy.js');
+  res.json(await previewCustomerCopy());
+}));
+integrationsRouter.get('/customer-copy/status', requirePermission('integrations:manage'), ah(async (_req, res) => {
+  const { customerCopyStatus } = await import('../domain/customerCopy.js');
+  res.json({ job: await customerCopyStatus() });
+}));
+integrationsRouter.post('/customer-copy/start', requireOwnerReauth('integrations:manage'), ah(async (req, res) => {
+  const { startCustomerCopy } = await import('../domain/customerCopy.js');
+  const job = await startCustomerCopy();
+  await logAction(req, 'shopify.customer_copy', undefined, undefined, { total: job.total });
+  res.status(202).json({ job });
+}));
+
 // ---------------- Instagram (Content Calendar) ----------------
 // Connect Instagram: one Facebook sign-in finds the accounts; each is matched to @addendum.salon, @addendumhair or
 // @addendumhairpro by its username and saved (encrypted) for posting. Owners re-enter their password first.

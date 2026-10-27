@@ -1,9 +1,11 @@
 import { config } from '../../config.js';
 import { IntegrationError } from '../../lib/errors.js';
-import { ShopifyStaleQuantityError, type ShopifyInventoryEntry, type ShopifyOrderLine, type ShopifyOrderWho, type ShopifyPriceEntry, type ShopifyNewVariant, type ShopifyProductVariants, type ShopifySetQuantity, type ShopifyService, type ShopifyVariantBySku } from './ShopifyService.js';
+import { ShopifyStaleQuantityError, type ShopifyCustomer, type ShopifyInventoryEntry, type ShopifyOrderLine, type ShopifyOrderWho, type ShopifyPriceEntry, type ShopifyNewVariant, type ShopifyProductVariants, type ShopifySetQuantity, type ShopifyService, type ShopifyVariantBySku } from './ShopifyService.js';
 
 /** Access scopes the Shopify app needs. */
 export const SHOPIFY_SCOPES = ['read_products', 'read_inventory', 'write_inventory', 'read_locations', 'read_orders'];
+/** Only for copying the Pro store's customers to Addendum Hair: read_customers (Pro) and write_customers (Addendum Hair). */
+export const SHOPIFY_CUSTOMER_SCOPES = ['read_customers', 'write_customers'];
 
 /**
  * Thrown when Shopify may or may not have applied a change (timeout, 5xx). Retrying with the same
@@ -278,6 +280,55 @@ export class ShopifyApiService implements ShopifyService {
       for (const p of d.nodes ?? []) if (p?.id) out.push({ productId: p.id, variants: p.variants.nodes.map((v: any) => ({ sku: v.sku || null, options: v.selectedOptions ?? [] })) });
     }
     return out;
+  }
+
+  // ---- Customers (copying the professional store's customers to the retail store)
+  async listCustomers(): Promise<ShopifyCustomer[]> {
+    const out: ShopifyCustomer[] = [];
+    let after: string | null = null;
+    do {
+      const d: any = await this.gql<any>(`query($after: String) { customers(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes {
+        id email phone firstName lastName tags note
+        emailMarketingConsent { marketingState marketingOptInLevel consentUpdatedAt }
+        smsMarketingConsent { marketingState marketingOptInLevel consentUpdatedAt }
+        defaultAddress { firstName lastName company address1 address2 city provinceCode countryCodeV2 zip phone } } } }`, { after });
+      for (const c of d.customers?.nodes ?? []) out.push({
+        id: c.id, email: c.email ?? null, phone: c.phone ?? null, firstName: c.firstName ?? null, lastName: c.lastName ?? null, tags: c.tags ?? [], note: c.note ?? null,
+        emailConsent: c.emailMarketingConsent ?? null, smsConsent: c.smsMarketingConsent ?? null,
+        address: c.defaultAddress ? { ...c.defaultAddress, countryCode: c.defaultAddress.countryCodeV2 } : null,
+      });
+      after = d.customers?.pageInfo?.hasNextPage ? d.customers.pageInfo.endCursor : null;
+    } while (after);
+    return out;
+  }
+  async findCustomer(email: string | null, phone: string | null) {
+    const q = email ? `email:"${email.replace(/"/g, '')}"` : phone ? `phone:"${phone.replace(/"/g, '')}"` : null;
+    if (!q) return null;
+    const d = await this.gql<any>(`query($q: String!) { customers(first: 5, query: $q) { nodes { id email phone tags } } }`, { q });
+    const hit = (d.customers?.nodes ?? []).find((c: any) => (email ? c.email?.toLowerCase() === email.toLowerCase() : c.phone === phone));
+    return hit ? { id: hit.id as string, tags: (hit.tags ?? []) as string[] } : null;
+  }
+  async createCustomer(c: ShopifyCustomer) {
+    const consent = (x: ShopifyCustomer['emailConsent']) => (x && x.marketingState !== 'NOT_SUBSCRIBED' ? { marketingState: x.marketingState, marketingOptInLevel: x.marketingOptInLevel ?? 'SINGLE_OPT_IN', consentUpdatedAt: x.consentUpdatedAt ?? undefined } : undefined);
+    const a = c.address;
+    const input: Record<string, unknown> = {
+      email: c.email ?? undefined, phone: c.phone ?? undefined, firstName: c.firstName ?? undefined, lastName: c.lastName ?? undefined, tags: c.tags, note: c.note ?? undefined,
+      emailMarketingConsent: c.email ? consent(c.emailConsent) : undefined, smsMarketingConsent: c.phone ? consent(c.smsConsent) : undefined,
+      addresses: a ? [{ firstName: a.firstName, lastName: a.lastName, company: a.company, address1: a.address1, address2: a.address2, city: a.city, provinceCode: a.provinceCode, countryCode: a.countryCode, zip: a.zip, phone: a.phone }] : undefined,
+    };
+    const run = async (inp: Record<string, unknown>) => this.gql<any>(`mutation($input: CustomerInput!) { customerCreate(input: $input) { customer { id } userErrors { field message } } }`, { input: inp });
+    let d = await run(input);
+    // A phone already used by another customer (or one Shopify won't take): create without it rather than not at all.
+    if ((d.customerCreate?.userErrors ?? []).some((e: any) => /phone/i.test(String(e.field)))) d = await run({ ...input, phone: undefined, smsMarketingConsent: undefined });
+    const errs = d.customerCreate?.userErrors ?? [];
+    if (errs.length) throw new IntegrationError('shopify', `Shopify didn't add the customer: ${errs.map((e: any) => e.message).join('; ')}`, false, false, JSON.stringify(errs));
+    return d.customerCreate.customer.id as string;
+  }
+  async addCustomerTags(id: string, tags: string[]) {
+    if (!tags.length) return;
+    const d = await this.gql<any>(`mutation($id: ID!, $tags: [String!]!) { tagsAdd(id: $id, tags: $tags) { userErrors { message } } }`, { id, tags });
+    const errs = d.tagsAdd?.userErrors ?? [];
+    if (errs.length) throw new IntegrationError('shopify', `Shopify didn't add the tags: ${errs.map((e: any) => e.message).join('; ')}`, false, false, JSON.stringify(errs));
   }
 
   async moveOptionValueFirst(productId: string, optionName: string, value: string) {

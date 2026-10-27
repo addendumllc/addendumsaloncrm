@@ -6,6 +6,7 @@ import { useReauth } from '../../components/domain/Reauth';
 import { relative } from '../../lib/format';
 import { Badge, Button, Modal, Spinner, cx, useToast } from '../../components/ui';
 import { Card } from './shared';
+import { CustomerCopyCard } from './CustomerCopy';
 
 interface CredField {
   key: string; label: string; secret: boolean; group: string | null; required: boolean; placeholder: string | null; help: string | null;
@@ -62,6 +63,7 @@ export function CredentialsSettings() {
         </div>
       </details>
       {data.integrations.map((i) => <IntegrationCard key={i.provider} integration={i} />)}
+      <CustomerCopyCard />
       <ChangeHistory integrations={data.integrations} />
     </div>
   );
