@@ -5,7 +5,7 @@ import type { PurchaseOrderDTO, StockForecastDTO, StockForecastResponse, StockPr
 import { api } from '../../api/client';
 import { dateShort, labelOfKey } from '../../lib/format';
 import { useStoreNames } from '../../lib/storeNames';
-import { collectionFilter, useInternalCollections } from './Collections';
+import { collectionFilter, useInternalCollections, collectionLabel } from './Collections';
 import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, cx, useToast } from '../ui';
 
 type Store = 'all' | 'salon' | 'hair';
@@ -135,7 +135,7 @@ export function InventoryOverview({ store, onOpenTab }: { store: Store; onOpenTa
         {picked.size > 0 && <>
           <select className="field h-9 w-auto py-1 text-[13px]" value={target} onChange={(e) => setTarget(e.target.value)} aria-label="Inventory collection">
             <option value="">Put in collection…</option>
-            {(internal?.collections ?? []).map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+            {(internal?.collections ?? []).map((c) => <option key={c.name} value={c.name}>{collectionLabel(c.name)}</option>)}
             <option value="__new">New collection…</option>
             <option value="__none">No collection (take out)</option>
           </select>

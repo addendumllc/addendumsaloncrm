@@ -220,19 +220,33 @@ export async function internalCollections() {
   const names = (await getKV<string[]>(COLLECTIONS_KEY)) ?? [];
   const counts = new Map((await db().query<{ c: string; n: number }>(`SELECT collection AS c, count(*)::int AS n FROM stock_products WHERE collection IS NOT NULL GROUP BY 1`)).map((r) => [r.c, r.n]));
   // Collections set on products before the list existed are kept in it.
-  const all = [...names, ...[...counts.keys()].filter((c) => !names.includes(c)).sort((a, b) => a.localeCompare(b))];
+  const listed = [...names, ...[...counts.keys()].filter((c) => !names.includes(c)).sort((a, b) => a.localeCompare(b))];
+  // Sub-collections ("Milbon / Shampoo") sit right under their collection, in the saved order; a parent that's only
+  // implied by a sub-collection is listed too.
+  const parents = [...new Set(listed.map((n) => parentOf(n) ?? n))];
+  const all = parents.flatMap((p) => [p, ...listed.filter((n) => parentOf(n) === p)]);
   const tracked = (await live().catch(() => null))?.rows.filter((r) => r.status !== 'not_tracked') ?? [];
-  return { collections: all.map((name) => ({ name, products: counts.get(name) ?? 0 })), withoutCollection: tracked.filter((r) => !r.collection).length };
+  return {
+    collections: all.map((name) => ({ name, products: counts.get(name) ?? 0, total: [...counts].filter(([c]) => c === name || parentOf(c) === name).reduce((a, [, n]) => a + n, 0) })),
+    withoutCollection: tracked.filter((r) => !r.collection).length,
+  };
 }
+/** "Milbon / Shampoo" → "Milbon" (a sub-collection's collection); null for a top-level one. */
+export const SUB_SEP = ' / ';
+export const parentOf = (name: string) => (name.includes(SUB_SEP) ? name.slice(0, name.indexOf(SUB_SEP)) : null);
 export async function saveCollectionList(names: string[]) {
   await setKV(COLLECTIONS_KEY, [...new Set(names.map((n) => n.trim()).filter(Boolean))]);
 }
 /** Renames a collection on every product in it (null = removes it from them). */
 export async function renameCollection(from: string, to: string | null, staffId: string | null) {
   const target = to?.trim() || null;
-  await db().query('UPDATE stock_products SET collection = $2, updated_by_staff_id = $3, updated_at = now() WHERE collection = $1', [from, target, staffId]);
+  // Its sub-collections go with it: renamed under the new name, or removed with it.
+  const prefix = `${from}${SUB_SEP}`;
+  const moved = (n: string) => (n === from ? target : n.startsWith(prefix) ? (target ? `${target}${SUB_SEP}${n.slice(prefix.length)}` : null) : n);
+  const current = (await db().query<{ c: string }>('SELECT DISTINCT collection AS c FROM stock_products WHERE collection = $1 OR starts_with(collection, $2)', [from, prefix])).map((r) => r.c);
+  for (const c of current) await db().query('UPDATE stock_products SET collection = $2, updated_by_staff_id = $3, updated_at = now() WHERE collection = $1', [c, moved(c), staffId]);
   const list = (await getKV<string[]>(COLLECTIONS_KEY)) ?? [];
-  await saveCollectionList(target ? list.map((n) => (n === from ? target : n)) : list.filter((n) => n !== from));
+  await saveCollectionList(list.map(moved).filter((n): n is string => !!n));
   forgetStockCache();
 }
 /**

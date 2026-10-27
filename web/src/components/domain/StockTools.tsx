@@ -8,7 +8,7 @@ import { AlertTriangle, ArrowLeftRight, Settings2, ChevronDown, ChevronRight, Do
 import { api } from '../../api/client';
 import { useCanDo } from '../../api/hooks';
 import { downloadCsv, parseCsv } from '../../lib/csv';
-import { collectionFilter, useInternalCollections } from './Collections';
+import { collectionFilter, useInternalCollections, collectionLabel } from './Collections';
 import { LeadTimesView } from './LeadTimes';
 import { dateShort, dateTime, dayKey, labelOfKey, relative } from '../../lib/format';
 import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, Segmented, Toggle, cx, useToast } from '../ui';
@@ -1229,7 +1229,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
           <select className="field ml-auto h-9 w-auto py-1 text-sm" value="" disabled={busy} aria-label="Move selected to a collection"
             onChange={(e) => { const v = e.target.value; if (!v) return; const name = v === '__new' ? window.prompt('New collection name (e.g. Milbon)')?.trim() : v === '__none' ? null : v; if (name !== undefined && name !== '') void moveTo(name); }}>
             <option value="">Move to collection…</option>
-            {(internal?.collections ?? []).map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+            {(internal?.collections ?? []).map((c) => <option key={c.name} value={c.name}>{collectionLabel(c.name)}</option>)}
             <option value="__new">+ New collection…</option>
             <option value="__none">No collection</option>
           </select>
@@ -1732,7 +1732,7 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
             </div>
             <div className="mb-2 flex flex-wrap items-center gap-2 text-[13px]">
               <select className="field h-9 w-auto py-1 text-[13px]" value={coll} onChange={(e) => setColl(e.target.value)} aria-label="Collection">
-                <option value="">All collections</option>{collections.map((c) => <option key={c}>{c}</option>)}
+                <option value="">All collections</option>{collections.map((c) => <option key={c} value={c}>{collectionLabel(c)}</option>)}
               </select>
               <label className="flex items-center gap-1.5 text-stone"><input type="checkbox" className="h-4 w-4 accent-plum" checked={showSkipped} onChange={(e) => setShowSkipped(e.target.checked)} /> Show skipped</label>
             </div>

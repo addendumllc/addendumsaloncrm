@@ -1,3 +1,4 @@
+import { collectionLabel, inCollection as inOwnCollection } from './Collections';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
@@ -34,7 +35,7 @@ export function ForecastWidget({ scope }: { scope: 'all' | 'salon' | 'online' })
   // The salon's own inventory collections when products have them (plus "No collection"), else the stores'.
   const own = useMemo(() => [...new Set(inShop.map((i) => i.collection).filter((c): c is string => !!c))].sort((a, b) => a.localeCompare(b)), [inShop]);
   const collections = useMemo(() => (own.length ? [...own, 'No collection'] : [...new Set(inShop.flatMap((i) => i.collections))].sort((a, b) => a.localeCompare(b))), [inShop, own]);
-  const inCollection = (i: Item, c: string) => (own.length ? (c === 'No collection' ? !i.collection : i.collection === c) : i.collections.includes(c));
+  const inCollection = (i: Item, c: string) => (own.length ? (c === 'No collection' ? !i.collection : inOwnCollection(i.collection, c)) : i.collections.includes(c));
   if (isLoading) return <PageLoading />;
   if (error || !data) return <ErrorNote error={error} onRetry={refetch} />;
   // A product in several collections counts once, under its most specific one (the one with the fewest products).
@@ -60,7 +61,7 @@ export function ForecastWidget({ scope }: { scope: 'all' | 'salon' | 'online' })
           <option value="product">View by product</option><option value="collection">View by collection</option><option value="supplier">View by supplier</option>
         </select>
         <select className="field h-9 w-auto max-w-full py-1 text-sm" value={coll} onChange={(e) => setColl(e.target.value)} aria-label="Collection">
-          <option value="">All collections</option>{collections.map((c) => <option key={c}>{c}</option>)}
+          <option value="">All collections</option>{collections.map((c) => <option key={c} value={c}>{collectionLabel(c)}</option>)}
         </select>
         <Link to="/inventory-sync?view=reorder" className="ml-auto text-[13px] text-plum hover:underline">Open To order</Link>
       </div>

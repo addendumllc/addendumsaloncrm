@@ -414,6 +414,25 @@ describe('Suppliers', () => {
     expect(list.collections.map((c: any) => c.name)).toEqual(['Care']);
   });
 
+  it('sub-collections sit under their collection; renaming or removing the collection takes them along', async () => {
+    const all = (await api.get('/api/inventory-sync/stock/products')).body.products.filter((p: any) => p.sku);
+    await api.put('/api/inventory-sync/stock/collections', { names: ['Zeta', 'Brand', 'Brand / Shampoo'] });
+    await api.post('/api/inventory-sync/stock/collections/assign', { collection: 'Brand / Shampoo', keys: [all[0].key] });
+    let list = (await api.get('/api/inventory-sync/stock/collections')).body.collections;
+    const names = list.map((c: any) => c.name);
+    expect(names.indexOf('Brand / Shampoo')).toBe(names.indexOf('Brand') + 1);
+    const brand = list.find((c: any) => c.name === 'Brand');
+    expect(brand.products).toBe(0);
+    expect(brand.total).toBeGreaterThan(0); // its sub-collection's products
+    list = (await api.post('/api/inventory-sync/stock/collections/rename', { from: 'Brand', to: 'Milbon' })).body.collections;
+    expect(list.map((c: any) => c.name)).toEqual(expect.arrayContaining(['Milbon', 'Milbon / Shampoo']));
+    expect((await api.get('/api/inventory-sync/stock/products')).body.products.find((p: any) => p.key === all[0].key).collection).toBe('Milbon / Shampoo');
+    list = (await api.post('/api/inventory-sync/stock/collections/rename', { from: 'Milbon', to: null })).body.collections;
+    expect(list.some((c: any) => c.name.startsWith('Milbon'))).toBe(false);
+    expect((await api.get('/api/inventory-sync/stock/products')).body.products.find((p: any) => p.key === all[0].key).collection).toBeNull();
+    await api.post('/api/inventory-sync/stock/collections/rename', { from: 'Zeta', to: null });
+  });
+
   it('moving one product to a collection (To order) moves its other listings of the same SKU too', async () => {
     const all = (await api.get('/api/inventory-sync/stock/products')).body.products;
     const sku = all.map((p: any) => p.sku).find((x: string | null) => x && all.filter((p: any) => p.sku === x).length > 1);
