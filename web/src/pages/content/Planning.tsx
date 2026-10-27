@@ -1,16 +1,16 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarPlus, Plus, Rocket, Trash2 } from 'lucide-react';
-import type { ContentAccountId, ContentCampaignDTO, ContentIdeaDTO } from '@addendum/shared';
+import { AlertTriangle, CalendarPlus, GanttChart, Mail, Plus, Rocket, Trash2 } from 'lucide-react';
+import type { ContentAccountId, ContentCampaignDTO, ContentIdeaDTO, ContentPostDTO } from '@addendum/shared';
 import { api } from '../../api/client';
 import { Badge, Button, Field, Modal, PageLoading, useToast } from '../../components/ui';
-import { AccountTag, formatLabel, platformLabel, type Basics } from './common';
+import { AccountTag, STATUS_TONE, formatLabel, platformLabel, postStatusLabel, type Basics } from './common';
 import type { Prefill } from './PostEditor';
 
 type Plan = { weeks: { weekOf: string; accounts: { account: ContentAccountId; empty: boolean; platforms: { platform: string; goal: number; planned: number; published: number }[] }[] }[]; seasonalIdeas: ContentIdeaDTO[]; campaignsWithoutPosts: ContentCampaignDTO[] };
 
 /** Planning: this week and the next four against the weekly goals, empty weeks flagged, seasonal ideas and campaigns. */
-export function PlanningTab({ b, onUse, embedded }: { b: Basics; onUse: (p: Prefill) => void; embedded?: boolean }) {
+export function PlanningTab({ b, onUse, embedded, onOpen }: { b: Basics; onUse: (p: Prefill) => void; embedded?: boolean; onOpen?: (p: ContentPostDTO) => void }) {
   const { data, isLoading } = useQuery({ queryKey: ['content-planning'], queryFn: () => api.get<Plan>('/content/planning') });
   const { data: ideas } = useQuery({ queryKey: ['content-ideas'], queryFn: () => api.get<{ ideas: ContentIdeaDTO[] }>('/content/ideas').then((r) => r.ideas) });
   // What could be posted: per account, this week's new ideas first, then favourites, seasonal ones and the rest —
@@ -22,6 +22,7 @@ export function PlanningTab({ b, onUse, embedded }: { b: Basics; onUse: (p: Pref
     notes: [i.visual && `Visual: ${i.visual}`, i.shotList && `Shot list:\n${i.shotList}`].filter(Boolean).join('\n\n') });
   const [campaign, setCampaign] = useState<ContentCampaignDTO | 'new' | null>(null);
   const [launching, setLaunching] = useState(false);
+  const [timeline, setTimeline] = useState<ContentCampaignDTO | null>(null);
   if (isLoading || !data) return <PageLoading />;
   return (
     <div className="space-y-6">
@@ -76,16 +77,17 @@ export function PlanningTab({ b, onUse, embedded }: { b: Basics; onUse: (p: Pref
           <Button size="sm" variant="ghost" icon={<Plus className="h-4 w-4" />} onClick={() => setCampaign('new')}>New campaign</Button></div>
         {!b.campaigns.length ? <p className="text-[13px] text-stone">Group posts into campaigns (a launch, a promotion, a season) to plan and measure them together.</p> : (
           <ul className="panel divide-y divide-line">{b.campaigns.map((c) => (
-            <li key={c.id}><button type="button" className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-left text-[13px] hover:bg-mist/40" onClick={() => setCampaign(c)}>
+            <li key={c.id} className="flex items-center"><button type="button" className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-left text-[13px] hover:bg-mist/40" onClick={() => setCampaign(c)}>
               {c.kind === 'launch' && <Badge tone="plum">Launch</Badge>}<span className="min-w-0 flex-1 font-medium text-ink">{c.name}</span>{c.accounts.map((a) => <AccountTag key={a} a={b.accountOf(a)} small />)}
               <span className="text-stone">{c.kind === 'launch' ? (c.startsOn ? `Release ${new Date(`${c.startsOn}T12:00`).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}` : 'Release date not set') : [c.startsOn, c.endsOn].filter(Boolean).join(' – ') || 'No dates'}</span>
-              {c.posts ? <Badge>{c.posts} post{c.posts === 1 ? '' : 's'}</Badge> : <Badge tone="amber">No posts yet</Badge>}
-            </button></li>
+              {c.posts ? <Badge>{c.posts} item{c.posts === 1 ? '' : 's'}</Badge> : <Badge tone="amber">Nothing yet</Badge>}
+            </button>{c.posts > 0 && <Button size="sm" variant="ghost" className="mr-2" icon={<GanttChart className="h-4 w-4" />} onClick={() => setTimeline(c)}>Timeline</Button>}</li>
           ))}</ul>
         )}
       </section>
       {campaign && <CampaignEditor c={campaign === 'new' ? null : campaign} b={b} onClose={() => setCampaign(null)} />}
       {launching && <LaunchModal b={b} onClose={() => setLaunching(false)} />}
+      {timeline && <CampaignTimeline c={timeline} b={b} onClose={() => setTimeline(null)} onOpen={onOpen} />}
     </div>
   );
 }
@@ -154,6 +156,34 @@ function LaunchModal({ b, onClose }: { b: Basics; onClose: () => void }) {
         </ul>
         <Field label="Notes (optional)"><textarea className="field min-h-[60px]" value={d.notes} onChange={(e) => setD({ ...d, notes: e.target.value })} placeholder="Price, colours, what makes it different — for the team and for AI drafts" /></Field>
       </div>
+    </Modal>
+  );
+}
+
+/** A campaign's full timeline: emails and posts in date order, which still need approval, and scheduling conflicts. */
+function CampaignTimeline({ c, b, onClose, onOpen }: { c: ContentCampaignDTO; b: Basics; onClose: () => void; onOpen?: (p: ContentPostDTO) => void }) {
+  const { data, isLoading } = useQuery({ queryKey: ['content-timeline', c.id], queryFn: () => api.get<{ posts: ContentPostDTO[]; conflicts: { a: string; b: string; reason: string }[]; needsApproval: string[] }>(`/content/campaigns/${c.id}/timeline`) });
+  const conflictOf = (id: string) => data?.conflicts.find((x) => x.a === id || x.b === id)?.reason;
+  return (
+    <Modal open xl onClose={onClose} title={c.name} footer={<Button variant="ghost" onClick={onClose}>Close</Button>}>
+      {isLoading || !data ? <PageLoading /> : (
+        <div className="space-y-3 text-[13px]">
+          <p className="text-ink-soft">{data.posts.length} deliverables · <b className="font-medium text-ink">{data.needsApproval.length}</b> still need approval{data.conflicts.length ? <> · <span className="text-rose">{data.conflicts.length} scheduling conflict{data.conflicts.length === 1 ? '' : 's'}</span></> : ''}</p>
+          <ul className="divide-y divide-line border border-line bg-white">
+            {data.posts.map((p) => (
+              <li key={p.id}><button type="button" className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-left hover:bg-mist/40" onClick={() => { onClose(); onOpen?.(p); }}>
+                <span className="num w-28 shrink-0 text-stone">{p.scheduledAt ? new Date(p.scheduledAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'No date'}</span>
+                {p.platform === 'email' ? <Mail className="h-4 w-4 shrink-0 text-stone" /> : <span className="w-4" />}
+                <AccountTag a={b.accountOf(p.account)} small /><span className="min-w-0 flex-1 truncate font-medium text-ink">{p.platform === 'email' && p.email?.subject ? p.email.subject : p.title}</span>
+                <span className="text-stone">{formatLabel(p.type)}</span>
+                <Badge tone={STATUS_TONE[p.status]}>{postStatusLabel(p)}</Badge>
+                {data.needsApproval.includes(p.id) && <Badge tone="amber">Needs approval</Badge>}
+                {conflictOf(p.id) && <span className="flex items-center gap-1 text-[12px] text-rose" title={conflictOf(p.id)}><AlertTriangle className="h-3.5 w-3.5" />{conflictOf(p.id)}</span>}
+              </button></li>
+            ))}
+          </ul>
+        </div>
+      )}
     </Modal>
   );
 }

@@ -20,7 +20,7 @@ export const badRequest = (msg: string, details?: unknown) => new AppError(400, 
 /** Thrown by integration adapters; carries a friendly message and whether a retry may help. */
 export class IntegrationError extends Error {
   constructor(
-    public provider: 'square' | 'highlevel' | 'sms' | 'ai' | 'email' | 'shopify' | 'gmail' | 'instagram',
+    public provider: 'square' | 'highlevel' | 'sms' | 'ai' | 'email' | 'shopify' | 'gmail' | 'instagram' | 'flodesk',
     public userMessage: string,
     public retryable: boolean,
     public authProblem = false,

@@ -2482,7 +2482,18 @@ export const CONTENT_STATUSES: { value: ContentStatus; label: string }[] = [
 ];
 export interface ContentMediaDTO { id: string; mime: string; name: string | null; size: number; url: string; title?: string | null; tags?: string[]; account?: ContentAccountId | null; approved?: boolean; createdAt?: string }
 /** Reach, views… — imported from the platform, or entered by hand (metricsSource says which). */
-export interface ContentMetrics { reach?: number; impressions?: number; views?: number; likes?: number; comments?: number; saves?: number; shares?: number; clicks?: number; bookingInquiries?: number; productClicks?: number; salesCents?: number }
+export interface ContentMetrics { reach?: number; impressions?: number; views?: number; likes?: number; comments?: number; saves?: number; shares?: number; clicks?: number; bookingInquiries?: number; productClicks?: number; salesCents?: number;
+  /** Email (from Flodesk's report, entered by hand): recipients, delivered, opens, unsubscribes, bounces; clicks and salesCents as above. */
+  recipients?: number; delivered?: number; opens?: number; unsubscribes?: number; bounces?: number }
+/** An email campaign's details (Flodesk): planned in the CRM; "Scheduled in Flodesk" needs its Flodesk link; "Sent" is confirmed by someone who publishes. */
+export interface ContentEmail {
+  subject: string | null; previewText: string | null;
+  /** Flodesk segments it goes to (id and name). */
+  audience: { id: string; name: string }[];
+  objective: string | null; destinationUrl: string | null; draftUrl: string | null;
+  /** The campaign in Flodesk (its link or ID) — set when it's scheduled there. */
+  flodeskUrl: string | null;
+}
 export interface ContentPostDTO {
   id: string; account: ContentAccountId; platform: ContentPlatform; type: ContentPostType; title: string; scheduledAt: string | null; dueAt: string | null;
   headline: string | null; caption: string; cta: string | null; hashtags: string | null; pillar: string | null; status: ContentStatus;
@@ -2498,6 +2509,8 @@ export interface ContentPostDTO {
   assignedStaffId: string | null; assignedName: string | null; reviewerStaffId: string | null; reviewerName: string | null; publisherStaffId: string | null; publisherName: string | null;
   notes: string | null; revision: number;
   metrics: ContentMetrics; metricsSource: 'imported' | 'manual' | null; metricsUpdatedAt: string | null;
+  /** Email campaigns (platform email). */
+  email: ContentEmail | null;
   permalink: string | null; postedAt: string | null; error: string | null;
   createdAt: string; updatedAt: string;
 }
@@ -2511,6 +2524,8 @@ export interface ContentIdeaDTO {
   effort: 'low' | 'medium' | 'high'; builtin: boolean; favorite: boolean;
   /** A Reel that also works as a Story. */
   alsoStory: boolean;
+  /** Email templates: subject line, preview text and when to send. */
+  subject: string | null; previewText: string | null; sendTiming: string | null;
   /** Drafted this week and not saved yet (replaced next week unless saved). */
   suggested: boolean; suggestedOn: string | null;
 }
@@ -2522,4 +2537,6 @@ export interface ContentSettings {
   goals: Partial<Record<ContentAccountId, Partial<Record<ContentPlatform, number>>>>;
   /** Who may work on each account (staff ids); empty = everyone with Content calendar. */
   access: Partial<Record<ContentAccountId, string[]>>;
+  /** The Flodesk segments each account emails by default (mapped by administrators — not assumed one per account). */
+  emailAudiences?: Partial<Record<ContentAccountId, { id: string; name: string }[]>>;
 }

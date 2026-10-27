@@ -106,6 +106,11 @@ async function run(p: CredentialProvider): Promise<TestResult> {
       const r = await hl.testConnection();
       return { ok: true, message: `Connected to HighLevel${r.locationName ? ` · ${r.locationName}` : ''}.`, warnings };
     }
+    case 'flodesk': {
+      const { FlodeskApi } = await import('./flodesk.js');
+      const segs = await new FlodeskApi(c.FLODESK_API_KEY!).segments();
+      return { ok: true, message: `Connected to Flodesk — ${segs.length} segment${segs.length === 1 ? '' : 's'} found.`, warnings };
+    }
     case 'instagram': {
       const { instagramAccounts, InstagramApi } = await import('./instagram.js');
       const found = instagramAccounts(c);

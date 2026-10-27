@@ -7,7 +7,7 @@ import { Badge, PageLoading, Segmented } from '../../components/ui';
 import { AccountTag, platformLabel, type Basics } from './common';
 
 type Group = { key: string; posts: number; withMetrics: number; totals: Required<ContentMetrics>; engagement: number };
-type Report = { posts: number; totals: Required<ContentMetrics>; byAccount: Group[]; byPlatform: Group[]; top: ContentPostDTO[]; suggestions: string[]; manual: number; imported: number };
+type Report = { posts: number; totals: Required<ContentMetrics>; byAccount: Group[]; byPlatform: Group[]; emailByAccount: Group[]; top: ContentPostDTO[]; suggestions: string[]; manual: number; imported: number };
 const n = (x: number) => x.toLocaleString();
 const COLS: [keyof ContentMetrics, string][] = [['reach', 'Reach'], ['views', 'Views'], ['impressions', 'Impressions'], ['likes', 'Likes'], ['comments', 'Comments'], ['saves', 'Saves'], ['shares', 'Shares'], ['clicks', 'Clicks'], ['bookingInquiries', 'Booking inquiries'], ['productClicks', 'Product clicks']];
 
@@ -38,8 +38,22 @@ export function AnalyticsTab({ b, onOpen }: { b: Basics; onOpen: (p: ContentPost
           <ul className="list-disc space-y-0.5 pl-5 text-ink-soft">{data.suggestions.map((s) => <li key={s}>{s}</li>)}</ul>
         </section>
       )}
-      <section><h2 className="mb-2 text-[15px] font-medium text-ink">By account</h2>{data.byAccount.length ? table(data.byAccount, (k) => <AccountTag a={b.accountOf(k)} />) : <p className="text-[13px] text-stone">Nothing published in this period yet.</p>}</section>
+      <section><h2 className="mb-2 text-[15px] font-medium text-ink">Social by account</h2>{data.byAccount.length ? table(data.byAccount, (k) => <AccountTag a={b.accountOf(k)} />) : <p className="text-[13px] text-stone">Nothing published in this period yet.</p>}</section>
       <section><h2 className="mb-2 text-[15px] font-medium text-ink">By platform</h2>{data.byPlatform.length ? table(data.byPlatform, (k) => platformLabel(k)) : <p className="text-[13px] text-stone">—</p>}</section>
+      <section>
+        <h2 className="mb-1 text-[15px] font-medium text-ink">Email (Flodesk)</h2>
+        <p className="mb-2 text-[13px] text-stone">Sent emails, with numbers copied from each campaign’s Flodesk report (entered by hand — Flodesk doesn’t share stats with other apps). Rates use delivered emails; opens can be overcounted by mail privacy features.</p>
+        {!data.emailByAccount.length ? <p className="text-[13px] text-stone">No emails sent in this period.</p> : (
+          <div className="overflow-x-auto"><table className="w-full min-w-[760px] border border-line bg-white text-left text-[13px]">
+            <thead className="border-b border-line bg-mist/50 text-[11px] uppercase tracking-wide text-stone"><tr><th className="px-3 py-2" /><th className="px-2 py-2 text-right">Emails</th><th className="px-2 py-2 text-right">Recipients</th><th className="px-2 py-2 text-right">Delivered</th><th className="px-2 py-2 text-right">Opens</th><th className="px-2 py-2 text-right">Open rate</th><th className="px-2 py-2 text-right">Clicks</th><th className="px-2 py-2 text-right">Click rate</th><th className="px-2 py-2 text-right">Unsubscribes</th><th className="px-2 py-2 text-right">Bounces</th><th className="px-2 py-2 text-right">Revenue</th></tr></thead>
+            <tbody className="divide-y divide-line">{data.emailByAccount.map((r) => { const base = r.totals.delivered || r.totals.recipients; const pct = (x: number) => (base ? `${((x / base) * 100).toFixed(1)}%` : '—'); return (
+              <tr key={r.key}><td className="px-3 py-2"><AccountTag a={b.accountOf(r.key)} /></td><td className="num px-2 py-2 text-right">{r.posts}{r.withMetrics < r.posts && <span className="text-stone"> ({r.withMetrics} with numbers)</span>}</td>
+                <td className="num px-2 py-2 text-right">{n(r.totals.recipients)}</td><td className="num px-2 py-2 text-right">{n(r.totals.delivered)}</td><td className="num px-2 py-2 text-right">{n(r.totals.opens)}</td><td className="num px-2 py-2 text-right">{pct(r.totals.opens)}</td>
+                <td className="num px-2 py-2 text-right">{n(r.totals.clicks)}</td><td className="num px-2 py-2 text-right">{pct(r.totals.clicks)}</td><td className="num px-2 py-2 text-right">{n(r.totals.unsubscribes)}</td><td className="num px-2 py-2 text-right">{n(r.totals.bounces)}</td><td className="num px-2 py-2 text-right">${n(Math.round(r.totals.salesCents / 100))}</td></tr>
+            ); })}</tbody>
+          </table></div>
+        )}
+      </section>
       <section>
         <h2 className="mb-2 text-[15px] font-medium text-ink">Top posts</h2>
         {!data.top.length ? <p className="text-[13px] text-stone">Add numbers to published posts (Performance) to see what works best.</p> : (

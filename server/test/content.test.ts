@@ -157,7 +157,7 @@ describe('Content calendar', () => {
     const r = await api.post('/api/content/launches', { product: 'The Bond – Keratin Application Tool Pro', releaseOn: null, accounts: ['a2', 'a3'] });
     expect(r.status).toBe(201);
     const c = r.body.campaign;
-    expect(c).toMatchObject({ kind: 'launch', product: 'The Bond – Keratin Application Tool Pro', posts: 15, startsOn: null });
+    expect(c).toMatchObject({ kind: 'launch', product: 'The Bond – Keratin Application Tool Pro', posts: 19, startsOn: null });
     const all = async () => (await db().query<any>('SELECT id, account, title, scheduled_at, launch_offset, status FROM content_posts WHERE campaign_id = $1 ORDER BY launch_offset', [c.id]));
     let posts = await all();
     expect(posts.every((p: any) => p.scheduled_at === null)).toBe(true);
@@ -175,5 +175,43 @@ describe('Content calendar', () => {
     posts = await all();
     expect(day(posts.find((p: any) => p.id === pub.id))).toBe('2026-11-17');
     expect(day(posts.find((p: any) => p.launch_offset === 0))).toBe('2026-12-08');
+  });
+
+  it('emails (Flodesk): planned in the CRM, “Scheduled in Flodesk” only with its Flodesk link, sent only when confirmed', async () => {
+    const day = (n: number) => new Date(Date.now() + n * 86400_000).toISOString();
+    const email = { subject: 'The Insider: November', previewText: 'New looks this month', audience: [{ id: 'seg1', name: 'Salon clients' }], objective: 'Fill openings', destinationUrl: 'https://addendumsalon.com/book', draftUrl: null, flodeskUrl: null };
+    let p = (await api.post('/api/content/posts', base({ accounts: ['a1'], title: 'The Insider — November', platform: 'email', type: 'email', scheduledAt: day(2), email }))).body.posts[0];
+    expect(p.email).toMatchObject({ subject: 'The Insider: November', audience: [{ name: 'Salon clients' }] });
+    for (const st of ['in_review', 'approved']) p = (await api.post(`/api/content/posts/${p.id}/status`, { status: st })).body.post;
+    const no = await api.post(`/api/content/posts/${p.id}/status`, { status: 'scheduled' });
+    expect(no.status).toBe(400);
+    expect(no.body.error.message).toMatch(/Flodesk/);
+    p = (await api.put(`/api/content/posts/${p.id}`, { ...p, mediaIds: [], email: { ...email, flodeskUrl: 'https://app.flodesk.com/emails/abc' } })).body.post;
+    expect((await api.post(`/api/content/posts/${p.id}/status`, { status: 'scheduled' })).body.post.status).toBe('scheduled');
+    expect((await api.post(`/api/content/posts/${p.id}/status`, { status: 'published' })).body.post.status).toBe('published');
+    const hist = (await api.get(`/api/content/posts/${p.id}`)).body.comments.filter((c: any) => c.kind === 'status').map((c: any) => c.body).filter(Boolean);
+    expect(hist).toEqual(expect.arrayContaining(['Scheduled in Flodesk', 'Confirmed as sent (Flodesk)']));
+    await api.put(`/api/content/posts/${p.id}/metrics`, { recipients: 1000, delivered: 980, opens: 450, clicks: 60, unsubscribes: 3 });
+    const a = (await api.get(`/api/content/analytics?from=${encodeURIComponent(day(-30))}&to=${encodeURIComponent(day(30))}`)).body;
+    expect(a.emailByAccount.find((r: any) => r.key === 'a1').totals).toMatchObject({ delivered: 980, opens: 450 });
+    expect(a.byAccount.every((r: any) => r.totals.recipients === 0)).toBe(true); // social kept apart
+  });
+
+  it('email templates per account; launches include emails; the timeline flags two emails too close together', async () => {
+    const ideas = (await api.get('/api/content/ideas')).body.ideas.filter((i: any) => i.platform === 'email');
+    expect(ideas.length).toBeGreaterThanOrEqual(25);
+    for (const a of ['a1', 'a2', 'a3']) expect(ideas.some((i: any) => i.accounts.includes(a) && i.subject && i.previewText && i.sendTiming)).toBe(true);
+    const c = (await api.post('/api/content/launches', { product: 'Clip-Ins', releaseOn: '2027-02-01', accounts: ['a2'] })).body.campaign;
+    let t = (await api.get(`/api/content/campaigns/${c.id}/timeline`)).body;
+    const emails = t.posts.filter((p: any) => p.platform === 'email');
+    expect(emails.length).toBe(3);
+    expect(emails[0].email.subject).toMatch(/Clip-Ins/);
+    expect(t.needsApproval.length).toBe(t.posts.length);
+    // Move the follow-up email next to the launch-day one: flagged.
+    const launchDay = emails.find((e: any) => e.title.includes('launch-day'));
+    const follow = emails.find((e: any) => e.title.includes('follow-up'));
+    await api.post(`/api/content/posts/${follow.id}/reschedule`, { scheduledAt: new Date(Date.parse(launchDay.scheduledAt) + 3600_000).toISOString() });
+    t = (await api.get(`/api/content/campaigns/${c.id}/timeline`)).body;
+    expect(t.conflicts.some((x: any) => /emails/.test(x.reason))).toBe(true);
   });
 });

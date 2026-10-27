@@ -1,22 +1,25 @@
 import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CopyPlus, ExternalLink, Film, ImagePlus, Library, Link2, Repeat, Sparkles, Trash2, X } from 'lucide-react';
+import { CopyPlus, ExternalLink, Film, ImagePlus, Library, Link2, Mail, Repeat, Sparkles, Trash2, X } from 'lucide-react';
 import {
-  CONTENT_FORMATS, CONTENT_PLATFORMS, type ContentAccountId, type ContentCommentDTO, type ContentMediaDTO, type ContentMetrics, type ContentPlatform, type ContentPostDTO, type ContentPostType, type ContentStatus,
+  CONTENT_FORMATS, CONTENT_PLATFORMS, type ContentAccountId, type ContentEmail, type ContentCommentDTO, type ContentMediaDTO, type ContentMetrics, type ContentPlatform, type ContentPostDTO, type ContentPostType, type ContentStatus,
 } from '@addendum/shared';
 import { api } from '../../api/client';
 import { Badge, Button, Field, Modal, PageTabs, Toggle, cx, useToast } from '../../components/ui';
-import { AccountTag, STATUS_TONE, fromLocal, statusLabel, toLocal, type Basics } from './common';
+import { AccountTag, STATUS_TONE, fromLocal, postStatusLabel, statusLabel, toLocal, type Basics } from './common';
 import { AssetPicker } from './Assets';
 
-export type Prefill = Partial<Pick<ContentPostDTO, 'title' | 'platform' | 'type' | 'headline' | 'caption' | 'cta' | 'hashtags' | 'pillar' | 'notes' | 'ideaId' | 'campaignId'>> & { accounts?: ContentAccountId[]; date?: string };
+export type Prefill = Partial<Pick<ContentPostDTO, 'title' | 'platform' | 'type' | 'headline' | 'caption' | 'cta' | 'hashtags' | 'pillar' | 'notes' | 'ideaId' | 'campaignId'>> & { accounts?: ContentAccountId[]; date?: string; email?: Partial<ContentEmail> };
+const NO_EMAIL: ContentEmail = { subject: null, previewText: null, audience: [], objective: null, destinationUrl: null, draftUrl: null, flodeskUrl: null };
 type Draft = {
   accounts: ContentAccountId[]; platform: ContentPlatform; type: ContentPostType; title: string; when: string; due: string; headline: string; caption: string; cta: string; hashtags: string;
   pillar: string; campaignId: string; media: ContentMediaDTO[]; externalLinks: string[]; link: ContentPostDTO['link']; assignedStaffId: string; reviewerStaffId: string; publisherStaffId: string; notes: string; autoPost: boolean; ideaId: string | null;
+  email: ContentEmail;
 };
 const fromPost = (p: ContentPostDTO): Draft => ({
   accounts: [p.account], platform: p.platform, type: p.type, title: p.title, when: toLocal(p.scheduledAt), due: p.dueAt ? p.dueAt.slice(0, 10) : '', headline: p.headline ?? '', caption: p.caption, cta: p.cta ?? '', hashtags: p.hashtags ?? '',
   pillar: p.pillar ?? '', campaignId: p.campaignId ?? '', media: p.media, externalLinks: p.externalLinks, link: p.link, assignedStaffId: p.assignedStaffId ?? '', reviewerStaffId: p.reviewerStaffId ?? '', publisherStaffId: p.publisherStaffId ?? '', notes: p.notes ?? '', autoPost: p.autoPost, ideaId: p.ideaId,
+  email: { ...NO_EMAIL, ...(p.email ?? {}) },
 });
 const KINDS = [['caption', 'Caption'], ['reel', 'Reels script + shot list'], ['story', 'Story sequence'], ['carousel', 'Carousel outline + slide copy'], ['tiktok', 'TikTok concept'], ['pinterest', 'Pinterest description'], ['promo', 'Promotional post'], ['product', 'Product spotlight'], ['email', 'Email campaign']] as const;
 
@@ -29,7 +32,13 @@ export function PostEditor({ post, prefill, b, onClose }: { post: ContentPostDTO
     accounts: prefill?.accounts ?? (b.mine.length === 1 ? [b.mine[0].id] : []), platform: prefill?.platform ?? 'instagram', type: prefill?.type ?? 'feed', title: prefill?.title ?? '',
     when: prefill?.date ? `${prefill.date}T10:00` : '', due: '', headline: prefill?.headline ?? '', caption: prefill?.caption ?? '', cta: prefill?.cta ?? '', hashtags: prefill?.hashtags ?? '', pillar: prefill?.pillar ?? '',
     campaignId: prefill?.campaignId ?? '', media: [], externalLinks: [], link: null, assignedStaffId: '', reviewerStaffId: '', publisherStaffId: '', notes: prefill?.notes ?? '', autoPost: false, ideaId: prefill?.ideaId ?? null,
+    // A new email goes to the account's mapped Flodesk audiences unless chosen otherwise.
+    email: { ...NO_EMAIL, audience: (prefill?.accounts ?? []).flatMap((a) => b.settings?.emailAudiences?.[a] ?? []), ...(prefill?.email ?? {}) },
   });
+  const isEmail = d.platform === 'email';
+  const setEmail = (p: Partial<ContentEmail>) => setD((x) => ({ ...x, email: { ...x.email, ...p } }));
+  const { data: segs } = useQuery({ queryKey: ['flodesk-segments'], enabled: isEmail, staleTime: 300_000, queryFn: () => api.get<{ connected: boolean; segments: { id: string; name: string; subscribers: number | null }[]; error?: string }>('/content/email/segments') });
+  const audienceOptions = [...new Map([...(segs?.segments ?? []), ...d.accounts.flatMap((a) => b.settings?.emailAudiences?.[a] ?? []), ...d.email.audience].map((x) => [x.id, { id: x.id, name: x.name }])).values()];
   const [current, setCurrent] = useState(post);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(0);
@@ -52,6 +61,8 @@ export function PostEditor({ post, prefill, b, onClose }: { post: ContentPostDTO
     platform: d.platform, type: d.type, title: d.title.trim(), scheduledAt: fromLocal(d.when), dueAt: d.due ? new Date(`${d.due}T17:00`).toISOString() : null, headline: d.headline.trim() || null, caption: d.caption,
     cta: d.cta.trim() || null, hashtags: d.hashtags.trim() || null, pillar: d.pillar || null, autoPost: d.autoPost, mediaIds: d.media.map((m) => m.id), externalLinks: d.externalLinks, link: d.link,
     campaignId: d.campaignId || null, assignedStaffId: d.assignedStaffId || null, reviewerStaffId: d.reviewerStaffId || null, publisherStaffId: d.publisherStaffId || null, notes: d.notes.trim() || null, ideaId: d.ideaId,
+    email: d.platform === 'email' ? { ...d.email, subject: d.email.subject?.trim() || null, previewText: d.email.previewText?.trim() || null, objective: d.email.objective?.trim() || null,
+      destinationUrl: d.email.destinationUrl?.trim() || null, draftUrl: d.email.draftUrl?.trim() || null, flodeskUrl: d.email.flodeskUrl?.trim() || null } : null,
   });
   const save = async (status?: 'idea' | 'draft') => {
     if (!d.title.trim()) { toast('Give the post a title.', 'error'); return; }
@@ -93,7 +104,8 @@ export function PostEditor({ post, prefill, b, onClose }: { post: ContentPostDTO
     </>}>
       {post && current && (
         <div className="mb-3 flex flex-wrap items-center gap-2 text-[13px]">
-          <AccountTag a={b.accountOf(current.account)} /><Badge tone={STATUS_TONE[current.status]}>{statusLabel(current.status)}</Badge>
+          <AccountTag a={b.accountOf(current.account)} /><Badge tone={STATUS_TONE[current.status]}>{postStatusLabel(current)}</Badge>
+          {current.platform === 'email' && current.email?.flodeskUrl && (/^https?:/.test(current.email.flodeskUrl) ? <a className="inline-flex items-center gap-1 text-plum hover:underline" href={current.email.flodeskUrl} target="_blank" rel="noreferrer">Open in Flodesk <ExternalLink className="h-3.5 w-3.5" /></a> : <span className="text-stone">Flodesk: {current.email.flodeskUrl}</span>)}
           {current.revision > 1 && <span className="text-stone">Revision {current.revision}</span>}
           {current.sourcePostId && <span className="text-stone">· Repurposed</span>}{current.groupId && <span className="text-stone">· Part of a multi-account post</span>}
           {current.permalink && <a className="ml-auto inline-flex items-center gap-1 text-plum hover:underline" href={current.permalink} target="_blank" rel="noreferrer">View post <ExternalLink className="h-3.5 w-3.5" /></a>}
@@ -104,7 +116,7 @@ export function PostEditor({ post, prefill, b, onClose }: { post: ContentPostDTO
         <div className="grid gap-5 text-[14px] lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
           <div className="space-y-4">
             {!post ? (
-              <Field label="Social account" hint="Each ticked account gets its own entry to edit, approve and schedule. Only tick accounts whose audience it really suits.">
+              <Field label="Account" hint="Each ticked account gets its own entry to edit, approve and schedule. Only tick accounts whose audience it really suits.">
                 <div className="flex flex-wrap gap-3">{b.mine.map((a) => (
                   <label key={a.id} className="flex items-center gap-1.5"><input type="checkbox" className="h-4 w-4 accent-plum" checked={d.accounts.includes(a.id)} onChange={(e) => set({ accounts: e.target.checked ? [...d.accounts, a.id] : d.accounts.filter((x) => x !== a.id) })} /><AccountTag a={a} /></label>
                 ))}</div>
@@ -130,13 +142,34 @@ export function PostEditor({ post, prefill, b, onClose }: { post: ContentPostDTO
               <Field label="Due for review"><input type="date" className="field" value={d.due} onChange={(e) => set({ due: e.target.value })} /></Field>
               <Field label="Campaign"><select className="field" value={d.campaignId} onChange={(e) => set({ campaignId: e.target.value })}><option value="">None</option>{b.campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
             </div>
-            <AiPanel d={d} b={b} onUse={(g) => set({ title: d.title || g.title, headline: g.headline ?? d.headline, caption: g.caption, cta: g.cta ?? d.cta, hashtags: g.hashtags ?? d.hashtags, notes: g.extra ? [d.notes, g.extra].filter(Boolean).join('\n\n') : d.notes })} />
-            <Field label="Headline / hook"><input className="field" maxLength={300} value={d.headline} onChange={(e) => set({ headline: e.target.value })} /></Field>
-            <Field label="Caption" hint={d.platform === 'instagram' ? `${igLength} / 2,200 with the CTA and hashtags` : undefined}><textarea className={cx('field min-h-[140px]', d.platform === 'instagram' && igLength > 2200 && 'border-rose')} value={d.caption} onChange={(e) => set({ caption: e.target.value })} /></Field>
+            <AiPanel d={d} b={b} onUse={(g) => setD((x) => ({ ...x, title: x.title || g.title, headline: g.headline ?? x.headline, caption: g.caption, cta: g.cta ?? x.cta, hashtags: isEmail ? x.hashtags : g.hashtags ?? x.hashtags,
+              notes: g.extra ? [x.notes, g.extra].filter(Boolean).join('\n\n') : x.notes, email: isEmail ? { ...x.email, subject: g.subjects?.[0] ?? g.headline ?? x.email.subject, previewText: g.previewText ?? x.email.previewText } : x.email }))} />
+            {isEmail ? (
+              <div className="space-y-3 rounded-xl border border-line p-3">
+                <p className="flex items-center gap-1.5 text-[13px] font-medium text-ink"><Mail className="h-4 w-4" />Email campaign (Flodesk)</p>
+                <Field label="Subject line"><input className="field" maxLength={300} value={d.email.subject ?? ''} onChange={(e) => setEmail({ subject: e.target.value })} /></Field>
+                <Field label="Preview text"><input className="field" maxLength={300} value={d.email.previewText ?? ''} onChange={(e) => setEmail({ previewText: e.target.value })} /></Field>
+                <Field label="Flodesk audience" hint={segs && !segs.connected ? 'Connect Flodesk (Settings → API & Integrations) to choose segments; map each account’s default in Content Calendar → Settings.' : segs?.error}>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1.5">{audienceOptions.length ? audienceOptions.map((o) => (
+                    <label key={o.id} className="flex items-center gap-1.5 text-[13px]"><input type="checkbox" className="h-4 w-4 accent-plum" checked={d.email.audience.some((x) => x.id === o.id)} onChange={(e) => setEmail({ audience: e.target.checked ? [...d.email.audience, o] : d.email.audience.filter((x) => x.id !== o.id) })} />{o.name}</label>
+                  )) : <span className="text-[13px] text-stone">No segments yet.</span>}</div>
+                </Field>
+                <Field label="Objective"><input className="field" maxLength={300} value={d.email.objective ?? ''} onChange={(e) => setEmail({ objective: e.target.value })} placeholder="e.g. Fill December openings" /></Field>
+              </div>
+            ) : <Field label="Headline / hook"><input className="field" maxLength={300} value={d.headline} onChange={(e) => set({ headline: e.target.value })} /></Field>}
+            <Field label={isEmail ? 'Email body (outline or copy)' : 'Caption'} hint={d.platform === 'instagram' ? `${igLength} / 2,200 with the CTA and hashtags` : undefined}><textarea className={cx('field min-h-[140px]', d.platform === 'instagram' && igLength > 2200 && 'border-rose')} value={d.caption} onChange={(e) => set({ caption: e.target.value })} /></Field>
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Call to action"><input className="field" maxLength={300} value={d.cta} onChange={(e) => set({ cta: e.target.value })} placeholder={acc?.cta} /></Field>
-              <Field label="Hashtags"><input className="field" maxLength={1000} value={d.hashtags} onChange={(e) => set({ hashtags: e.target.value })} placeholder="#addendumsalon …" /></Field>
+              <Field label={isEmail ? 'Button (CTA)' : 'Call to action'}><input className="field" maxLength={300} value={d.cta} onChange={(e) => set({ cta: e.target.value })} placeholder={acc?.cta} /></Field>
+              {isEmail
+                ? <Field label="Destination URL"><input className="field" value={d.email.destinationUrl ?? ''} onChange={(e) => setEmail({ destinationUrl: e.target.value })} placeholder="https://" /></Field>
+                : <Field label="Hashtags"><input className="field" maxLength={1000} value={d.hashtags} onChange={(e) => set({ hashtags: e.target.value })} placeholder="#addendumsalon …" /></Field>}
             </div>
+            {isEmail && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Draft link (optional)"><input className="field" value={d.email.draftUrl ?? ''} onChange={(e) => setEmail({ draftUrl: e.target.value })} placeholder="Google Doc, Canva…" /></Field>
+                <Field label="Flodesk campaign link or ID" hint="Add it once the email is set up in Flodesk — needed to mark it scheduled."><input className="field" value={d.email.flodeskUrl ?? ''} onChange={(e) => setEmail({ flodeskUrl: e.target.value })} placeholder="https://app.flodesk.com/…" /></Field>
+              </div>
+            )}
             <Field label="Notes (internal)"><textarea className="field min-h-[70px]" value={d.notes} onChange={(e) => set({ notes: e.target.value })} placeholder="Shot list, music, who’s modelling…" /></Field>
           </div>
           <div className="space-y-4">
@@ -206,7 +239,7 @@ export function PostEditor({ post, prefill, b, onClose }: { post: ContentPostDTO
   );
 }
 
-type Generated = { title: string; headline: string | null; caption: string; cta: string | null; hashtags: string | null; extra: string | null; ai: boolean };
+type Generated = { title: string; headline: string | null; caption: string; cta: string | null; hashtags: string | null; extra: string | null; ai: boolean; subjects?: string[]; previewText?: string | null };
 /** Write with AI: a draft for the account's voice, audience and CTA — shown first, then used only if chosen. */
 function AiPanel({ d, b, onUse }: { d: Draft; b: Basics; onUse: (g: Generated) => void }) {
   const toast = useToast();
@@ -236,7 +269,8 @@ function AiPanel({ d, b, onUse }: { d: Draft; b: Basics; onUse: (g: Generated) =
       {out && (
         <div className="mt-3 space-y-1.5 rounded-lg border border-line bg-white p-3">
           {!out.ai && <p className="text-[12px] text-stone">Built-in template (add an Anthropic key in API & Integrations for AI writing).</p>}
-          {out.headline && <p className="font-medium text-ink">{out.headline}</p>}
+          {out.subjects?.length ? <div className="text-ink"><span className="text-[12px] text-stone">Subject lines:</span><ul className="list-disc pl-5">{out.subjects.map((x) => <li key={x}>{x}</li>)}</ul>{out.previewText && <p className="text-[12px] text-stone">Preview: {out.previewText}</p>}</div>
+            : out.headline && <p className="font-medium text-ink">{out.headline}</p>}
           <p className="whitespace-pre-line text-ink">{out.caption}</p>
           {out.cta && <p className="text-ink-soft">{out.cta}</p>}{out.hashtags && <p className="text-stone">{out.hashtags}</p>}
           {out.extra && <p className="whitespace-pre-line text-[12px] text-stone">{out.extra}</p>}
@@ -256,7 +290,8 @@ function Workflow({ post, b, onChanged }: { post: ContentPostDTO; b: Basics; onC
   const req = b.settings?.requireApproval ?? true;
   const move = async (status: ContentStatus, needsNote = false) => {
     if (needsNote && !note.trim()) { toast('Add a comment saying what needs changing.', 'error'); return; }
-    if (status === 'published' && !window.confirm(post.autoPost && post.status === 'scheduled' ? 'Mark it published now? (It won’t be posted automatically.)' : 'Confirm it has been published on the platform?')) return;
+    if (status === 'published' && !window.confirm(post.platform === 'email' ? 'Confirm Flodesk shows this email as sent?' : post.autoPost && post.status === 'scheduled' ? 'Mark it published now? (It won’t be posted automatically.)' : 'Confirm it has been published on the platform?')) return;
+    if (status === 'scheduled' && post.platform === 'email' && !post.email?.flodeskUrl) { toast('Schedule it in Flodesk first, then add the Flodesk campaign link (Content tab) and save.', 'error'); return; }
     setBusy(true);
     try { const r = await api.post<{ post: ContentPostDTO }>(`/content/posts/${post.id}/status`, { status, comment: note.trim() || null }); setNote(''); onChanged(r.post); void refetch(); }
     catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
@@ -271,8 +306,8 @@ function Workflow({ post, b, onChanged }: { post: ContentPostDTO; b: Basics; onC
     ['Send for review', 'in_review', ['idea', 'draft', 'changes_requested'].includes(s)],
     ['Request changes', 'changes_requested', b.canApprove && ['in_review', 'approved', 'scheduled'].includes(s), true],
     ['Approve', 'approved', b.canApprove && ['in_review', 'changes_requested', 'failed'].includes(s)],
-    ['Schedule', 'scheduled', b.canPublish && (s === 'approved' || (!req && ['draft', 'in_review'].includes(s)) || s === 'failed')],
-    ['Confirm published', 'published', b.canPublish && ['approved', 'scheduled', 'failed'].includes(s)],
+    [post.platform === 'email' ? 'Mark scheduled in Flodesk' : 'Schedule', 'scheduled', b.canPublish && (s === 'approved' || (!req && ['draft', 'in_review'].includes(s)) || s === 'failed')],
+    [post.platform === 'email' ? 'Confirm sent' : 'Confirm published', 'published', b.canPublish && ['approved', 'scheduled', 'failed'].includes(s)],
   ];
   return (
     <div className="grid gap-5 text-[14px] lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -300,10 +335,13 @@ function Workflow({ post, b, onChanged }: { post: ContentPostDTO; b: Basics; onC
   );
 }
 
-const METRICS: [keyof ContentMetrics, string][] = [['reach', 'Reach'], ['impressions', 'Impressions'], ['views', 'Views'], ['likes', 'Likes'], ['comments', 'Comments'], ['saves', 'Saves'], ['shares', 'Shares'], ['clicks', 'Link clicks'], ['bookingInquiries', 'Booking inquiries'], ['productClicks', 'Shopify product clicks'], ['salesCents', 'Attributed sales ($)']];
+const EMAIL_METRICS: [keyof ContentMetrics, string][] = [['recipients', 'Recipients'], ['delivered', 'Delivered'], ['opens', 'Opens'], ['clicks', 'Clicks'], ['unsubscribes', 'Unsubscribes'], ['bounces', 'Bounces'], ['salesCents', 'Attributed revenue ($)']];
+const SOCIAL_METRICS: [keyof ContentMetrics, string][] = [['reach', 'Reach'], ['impressions', 'Impressions'], ['views', 'Views'], ['likes', 'Likes'], ['comments', 'Comments'], ['saves', 'Saves'], ['shares', 'Shares'], ['clicks', 'Link clicks'], ['bookingInquiries', 'Booking inquiries'], ['productClicks', 'Shopify product clicks'], ['salesCents', 'Attributed sales ($)']];
 /** Numbers for the post: imported (Instagram, posts the CRM published) or entered by hand — always labelled which. */
 function Performance({ post, onChanged }: { post: ContentPostDTO; onChanged: (p: ContentPostDTO) => void }) {
   const toast = useToast();
+  const METRICS = post.platform === 'email' ? EMAIL_METRICS : SOCIAL_METRICS;
+  const pct = (a?: number, b2?: number) => (a != null && b2 ? `${((a / b2) * 100).toFixed(1)}%` : '—');
   const [m, setM] = useState<Record<string, string>>(() => Object.fromEntries(METRICS.map(([k]) => [k, post.metrics[k] != null ? String(k === 'salesCents' ? post.metrics[k]! / 100 : post.metrics[k]) : ''])));
   const [busy, setBusy] = useState(false);
   const save = async () => {
@@ -320,6 +358,7 @@ function Performance({ post, onChanged }: { post: ContentPostDTO; onChanged: (p:
   };
   return (
     <div className="space-y-3 text-[14px]">
+      {post.platform === 'email' && <p className="text-[13px] text-ink-soft">Flodesk doesn’t share email stats with other apps — copy them from the campaign’s report in Flodesk (its definitions apply; opens can be overcounted by mail privacy features). Open rate {pct(post.metrics.opens, post.metrics.delivered ?? post.metrics.recipients)} · click rate {pct(post.metrics.clicks, post.metrics.delivered ?? post.metrics.recipients)}.</p>}
       <p className="text-[13px] text-ink-soft">{post.metricsSource ? <>Numbers {post.metricsSource === 'imported' ? 'imported from Instagram' : 'entered by hand'}{post.metricsUpdatedAt ? ` · ${new Date(post.metricsUpdatedAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}` : ''}.</> : 'No numbers yet.'} Posts the CRM published to Instagram import their numbers daily; enter others by hand.</p>
       <div className="grid gap-3 sm:grid-cols-4">{METRICS.map(([k, label]) => <Field key={k} label={label}><input className="field num" inputMode="decimal" value={m[k]} onChange={(e) => setM({ ...m, [k]: e.target.value })} /></Field>)}</div>
       <div className="flex gap-2"><Button variant="primary" loading={busy} onClick={save}>Save numbers</Button>{post.platform === 'instagram' && post.permalink && <Button loading={busy} onClick={importNow}>Import from Instagram</Button>}</div>

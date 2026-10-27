@@ -4,7 +4,9 @@ import type { ContentAccountId, ContentPostType } from '@addendum/shared';
  * A launch's promotion plan, by account: teasers before the release, the launch itself, and follow-ups after —
  * each `offset` days from the release date. Drafts to edit; the product's name is filled in throughout.
  */
-export interface LaunchPost { account: ContentAccountId; offset: number; type: ContentPostType; title: string; hook: string; caption: string; cta: string; hashtags: string; notes: string }
+export interface LaunchPost { account: ContentAccountId; offset: number; type: ContentPostType; title: string; hook: string; caption: string; cta: string; hashtags: string; notes: string;
+  /** Emails (Flodesk): subject and preview text. */
+  platform?: 'email'; email?: { subject: string; previewText: string } }
 
 export function launchPlan(product: string, accounts: ContentAccountId[]): LaunchPost[] {
   const P = product.trim();
@@ -23,11 +25,15 @@ export function launchPlan(product: string, accounts: ContentAccountId[]): Launc
     { account: 'a2', offset: 0, type: 'story', title: `${P} — shop link`, hook: 'It’s live!', caption: 'Story: product shot + link sticker to the product page.', cta: 'Tap to shop.', hashtags: '', notes: '' },
     { account: 'a2', offset: 3, type: 'reel', title: `${P} — demo`, hook: 'Watch it in action.', caption: `${P}, start to finish in real time.`, cta: 'Shop now.', hashtags: H, notes: 'One continuous demo, close-up.' },
     { account: 'a2', offset: 7, type: 'carousel', title: `${P} — your questions answered`, hook: 'You asked. We answered.', caption: `The questions we’ve had most since launching ${P}.`, cta: 'Shop now.', hashtags: H, notes: 'Collect real questions from DMs and comments in launch week.' },
+    { account: 'a2', offset: -3, type: 'email', platform: 'email', title: `${P} — coming soon email`, hook: 'Something new is coming', caption: `Be the first to know: ${P} launches in three days.\n\n1. Teaser image\n2. What it’s for\n3. Launch date and time`, cta: 'Get early access', hashtags: '', notes: 'Flodesk: launch-countdown style.', email: { subject: `Something new is coming: ${P}`, previewText: 'Be the first to know when it drops.' } },
+    { account: 'a2', offset: 0, type: 'email', platform: 'email', title: `${P} — launch-day email`, hook: `${P} is here`, caption: `It’s here. Introducing ${P}.\n\n1. Hero\n2. What it does\n3. How to use it\n4. Shop`, cta: 'Shop now', hashtags: '', notes: '', email: { subject: `Introducing ${P}`, previewText: 'Designed with stylists. Available now.' } },
+    { account: 'a2', offset: 7, type: 'email', platform: 'email', title: `${P} — benefits follow-up email`, hook: `Why ${P} makes a difference`, caption: `The benefits of ${P}, one by one — plus what customers are saying.\n\n1. Three benefits\n2. Reviews\n3. Shop`, cta: 'Shop now', hashtags: '', notes: '', email: { subject: `3 reasons you’ll love ${P}`, previewText: 'What it does — and what customers are saying.' } },
     { account: 'a2', offset: 14, type: 'reel', title: `${P} — first reactions`, hook: 'What you’re saying about it.', caption: `Your first reactions to ${P} — thank you for the love.`, cta: 'Shop now.', hashtags: H, notes: 'Reposts and reviews (with permission).' },
   );
   if (accounts.includes('a3')) plan.push(
     { account: 'a3', offset: -7, type: 'story', title: `${P} — for our pros first`, hook: 'Stylists, you’ll want to see this.', caption: `Story: heads-up to our pros — ${P} launches next week. Question sticker for what they want to know.`, cta: 'Send us your questions.', hashtags: '', notes: '' },
     { account: 'a3', offset: 0, type: 'reel', title: `${P} — how to use it`, hook: `How to use ${P} on your next install.`, caption: `${P} is here. A quick walkthrough for pros — set-up, technique and the result.`, cta: 'Explore professional products — link in bio.', hashtags: PRO, notes: 'Technique-first, close-up, captions on screen.' },
+    { account: 'a3', offset: 0, type: 'email', platform: 'email', title: `${P} — for professionals email`, hook: `${P} for professionals`, caption: `Now available for professionals: ${P}.\n\n1. What it solves at the chair\n2. Technique tips\n3. Shop professional`, cta: 'Explore professional solutions', hashtags: '', notes: '', email: { subject: `New for pros: ${P}`, previewText: 'What it solves at the chair, and how to use it.' } },
     { account: 'a3', offset: 2, type: 'carousel', title: `${P} — step by step`, hook: 'Save this for your next appointment.', caption: `Step-by-step: getting the best results with ${P}.`, cta: 'Save this and shop professional products.', hashtags: PRO, notes: 'Slides: 1. Hook 2–6. Steps 7. Pro tip.' },
     { account: 'a3', offset: 7, type: 'reel', title: `${P} — pro tips`, hook: 'Three tips from our educators.', caption: `Three ways our educators get more out of ${P}.`, cta: 'Learn more — link in bio.', hashtags: PRO, notes: '' },
     { account: 'a3', offset: 14, type: 'feed', title: `${P} — stylist results`, hook: 'Your installs, featuring the new tool.', caption: `Results from stylists using ${P} — tag us to be featured.`, cta: 'Tag @addendumhairpro to be featured.', hashtags: PRO, notes: 'Stylist work with permission and credit.' },

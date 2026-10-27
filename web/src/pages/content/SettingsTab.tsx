@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useReauth } from '../../components/domain/Reauth';
 import { CONTENT_PLATFORMS, type ContentAccount, type ContentPlatform, type ContentSettings } from '@addendum/shared';
@@ -14,6 +14,10 @@ export function SettingsTab({ b }: { b: Basics }) {
   const [accounts, setAccounts] = useState(b.accounts.map((a) => ({ ...a, pillarsText: a.pillars.join('\n') })));
   const [s, setS] = useState<ContentSettings>(b.settings ?? { requireApproval: true, goals: {}, access: {} });
   const [busy, setBusy] = useState(false);
+  const { data: segs } = useQuery({ queryKey: ['flodesk-segments'], staleTime: 300_000, queryFn: () => api.get<{ connected: boolean; segments: { id: string; name: string; subscribers: number | null }[]; error?: string }>('/content/email/segments') });
+  const [typed, setTyped] = useState<Record<string, string>>({});
+  const audiences = (a: ContentAccount['id']) => s.emailAudiences?.[a] ?? [];
+  const setAudiences = (a: ContentAccount['id'], list: { id: string; name: string }[]) => setS({ ...s, emailAudiences: { ...(s.emailAudiences ?? {}), [a]: list } });
   const reauth = useReauth();
   const [params, setParams] = useSearchParams();
   // Back from Facebook's sign-in.
@@ -66,6 +70,21 @@ export function SettingsTab({ b }: { b: Basics }) {
               {CONTENT_PLATFORMS.map((p) => <label key={p.value} className="flex items-center justify-between gap-2 text-[13px]">{p.label}<input className="field h-8 w-16 py-0 text-right num" inputMode="numeric" value={s.goals[a.id]?.[p.value] ?? ''} onChange={(e) => goal(a.id, p.value, Number(e.target.value.replace(/\D/g, '')) || 0)} /></label>)}
             </div>
           </div>
+          <Field label="Flodesk audiences for emails" hint={segs?.connected ? 'The segments this account’s emails go to by default (changeable per email). Not assumed to be one per account.' : 'Connect Flodesk in Settings → API & Integrations to pick its segments — or type the segment names for now.'}>
+            {segs?.connected && segs.segments.length ? (
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5">{segs.segments.map((g) => (
+                <label key={g.id} className="flex items-center gap-1.5 text-[13px]"><input type="checkbox" className="h-4 w-4 accent-plum" checked={audiences(a.id).some((x) => x.id === g.id)}
+                  onChange={(e) => setAudiences(a.id, e.target.checked ? [...audiences(a.id), { id: g.id, name: g.name }] : audiences(a.id).filter((x) => x.id !== g.id))} />{g.name}{g.subscribers != null && <span className="text-stone">({g.subscribers.toLocaleString()})</span>}</label>
+              ))}</div>
+            ) : (
+              <div className="space-y-1.5">
+                <div className="flex flex-wrap gap-1.5">{audiences(a.id).map((x) => <span key={x.id} className="inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-0.5 text-[12px]">{x.name}<button type="button" className="text-stone hover:text-ink" onClick={() => setAudiences(a.id, audiences(a.id).filter((y) => y.id !== x.id))} aria-label="Remove">×</button></span>)}</div>
+                <div className="flex gap-2"><input className="field h-9 flex-1" placeholder="Segment name, e.g. Salon clients" value={typed[a.id] ?? ''} onChange={(e) => setTyped({ ...typed, [a.id]: e.target.value })} />
+                  <Button size="sm" disabled={!typed[a.id]?.trim()} onClick={() => { setAudiences(a.id, [...audiences(a.id), { id: `name:${typed[a.id].trim()}`, name: typed[a.id].trim() }]); setTyped({ ...typed, [a.id]: '' }); }}>Add</Button></div>
+              </div>
+            )}
+            {segs?.error && <p className="mt-1 text-[12px] text-rose">{segs.error}</p>}
+          </Field>
           <Field label="Who works on this account" hint="None ticked = everyone with Content calendar. Administrators always can.">
             <div className="flex flex-wrap gap-x-4 gap-y-1.5">{b.staff.map((st) => (
               <label key={st.id} className="flex items-center gap-1.5 text-[13px]"><input type="checkbox" className="h-4 w-4 accent-plum" checked={(s.access[a.id] ?? []).includes(st.id)}

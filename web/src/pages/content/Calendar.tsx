@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, GripVertical, Plus, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight, GripVertical, Mail, Plus, Search } from 'lucide-react';
 import { CONTENT_FORMATS, CONTENT_PLATFORMS, CONTENT_STATUSES, type ContentAccountId, type ContentIdeaDTO, type ContentPostDTO } from '@addendum/shared';
 import { PlanningTab } from './Planning';
 import type { Prefill } from './PostEditor';
 import { api } from '../../api/client';
 import { Badge, Button, PageLoading, Segmented, cx, useToast } from '../../components/ui';
-import { AccountTag, STATUS_TONE, formatLabel, platformLabel, statusLabel, timeOf, ymd, type Basics } from './common';
+import { AccountTag, STATUS_TONE, formatLabel, platformLabel, postStatusLabel, timeOf, ymd, type Basics } from './common';
 
 type View = 'month' | 'week' | 'day';
 const PILL = { sage: 'bg-sage-tint text-sage', amber: 'bg-amber-tint text-amber', rose: 'bg-rose-tint text-rose', plum: 'bg-plum-tint text-plum', neutral: 'bg-mist text-stone' } as const;
@@ -22,7 +22,7 @@ export function CalendarTab({ b, onOpen, onNew, onUse }: { b: Basics; onOpen: (p
   const [view, setViewState] = useState<View>(() => { try { return (localStorage.getItem('content-view') as View) || 'month'; } catch { return 'month'; } });
   const setView = (v: View) => { setViewState(v); try { localStorage.setItem('content-view', v); } catch { /* private */ } };
   const [anchor, setAnchor] = useState(() => new Date());
-  const [f, setF] = useState({ account: '', platform: '', pillar: '', format: '', status: '', campaign: '', person: '' });
+  const [f, setF] = useState({ account: '', platform: '', pillar: '', format: '', status: '', campaign: '', person: '', channel: '' as '' | 'social' | 'email' });
   const [dragging, setDragging] = useState<string | null>(null);
   // Ideas under the calendar: drag one onto a day to start a post for that day.
   const [draggingIdea, setDraggingIdea] = useState<ContentIdeaDTO | null>(null);
@@ -40,7 +40,7 @@ export function CalendarTab({ b, onOpen, onNew, onUse }: { b: Basics; onOpen: (p
   }, [view, anchor]);
   const from = days[0]; const to = new Date(days[days.length - 1].getTime() + 86400_000);
   const { data, isLoading } = useQuery({ queryKey: ['content-posts', ymd(from), ymd(to)], queryFn: () => api.get<{ posts: ContentPostDTO[] }>(`/content/posts?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`).then((r) => r.posts) });
-  const posts = (data ?? []).filter((p) => (!f.account || p.account === f.account) && (!f.platform || p.platform === f.platform) && (!f.pillar || p.pillar === f.pillar) && (!f.format || p.type === f.format)
+  const posts = (data ?? []).filter((p) => (!f.channel || (f.channel === 'email') === (p.platform === 'email')) && (!f.account || p.account === f.account) && (!f.platform || p.platform === f.platform) && (!f.pillar || p.pillar === f.pillar) && (!f.format || p.type === f.format)
     && (!f.status || p.status === f.status) && (!f.campaign || p.campaignId === f.campaign) && (!f.person || [p.assignedStaffId, p.reviewerStaffId, p.publisherStaffId].includes(f.person)));
   const dated = posts.filter((p) => p.scheduledAt);
   const ideas = posts.filter((p) => !p.scheduledAt);
@@ -66,10 +66,10 @@ export function CalendarTab({ b, onOpen, onNew, onUse }: { b: Basics; onOpen: (p
     return (
       <button type="button" draggable={!['published', 'publishing'].includes(p.status)} onDragStart={(e) => { e.dataTransfer.setData('text/x-post', p.id); setDragging(p.id); }} onDragEnd={() => setDragging(null)} onClick={() => onOpen(p)}
         className={cx('block w-full rounded border-l-[3px] bg-white px-1.5 py-1 text-left shadow-sm hover:bg-mist/60', full ? 'text-[13px]' : 'text-[11px]')} style={{ borderLeftColor: a?.color }}
-        title={`${p.title} · ${a?.name} · ${platformLabel(p.platform)} · ${statusLabel(p.status)}`}>
-        <span className="flex items-center gap-1"><span className="num text-stone">{p.scheduledAt ? timeOf(p.scheduledAt) : ''}</span><span className="truncate font-medium text-ink">{p.title}</span></span>
+        title={`${p.title} · ${a?.name} · ${platformLabel(p.platform)} · ${postStatusLabel(p)}`}>
+        <span className="flex items-center gap-1">{p.platform === 'email' && <Mail className="h-3 w-3 shrink-0 text-stone" />}<span className="num text-stone">{p.scheduledAt ? timeOf(p.scheduledAt) : ''}</span><span className="truncate font-medium text-ink">{p.platform === 'email' && p.email?.subject ? p.email.subject : p.title}</span></span>
         <span className="flex flex-wrap items-center gap-x-1.5 text-[10.5px] text-stone"><span className="truncate">{a?.name}</span>· {platformLabel(p.platform)}{full && <> · {formatLabel(p.type)}</>}
-          <span className={cx('rounded px-1', PILL[STATUS_TONE[p.status]])}>{statusLabel(p.status)}</span></span>
+          <span className={cx('rounded px-1', PILL[STATUS_TONE[p.status]])}>{postStatusLabel(p)}</span></span>
         {full && p.assignedName && <span className="block text-[11px] text-stone">{p.assignedName}</span>}
       </button>
     );
@@ -85,7 +85,8 @@ export function CalendarTab({ b, onOpen, onNew, onUse }: { b: Basics; onOpen: (p
         <span className="min-w-[10rem] text-center text-[15px] font-medium text-ink">{title}</span>
         <Button size="sm" variant="ghost" icon={<ChevronRight className="h-4 w-4" />} aria-label="Next" onClick={() => step(1)} />
         <Button size="sm" variant="ghost" onClick={() => setAnchor(new Date())}>Today</Button>
-        <Segmented size="sm" className="ml-auto" value={view} onChange={setView} options={[{ value: 'month', label: 'Month' }, { value: 'week', label: 'Week' }, { value: 'day', label: 'Day' }]} />
+        <Segmented size="sm" className="ml-auto" value={f.channel || 'all'} onChange={(v) => setF({ ...f, channel: v === 'all' ? '' : v })} options={[{ value: 'all', label: 'All' }, { value: 'social', label: 'Social' }, { value: 'email', label: 'Email' }]} />
+        <Segmented size="sm" value={view} onChange={setView} options={[{ value: 'month', label: 'Month' }, { value: 'week', label: 'Week' }, { value: 'day', label: 'Day' }]} />
       </div>
       <div className="mb-4 flex flex-wrap gap-2">
         <div className="flex flex-wrap gap-1.5">
@@ -145,7 +146,7 @@ export function CalendarTab({ b, onOpen, onNew, onUse }: { b: Basics; onOpen: (p
           {!ideaList.length && <p className="p-2 text-[13px] text-stone">No ideas match — see the Ideas tab.</p>}
         </div>
       </section>
-      <section className="mt-6"><PlanningTab b={b} onUse={onUse} embedded /></section>
+      <section className="mt-6"><PlanningTab b={b} onUse={onUse} onOpen={onOpen} embedded /></section>
       <section className="mt-6">
         <h2 className="mb-2 text-[15px] font-medium text-ink">Not scheduled yet <span className="num text-stone">{ideas.length}</span></h2>
         {!ideas.length ? <p className="text-[13px] text-stone">Posts without a date show here — drag one onto a day to schedule it.</p> : (
@@ -154,7 +155,7 @@ export function CalendarTab({ b, onOpen, onNew, onUse }: { b: Basics; onOpen: (p
               <button type="button" className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-left text-[13px] hover:bg-mist/40" onClick={() => onOpen(p)}>
                 <AccountTag a={b.accountOf(p.account)} /><span className="min-w-0 flex-1 truncate font-medium text-ink">{p.title}</span>
                 <span className="text-stone">{platformLabel(p.platform)} · {formatLabel(p.type)}</span>{p.assignedName && <span className="text-stone">{p.assignedName}</span>}
-                <Badge tone={STATUS_TONE[p.status]}>{statusLabel(p.status)}</Badge>
+                <Badge tone={STATUS_TONE[p.status]}>{postStatusLabel(p)}</Badge>
               </button>
             </li>
           ))}</ul>

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type {
-  ContentAccount, ContentAccountId, ContentCampaignDTO, ContentCommentDTO, ContentIdeaDTO, ContentMediaDTO, ContentMetrics, ContentPlatform, ContentPostDTO,
+  ContentAccount, ContentAccountId, ContentCampaignDTO, ContentEmail, ContentCommentDTO, ContentIdeaDTO, ContentMediaDTO, ContentMetrics, ContentPlatform, ContentPostDTO,
   ContentPostType, ContentSettings, ContentStatus, CurrentUser,
 } from '@addendum/shared';
 import { config } from '../config.js';
@@ -10,7 +10,7 @@ import { InstagramApi, instagramAccounts, type IgSlot } from '../integrations/in
 import { badRequest, forbidden, notFound } from '../lib/errors.js';
 import { iso } from '../lib/time.js';
 import { getKV, getSettings, setKV } from '../repos/settings.js';
-import { BUILTIN_IDEAS } from './contentIdeas.js';
+import { BUILTIN_IDEAS, EMAIL_IDEAS } from './contentIdeas.js';
 
 /**
  * Content calendar for the three social accounts (@addendum.salon, @addendumhair, @addendumhairpro): planning,
@@ -137,7 +137,7 @@ async function toDTO(rows: any[]): Promise<ContentPostDTO[]> {
     campaignId: r.campaign_id, campaignName: r.campaign_name ?? null, groupId: r.group_id, sourcePostId: r.source_post_id, ideaId: r.idea_id,
     assignedStaffId: r.assigned_staff_id, assignedName: r.assigned_name ?? null, reviewerStaffId: r.reviewer_staff_id, reviewerName: r.reviewer_name ?? null,
     publisherStaffId: r.publisher_staff_id, publisherName: r.publisher_name ?? null, notes: r.notes, revision: r.revision,
-    metrics: r.metrics ?? {}, metricsSource: r.metrics_source, metricsUpdatedAt: iso(r.metrics_updated_at),
+    metrics: r.metrics ?? {}, metricsSource: r.metrics_source, metricsUpdatedAt: iso(r.metrics_updated_at), email: r.email ?? null,
     permalink: r.permalink, postedAt: iso(r.posted_at), error: r.error, createdAt: iso(r.created_at)!, updatedAt: iso(r.updated_at)!,
   }));
 }
@@ -158,6 +158,8 @@ export interface PostFields {
   headline: string | null; caption: string; cta: string | null; hashtags: string | null; pillar: string | null; autoPost: boolean;
   mediaIds: string[]; externalLinks: string[]; link: ContentPostDTO['link']; campaignId: string | null;
   assignedStaffId: string | null; reviewerStaffId: string | null; publisherStaffId: string | null; notes: string | null; ideaId?: string | null;
+  /** Email campaigns only. */
+  email?: ContentEmail | null;
 }
 
 /** What Instagram auto-posting needs for this post (null = ready). */
@@ -207,6 +209,7 @@ export async function createPosts(u: Who, accounts: ContentAccountId[], f: PostF
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::boolean,$13::uuid[],$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) RETURNING id`,
       // Cross-posted accounts can go out on different days (their own date and time).
       [account, ...VALUES({ ...f, autoPost: false, scheduledAt: account in schedules ? schedules[account] ?? null : f.scheduledAt }), status, group, sourcePostId, f.ideaId ?? null, u.id]))!;
+    if (f.email !== undefined) await db().query('UPDATE content_posts SET email = $2 WHERE id = $1', [r.id, f.platform === 'email' && f.email ? JSON.stringify(f.email) : null]);
     await log(r.id, u.id, 'status', null, null, status);
     out.push(await getPost(u, r.id));
   }
@@ -220,7 +223,8 @@ export async function updatePost(u: Who, id: string, f: PostFields) {
   checkFields(f);
   if (f.autoPost && !has(u, 'content:publish')) throw forbidden('Only people who publish content can turn on auto-posting.');
   if (f.autoPost && (await contentAccounts()).find((a) => a.id === before.account)?.privateAccount) throw badRequest('This account is private — Instagram doesn’t let apps post to it. It’s posted by hand, with a “Time to post” reminder.');
-  const changedCopy = before.caption !== f.caption || before.headline !== f.headline || before.cta !== f.cta || before.hashtags !== f.hashtags;
+  const changedCopy = before.caption !== f.caption || before.headline !== f.headline || before.cta !== f.cta || before.hashtags !== f.hashtags
+    || (f.email !== undefined && (before.email?.subject ?? null) !== (f.email?.subject ?? null)) || (f.email !== undefined && (before.email?.previewText ?? null) !== (f.email?.previewText ?? null));
   if (changedCopy) await log(id, u.id, 'revision', JSON.stringify({ revision: before.revision, headline: before.headline, caption: before.caption, cta: before.cta, hashtags: before.hashtags }));
   // Approved copy that changes goes back for review (when approval is required).
   const { requireApproval } = await contentSettings();
@@ -232,6 +236,7 @@ export async function updatePost(u: Who, id: string, f: PostFields) {
        revision = revision + $23::int, status = CASE WHEN $24 THEN 'in_review' ELSE status END,
        reminded_day_before = reminded_day_before AND NOT $25, reminded_today = reminded_today AND NOT $25, reminded_due = reminded_due AND NOT $25, updated_at = now() WHERE id = $1`,
     [id, ...VALUES(f), changedCopy ? 1 : 0, backToReview, moved]);
+  if (f.email !== undefined) await db().query('UPDATE content_posts SET email = $2 WHERE id = $1', [id, f.platform === 'email' && f.email ? JSON.stringify(f.email) : null]);
   if (backToReview) {
     await log(id, u.id, 'status', 'Copy changed after approval', before.status, 'in_review');
     await notify(f.reviewerStaffId, 'Post back in review', `“${f.title}” changed after it was approved.`, id, u.id);
@@ -272,6 +277,8 @@ export async function transition(u: Who, id: string, to: ContentStatus, comment:
   }
   if (to === 'scheduled') {
     if (!p.scheduledAt) throw badRequest('Pick a date and time first.');
+    // An email is "Scheduled in Flodesk" only once it's set up there — its Flodesk link is the record of that.
+    if (p.platform === 'email' && !p.email?.flodeskUrl) throw badRequest('Schedule it in Flodesk first, then add the Flodesk campaign link and mark it scheduled.');
     if (p.autoPost) {
       const acc = (await contentAccounts()).find((a) => a.id === p.account);
       if (acc?.privateAccount) throw badRequest(`${acc.name} is private — Instagram doesn’t let apps post to it. Turn off auto-posting; you’ll get a “Time to post” reminder instead.`);
@@ -282,7 +289,7 @@ export async function transition(u: Who, id: string, to: ContentStatus, comment:
   // Published by hand: confirmed by someone allowed to publish (auto-posting sets it itself).
   await db().query(`UPDATE content_posts SET status = $2, posted_at = CASE WHEN $2 = 'published' THEN COALESCE(posted_at, now()) ELSE posted_at END,
     error = CASE WHEN $2 IN ('scheduled','approved') THEN NULL ELSE error END, updated_at = now() WHERE id = $1`, [id, to]);
-  await log(id, u.id, 'status', comment?.trim() || (to === 'published' ? 'Confirmed as published' : null), from, to);
+  await log(id, u.id, 'status', comment?.trim() || (to === 'published' ? (p.platform === 'email' ? 'Confirmed as sent (Flodesk)' : 'Confirmed as published') : to === 'scheduled' && p.platform === 'email' ? 'Scheduled in Flodesk' : null), from, to);
   const t = `“${p.title}”`;
   if (to === 'in_review') await notify(p.reviewerStaffId, 'Post to review', `${t} is ready for review.`, id, u.id);
   if (to === 'changes_requested') await notify(p.assignedStaffId, 'Changes requested', `${t}: ${comment}`, id, u.id);
@@ -427,11 +434,11 @@ export async function createLaunch(u: Who, l: { product: string; releaseOn: stri
   const accounts = await contentAccounts();
   for (const p of launchPlan(l.product, l.accounts)) {
     const [post] = await createPosts(u, [p.account], {
-      platform: 'instagram', type: p.type, title: p.title, scheduledAt: null, dueAt: null, headline: p.hook, caption: p.caption, cta: p.cta || accounts.find((a) => a.id === p.account)?.cta || null,
+      platform: p.platform ?? 'instagram', type: p.type, title: p.title, scheduledAt: null, dueAt: null, headline: p.hook, caption: p.caption, cta: p.cta || accounts.find((a) => a.id === p.account)?.cta || null,
       hashtags: p.hashtags || null, pillar: p.account === 'a3' ? 'Professional product recommendations' : p.account === 'a1' ? 'Retail: Milbon & Oribe' : 'Launches & restocks', autoPost: false,
       mediaIds: [], externalLinks: [], link: null, campaignId: c.id, assignedStaffId: null, reviewerStaffId: null, publisherStaffId: null, notes: p.notes || null,
     }, 'draft');
-    await db().query('UPDATE content_posts SET launch_offset = $2 WHERE id = $1', [post.id, p.offset]);
+    await db().query('UPDATE content_posts SET launch_offset = $2, email = $3 WHERE id = $1', [post.id, p.offset, p.email ? JSON.stringify({ audience: [], objective: null, destinationUrl: null, draftUrl: null, flodeskUrl: null, ...p.email }) : null]);
   }
   await placeLaunchPosts(c.id);
   return (await listCampaigns()).find((x) => x.id === c.id)!;
@@ -450,24 +457,43 @@ export async function placeLaunchPosts(campaignId: string) {
   return rows.length;
 }
 
+/**
+ * A campaign's timeline: every deliverable (emails and posts) in date order, which still need approval, and conflicts —
+ * two emails to one account within 2 days, or two posts for one account at the same hour.
+ */
+export async function campaignTimeline(u: Who, id: string) {
+  const mine = await accountsFor(u);
+  const posts = await toDTO(await db().query(`${SELECT} WHERE p.campaign_id = $1 AND p.account = ANY($2::text[]) ORDER BY p.scheduled_at NULLS LAST, p.created_at`, [id, mine]));
+  const conflicts: { a: string; b: string; reason: string }[] = [];
+  const dated = posts.filter((p) => p.scheduledAt);
+  for (let i = 0; i < dated.length; i++) for (let j = i + 1; j < dated.length; j++) {
+    const a = dated[i], b = dated[j];
+    if (a.account !== b.account) continue;
+    const gap = Math.abs(Date.parse(a.scheduledAt!) - Date.parse(b.scheduledAt!));
+    if (a.platform === 'email' && b.platform === 'email' && gap < 2 * 86400_000) conflicts.push({ a: a.id, b: b.id, reason: 'Two emails to the same account within 2 days' });
+    else if (a.platform === b.platform && a.platform !== 'email' && gap < 3600_000) conflicts.push({ a: a.id, b: b.id, reason: 'Two posts for the same account within an hour' });
+  }
+  return { posts, conflicts, needsApproval: posts.filter((p) => !['approved', 'scheduled', 'publishing', 'published'].includes(p.status)).map((p) => p.id) };
+}
+
 // ---------------- Ideas library ----------------
 const REMOVED_IDEAS_KEY = 'content.ideas.removed';
 /** Adds any built-in ideas not there yet (one someone removed isn't added back). */
 export async function seedContentIdeas() {
   const removed = new Set((await getKV<string[]>(REMOVED_IDEAS_KEY)) ?? []);
   const have = new Set((await db().query<{ key: string }>('SELECT key FROM content_ideas WHERE key IS NOT NULL')).map((r) => r.key));
-  for (const i of BUILTIN_IDEAS) {
+  for (const i of [...BUILTIN_IDEAS, ...EMAIL_IDEAS]) {
     if (have.has(i.key) || removed.has(i.key)) continue;
     await db().query(
-      `INSERT INTO content_ideas(key, accounts, title, pillar, audience, platform, format, hook, visual, shot_list, caption, cta, hashtags, season, effort, builtin, also_story)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,true,$16) ON CONFLICT (key) DO NOTHING`,
-      [i.key, i.accounts, i.title, i.pillar, i.audience, i.platform, i.format, i.hook, i.visual, i.shots, i.caption, i.cta, i.hashtags, i.season, i.effort, !!i.alsoStory]);
+      `INSERT INTO content_ideas(key, accounts, title, pillar, audience, platform, format, hook, visual, shot_list, caption, cta, hashtags, season, effort, builtin, also_story, subject, preview_text, send_timing)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,true,$16,$17,$18,$19) ON CONFLICT (key) DO NOTHING`,
+      [i.key, i.accounts, i.title, i.pillar, i.audience, i.platform, i.format, i.hook, i.visual, i.shots, i.caption, i.cta, i.hashtags, i.season, i.effort, !!i.alsoStory, i.subject ?? null, i.preview ?? null, i.timing ?? null]);
   }
 }
 const ideaDTO = (r: any, favs: Set<string>): ContentIdeaDTO => ({
   id: r.id, accounts: r.accounts ?? [], title: r.title, pillar: r.pillar, audience: r.audience, platform: r.platform, format: r.format, hook: r.hook, visual: r.visual,
   shotList: r.shot_list, caption: r.caption, cta: r.cta, hashtags: r.hashtags, season: r.season, effort: r.effort, builtin: r.builtin, favorite: favs.has(r.id),
-  alsoStory: !!r.also_story, suggested: r.status === 'suggested', suggestedOn: r.suggested_on ? String(iso(r.suggested_on)).slice(0, 10) : null,
+  alsoStory: !!r.also_story, subject: r.subject ?? null, previewText: r.preview_text ?? null, sendTiming: r.send_timing ?? null, suggested: r.status === 'suggested', suggestedOn: r.suggested_on ? String(iso(r.suggested_on)).slice(0, 10) : null,
 });
 export async function listIdeas(u: Who) {
   await seedContentIdeas();
@@ -475,11 +501,11 @@ export async function listIdeas(u: Who) {
   const favs = new Set((await db().query<{ idea_id: string }>('SELECT idea_id FROM content_idea_favorites WHERE staff_id = $1', [u.id])).map((r) => r.idea_id));
   return (await db().query<any>(`SELECT * FROM content_ideas WHERE accounts && $1::text[] OR accounts = '{}' ORDER BY builtin, created_at DESC`, [mine])).map((r) => ideaDTO(r, favs));
 }
-export async function saveIdea(u: Who, i: Omit<ContentIdeaDTO, 'id' | 'builtin' | 'favorite'> & { id?: string }) {
-  const vals = [i.accounts, i.title, i.pillar, i.audience, i.platform, i.format, i.hook, i.visual, i.shotList, i.caption, i.cta, i.hashtags, i.season, i.effort, !!i.alsoStory];
+export async function saveIdea(u: Who, i: Omit<ContentIdeaDTO, 'id' | 'builtin' | 'favorite' | 'suggested' | 'suggestedOn'> & { id?: string }) {
+  const vals = [i.accounts, i.title, i.pillar, i.audience, i.platform, i.format, i.hook, i.visual, i.shotList, i.caption, i.cta, i.hashtags, i.season, i.effort, !!i.alsoStory, i.subject ?? null, i.previewText ?? null, i.sendTiming ?? null];
   // Editing a suggestion saves it to the library.
-  if (i.id) await db().query("UPDATE content_ideas SET accounts=$2, title=$3, pillar=$4, audience=$5, platform=$6, format=$7, hook=$8, visual=$9, shot_list=$10, caption=$11, cta=$12, hashtags=$13, season=$14, effort=$15, also_story=$16, status='library' WHERE id=$1", [i.id, ...vals]);
-  else await db().query('INSERT INTO content_ideas(accounts, title, pillar, audience, platform, format, hook, visual, shot_list, caption, cta, hashtags, season, effort, also_story, created_by_staff_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)', [...vals, u.id]);
+  if (i.id) await db().query("UPDATE content_ideas SET accounts=$2, title=$3, pillar=$4, audience=$5, platform=$6, format=$7, hook=$8, visual=$9, shot_list=$10, caption=$11, cta=$12, hashtags=$13, season=$14, effort=$15, also_story=$16, subject=$17, preview_text=$18, send_timing=$19, status='library' WHERE id=$1", [i.id, ...vals]);
+  else await db().query('INSERT INTO content_ideas(accounts, title, pillar, audience, platform, format, hook, visual, shot_list, caption, cta, hashtags, season, effort, also_story, subject, preview_text, send_timing, created_by_staff_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)', [...vals, u.id]);
   return listIdeas(u);
 }
 export async function deleteIdea(u: Who, id: string) {
@@ -562,11 +588,14 @@ export async function favoriteIdea(u: Who, id: string, on: boolean) {
 
 // ---------------- AI drafts ----------------
 export interface GenerateInput { account: ContentAccountId; platform: ContentPlatform; format: ContentPostType; pillar: string | null; tone: string | null; objective: string | null; campaign: string | null; brief: string | null; kind?: string | null }
-export interface Generated { title: string; headline: string | null; caption: string; cta: string | null; hashtags: string | null; extra: string | null; ai: boolean }
+export interface Generated { title: string; headline: string | null; caption: string; cta: string | null; hashtags: string | null; extra: string | null; ai: boolean;
+  /** Emails: subject line options (the first is used) and preview text. */
+  subjects?: string[]; previewText?: string | null }
 const KIND_ASK: Record<string, string> = {
   caption: 'an Instagram caption', reel: 'a Reels script with a shot list (in "extra")', story: 'an Instagram Story sequence, frame by frame (in "extra")',
   carousel: 'a carousel outline with copy for each slide (in "extra")', tiktok: 'a TikTok concept with hook, beats and on-screen text (in "extra")',
-  pinterest: 'a Pinterest pin title and description', promo: 'a promotional post', product: 'a product spotlight', email: 'an email campaign: subject line in "headline", body in "caption"',
+  pinterest: 'a Pinterest pin title and description', promo: 'a promotional post', product: 'a product spotlight',
+  email: 'an email campaign for Flodesk: 3 subject line options in "subjects", "previewText", the email body in "caption" (short sections with headings), the button text in "cta", and visual direction in "extra"',
 };
 /** A draft written for the account's voice, audience and CTA — with Claude when set up, else from the closest library idea. Always editable; never posted. */
 export async function generate(i: GenerateInput): Promise<Generated> {
@@ -575,15 +604,22 @@ export async function generate(i: GenerateInput): Promise<Generated> {
   const ai = aiService();
   if (ai.write) {
     const salon = (await getSettings()).business.name;
-    const system = `You write social media content for ${acc.name} (${acc.brand === 'salon' ? `${salon}, a luxury hair salon` : 'Addendum Hair, a professional hair extension brand'}). Voice: ${acc.voice} Primary call to action: ${acc.cta}. Content pillars: ${acc.pillars.join('; ')}. Never invent prices, discounts or claims that weren't given. Reply with ONLY a JSON object: {"title": short internal title, "headline": string|null, "caption": string, "cta": string, "hashtags": string (space-separated, 5-12, or "" for email), "extra": string|null}.`;
+    const system = `You write ${kind === 'email' ? 'email marketing (Flodesk)' : 'social media content'} for ${acc.name} (${acc.brand === 'salon' ? `${salon}, a luxury hair salon` : 'Addendum Hair, a professional hair extension brand'}). Voice: ${acc.voice}${acc.id === 'a1' ? ' Luxury editorial tone.' : acc.id === 'a2' ? ' Product-focused brand voice.' : ' Educational, professional tone for stylists.'} Primary call to action: ${acc.cta}. Content pillars: ${acc.pillars.join('; ')}. Never invent prices, discounts or claims that weren't given. Reply with ONLY a JSON object: {"title": short internal title, "headline": string|null, "caption": string, "cta": string, "hashtags": string (space-separated, 5-12, or "" for email), "extra": string|null${kind === 'email' ? ', "subjects": string[], "previewText": string' : ''}}.`;
     const user = [`Write ${KIND_ASK[kind] ?? KIND_ASK.caption} for ${i.platform} (${i.format}).`, i.pillar && `Pillar: ${i.pillar}.`, i.objective && `Objective: ${i.objective}.`, i.tone && `Tone: ${i.tone}.`, i.campaign && `Campaign: ${i.campaign}.`, i.brief && `Brief:\n${i.brief}`].filter(Boolean).join('\n');
     try {
       const text = await ai.write(system, user, 1500);
       const j = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
-      return { title: String(j.title ?? '').slice(0, 200) || 'AI draft', headline: j.headline ?? null, caption: String(j.caption ?? ''), cta: j.cta ?? acc.cta, hashtags: j.hashtags ?? null, extra: j.extra ?? null, ai: true };
+      const subjects = Array.isArray(j.subjects) ? j.subjects.map(String).filter(Boolean).slice(0, 5) : undefined;
+      return { title: String(j.title ?? '').slice(0, 200) || 'AI draft', headline: subjects?.[0] ?? j.headline ?? null, caption: String(j.caption ?? ''), cta: j.cta ?? acc.cta, hashtags: kind === 'email' ? null : j.hashtags ?? null, extra: j.extra ?? null, ai: true, subjects, previewText: j.previewText ?? null };
     } catch (e) { console.warn('[content] AI draft failed:', (e as Error).message); }
   }
   // Built-in: the closest library idea for this account (pillar and format), with the account's CTA.
+  if (kind === 'email') {
+    const emails = EMAIL_IDEAS.filter((x) => x.accounts.includes(i.account));
+    const e = emails.find((x) => x.pillar === i.pillar) ?? emails[0];
+    return { title: e.title, headline: e.subject ?? null, caption: [i.brief?.trim() && !i.brief.startsWith('Repurpose') ? i.brief.trim() : e.caption, '', e.shots].join('\n'), cta: e.cta, hashtags: null,
+      extra: `Visual: ${e.visual}\nSend: ${e.timing}`, ai: false, subjects: [e.subject!], previewText: e.preview ?? null };
+  }
   const ideas = BUILTIN_IDEAS.filter((x) => x.accounts.includes(i.account));
   const best = ideas.find((x) => x.pillar === i.pillar && x.format === i.format) ?? ideas.find((x) => x.pillar === i.pillar) ?? ideas.find((x) => x.format === i.format) ?? ideas[0];
   const brief = i.brief?.trim();
@@ -627,11 +663,14 @@ const ENGAGE = (m: ContentMetrics) => (m.likes ?? 0) + (m.comments ?? 0) + (m.sa
 export async function analytics(u: Who, from: string, to: string) {
   const mine = await accountsFor(u);
   const posts = await toDTO(await db().query(`${SELECT} WHERE p.account = ANY($3::text[]) AND p.status = 'published' AND COALESCE(p.posted_at, p.scheduled_at) >= $1 AND COALESCE(p.posted_at, p.scheduled_at) < $2`, [from, to, mine]));
-  const KEYS: (keyof ContentMetrics)[] = ['reach', 'impressions', 'views', 'likes', 'comments', 'saves', 'shares', 'clicks', 'bookingInquiries', 'productClicks', 'salesCents'];
+  const KEYS: (keyof ContentMetrics)[] = ['reach', 'impressions', 'views', 'likes', 'comments', 'saves', 'shares', 'clicks', 'bookingInquiries', 'productClicks', 'salesCents', 'recipients', 'delivered', 'opens', 'unsubscribes', 'bounces'];
   const sum = (list: ContentPostDTO[]) => Object.fromEntries(KEYS.map((k) => [k, list.reduce((n, p) => n + (p.metrics[k] ?? 0), 0)])) as Required<ContentMetrics>;
-  const group = (key: (p: ContentPostDTO) => string) => [...new Set(posts.map(key))].map((k) => { const l = posts.filter((p) => key(p) === k); return { key: k, posts: l.length, withMetrics: l.filter((p) => p.metricsSource).length, totals: sum(l), engagement: l.reduce((n, p) => n + ENGAGE(p.metrics), 0) }; });
-  const byAccount = group((p) => p.account); const byPlatform = group((p) => p.platform);
-  const top = [...posts].filter((p) => p.metricsSource).sort((a, b) => ENGAGE(b.metrics) - ENGAGE(a.metrics) || (b.metrics.reach ?? 0) - (a.metrics.reach ?? 0)).slice(0, 5);
+  const group = (key: (p: ContentPostDTO) => string, from = posts) => [...new Set(from.map(key))].map((k) => { const l = from.filter((p) => key(p) === k); return { key: k, posts: l.length, withMetrics: l.filter((p) => p.metricsSource).length, totals: sum(l), engagement: l.reduce((n, p) => n + ENGAGE(p.metrics), 0) }; });
+  const social = posts.filter((p) => p.platform !== 'email');
+  const byAccount = group((p) => p.account, social); const byPlatform = group((p) => p.platform, social);
+  // Emails on their own (sent ones, numbers from Flodesk's report entered by hand).
+  const emailByAccount = group((p) => p.account, posts.filter((p) => p.platform === 'email'));
+  const top = [...social].filter((p) => p.metricsSource).sort((a, b) => ENGAGE(b.metrics) - ENGAGE(a.metrics) || (b.metrics.reach ?? 0) - (a.metrics.reach ?? 0)).slice(0, 5);
   // Suggest more of each account's best pillar and format (by average engagement, 2+ posts with numbers).
   const accs = await contentAccounts();
   const suggestions = mine.flatMap((a) => {
@@ -643,7 +682,7 @@ export async function analytics(u: Who, from: string, to: string) {
     const pillar = best((p) => p.pillar); const format = best((p) => p.type);
     return [pillar && `${name}: “${pillar.k}” gets the most engagement (about ${Math.round(pillar.avg)} per post) — plan more of it.`, format && `${name}: ${format.k} posts perform best — use that format more.`].filter(Boolean) as string[];
   });
-  return { posts: posts.length, totals: sum(posts), byAccount, byPlatform, top, suggestions, manual: posts.filter((p) => p.metricsSource === 'manual').length, imported: posts.filter((p) => p.metricsSource === 'imported').length };
+  return { posts: posts.length, totals: sum(posts), byAccount, byPlatform, emailByAccount, top, suggestions, manual: posts.filter((p) => p.metricsSource === 'manual').length, imported: posts.filter((p) => p.metricsSource === 'imported').length };
 }
 
 // ---------------- Scheduler: reminders, auto-posting and metrics ----------------
@@ -681,7 +720,7 @@ export async function remindTimeToPost(now = new Date()) {
   const names = new Map((await contentAccounts()).map((a) => [a.id, a.name]));
   for (const r of rows) {
     const who = r.publisher_staff_id ?? r.assigned_staff_id;
-    if (who) await notify(who, `Time to post: ${r.title}`, `Post it on ${names.get(r.account) ?? r.platform} now, then open it and press Confirm published.`, r.id);
+    if (who) await notify(who, r.platform === 'email' ? `Email due: ${r.title}` : `Time to post: ${r.title}`, r.platform === 'email' ? 'Check in Flodesk that it went out, then open it and confirm it as sent.' : `Post it on ${names.get(r.account) ?? r.platform} now, then open it and press Confirm published.`, r.id);
     await db().query('UPDATE content_posts SET reminded_due = true WHERE id = $1', [r.id]);
   }
   return rows.length;

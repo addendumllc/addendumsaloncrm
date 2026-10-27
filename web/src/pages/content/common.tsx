@@ -7,6 +7,9 @@ export const STATUS_TONE: Record<ContentStatus, 'neutral' | 'amber' | 'plum' | '
   idea: 'neutral', draft: 'neutral', in_review: 'amber', changes_requested: 'rose', approved: 'sage', scheduled: 'plum', publishing: 'plum', published: 'sage', failed: 'rose',
 };
 export const statusLabel = (s: ContentStatus) => CONTENT_STATUSES.find((x) => x.value === s)?.label ?? s;
+/** A post's status in its channel's words: emails are "Planned" until scheduled in Flodesk, then "Sent" once confirmed. */
+export const postStatusLabel = (p: { status: ContentStatus; platform: string }) => (p.platform !== 'email' ? statusLabel(p.status)
+  : p.status === 'scheduled' ? 'Scheduled in Flodesk' : p.status === 'published' ? 'Sent' : p.status === 'publishing' ? 'Sending…' : p.status === 'approved' ? 'Approved (planned)' : statusLabel(p.status));
 export const formatLabel = (f: string) => CONTENT_FORMATS.find((x) => x.value === f)?.label ?? f;
 export const platformLabel = (p: string) => CONTENT_PLATFORMS.find((x) => x.value === p)?.label ?? p;
 export const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;

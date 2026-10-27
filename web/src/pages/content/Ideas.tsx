@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Bookmark, CalendarPlus, Heart, Plus, Search, Sparkles, Trash2, Wand2, X } from 'lucide-react';
+import { Bookmark, CalendarPlus, Heart, Mail, Plus, Search, Sparkles, Trash2, Wand2, X } from 'lucide-react';
 import { CONTENT_FORMATS, CONTENT_PLATFORMS, type ContentAccountId, type ContentIdeaDTO, type ContentPlatform, type ContentPostType } from '@addendum/shared';
 import { api } from '../../api/client';
-import { Badge, Button, EmptyState, Field, Modal, PageLoading, cx, useToast } from '../../components/ui';
+import { Badge, Button, EmptyState, Field, Modal, PageLoading, Segmented, cx, useToast } from '../../components/ui';
 import { AccountTag, formatLabel, platformLabel, type Basics } from './common';
 import type { Prefill } from './PostEditor';
 
@@ -14,11 +14,11 @@ export function IdeasTab({ b, onUse }: { b: Basics; onUse: (p: Prefill) => void 
   const toast = useToast();
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ['content-ideas'], queryFn: () => api.get<{ ideas: ContentIdeaDTO[] }>('/content/ideas').then((r) => r.ideas) });
-  const [f, setF] = useState({ q: '', account: '', pillar: '', format: '', favorites: false });
+  const [f, setF] = useState({ q: '', account: '', pillar: '', format: '', favorites: false, channel: 'all' as 'all' | 'social' | 'email' });
   const [editing, setEditing] = useState<ContentIdeaDTO | 'new' | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [suggesting, setSuggesting] = useState(false);
-  const fresh = (data ?? []).filter((i) => i.suggested && (!f.account || i.accounts.includes(f.account as ContentAccountId)));
+  const fresh = (data ?? []).filter((i) => i.suggested && (f.channel === 'all' || (f.channel === 'email') === (i.platform === 'email')) && (!f.account || i.accounts.includes(f.account as ContentAccountId)));
   const suggestMore = async () => {
     setSuggesting(true);
     try {
@@ -30,25 +30,29 @@ export function IdeasTab({ b, onUse }: { b: Basics; onUse: (p: Prefill) => void 
   const keep = async (i: ContentIdeaDTO) => { qc.setQueryData(['content-ideas'], (await api.put<{ ideas: ContentIdeaDTO[] }>(`/content/ideas/${i.id}/keep`)).ideas); toast('Saved to the library'); };
   const dismiss = async (i: ContentIdeaDTO) => { qc.setQueryData(['content-ideas'], (await api.del<{ ideas: ContentIdeaDTO[] }>(`/content/ideas/${i.id}`)).ideas); };
   const words = f.q.toLowerCase().split(/\s+/).filter(Boolean);
-  const list = (data ?? []).filter((i) => !i.suggested && (!f.account || i.accounts.includes(f.account as ContentAccountId)) && (!f.pillar || i.pillar === f.pillar) && (!f.format || i.format === f.format) && (!f.favorites || i.favorite)
-    && words.every((w) => `${i.title} ${i.pillar} ${i.hook ?? ''} ${i.caption ?? ''} ${i.season ?? ''}`.toLowerCase().includes(w)))
+  const list = (data ?? []).filter((i) => !i.suggested && (f.channel === 'all' || (f.channel === 'email') === (i.platform === 'email')) && (!f.account || i.accounts.includes(f.account as ContentAccountId)) && (!f.pillar || i.pillar === f.pillar) && (!f.format || i.format === f.format) && (!f.favorites || i.favorite)
+    && words.every((w) => `${i.title} ${i.pillar} ${i.hook ?? ''} ${i.caption ?? ''} ${i.season ?? ''} ${i.subject ?? ''}`.toLowerCase().includes(w)))
     .sort((a, x) => Number(x.favorite) - Number(a.favorite));
   const pillars = [...new Set((data ?? []).map((i) => i.pillar))].sort();
   const fav = async (i: ContentIdeaDTO) => { await api.put(`/content/ideas/${i.id}/favorite`, { on: !i.favorite }); void qc.invalidateQueries({ queryKey: ['content-ideas'] }); };
   // An idea for several accounts is cross-posted: all its accounts ticked, each on its own day.
   const toCalendar = (i: ContentIdeaDTO, extra: Partial<Prefill> = {}) => onUse({
     accounts: f.account ? [f.account as ContentAccountId] : i.accounts, title: i.title, platform: i.platform, type: i.format, headline: i.hook,
-    caption: i.caption ?? '', cta: i.cta, hashtags: i.hashtags, pillar: i.pillar, ideaId: i.id, notes: [i.visual && `Visual: ${i.visual}`, i.shotList && `Shot list:\n${i.shotList}`].filter(Boolean).join('\n\n'), ...extra,
+    caption: i.platform === 'email' ? [i.previewText, i.shotList].filter(Boolean).join('\n\n') : i.caption ?? '', cta: i.cta, hashtags: i.hashtags, pillar: i.pillar, ideaId: i.id,
+    notes: [i.visual && `Visual: ${i.visual}`, i.platform !== 'email' && i.shotList && `Shot list:\n${i.shotList}`, i.sendTiming && `Send: ${i.sendTiming}`].filter(Boolean).join('\n\n'),
+    ...(i.platform === 'email' ? { email: { subject: i.subject, previewText: i.previewText } } : {}), ...extra,
   });
   const draft = async (i: ContentIdeaDTO) => {
     const account = (f.account as ContentAccountId) || i.accounts[0];
     setBusy(i.id);
     try {
-      const g = (await api.post<{ draft: { title: string; headline: string | null; caption: string; cta: string | null; hashtags: string | null; extra: string | null; ai: boolean } }>('/content/generate', {
+      const g = (await api.post<{ draft: { title: string; headline: string | null; caption: string; cta: string | null; hashtags: string | null; extra: string | null; ai: boolean; subjects?: string[]; previewText?: string | null } }>('/content/generate', {
         account, platform: i.platform, format: i.format, pillar: i.pillar, brief: [`Idea: ${i.title}`, i.hook && `Hook: ${i.hook}`, i.visual && `Visual: ${i.visual}`, i.caption && `Starting caption: ${i.caption}`, i.audience && `Audience: ${i.audience}`].filter(Boolean).join('\n'),
       })).draft;
       if (!g.ai) toast('Built-in draft (add an Anthropic key for AI writing) — edit before saving.');
-      toCalendar(i, { accounts: [account], headline: g.headline ?? i.hook, caption: g.caption, cta: g.cta ?? i.cta, hashtags: g.hashtags ?? i.hashtags, notes: [g.extra, i.shotList && `Shot list:\n${i.shotList}`].filter(Boolean).join('\n\n') });
+      toCalendar(i, { accounts: [account], headline: g.headline ?? i.hook, caption: g.caption, cta: g.cta ?? i.cta, hashtags: i.platform === 'email' ? null : g.hashtags ?? i.hashtags,
+        notes: [g.extra, i.platform !== 'email' && i.shotList && `Shot list:\n${i.shotList}`, g.subjects && g.subjects.length > 1 && `Other subject lines:\n${g.subjects.slice(1).join('\n')}`].filter(Boolean).join('\n\n'),
+        ...(i.platform === 'email' ? { email: { subject: g.subjects?.[0] ?? g.headline ?? i.subject, previewText: g.previewText ?? i.previewText } } : {}) });
     } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(null); }
   };
   return (
@@ -58,6 +62,7 @@ export function IdeasTab({ b, onUse }: { b: Basics; onUse: (p: Prefill) => void 
         <select className="field h-10 w-auto" value={f.account} onChange={(e) => setF({ ...f, account: e.target.value })} aria-label="Account"><option value="">All accounts</option>{b.mine.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
         <select className="field h-10 w-auto" value={f.pillar} onChange={(e) => setF({ ...f, pillar: e.target.value })} aria-label="Pillar"><option value="">All pillars</option>{pillars.map((p) => <option key={p}>{p}</option>)}</select>
         <select className="field h-10 w-auto" value={f.format} onChange={(e) => setF({ ...f, format: e.target.value })} aria-label="Format"><option value="">All formats</option>{CONTENT_FORMATS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}</select>
+        <Segmented size="sm" value={f.channel} onChange={(v) => setF({ ...f, channel: v })} options={[{ value: 'all', label: 'All' }, { value: 'social', label: 'Social' }, { value: 'email', label: 'Email' }]} />
         <label className="flex items-center gap-1.5 text-[13px] text-ink-soft"><input type="checkbox" className="h-4 w-4 accent-plum" checked={f.favorites} onChange={(e) => setF({ ...f, favorites: e.target.checked })} />Favourites</label>
         <span className="ml-auto flex gap-2">
           <Button icon={<Wand2 className="h-4 w-4" />} loading={suggesting} onClick={suggestMore}>Suggest more</Button>
@@ -95,9 +100,13 @@ export function IdeasTab({ b, onUse }: { b: Basics; onUse: (p: Prefill) => void 
                 <button type="button" onClick={() => fav(i)} aria-label={i.favorite ? 'Remove favourite' : 'Favourite'} className={cx('p-0.5', i.favorite ? 'text-rose' : 'text-stone hover:text-ink')}><Heart className="h-4 w-4" fill={i.favorite ? 'currentColor' : 'none'} /></button>
               </div>
               <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">{i.accounts.map((a) => <AccountTag key={a} a={b.accountOf(a)} small />)}<Badge>{i.pillar}</Badge><span className="text-[11px] text-stone">{platformLabel(i.platform)} · {formatLabel(i.format)}{i.alsoStory ? ' + Story' : ''}{i.accounts.length > 1 ? ' · Cross-post' : ''} · {EFFORT[i.effort]}{i.season && i.season !== 'any' ? ` · ${i.season}` : ''}</span></div>
-              {i.hook && <p className="mb-1 italic text-ink">“{i.hook}”</p>}
+              {i.platform === 'email' ? <>
+                <p className="mb-0.5 flex items-start gap-1.5 text-ink"><Mail className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone" /><span><b className="font-medium">{i.subject}</b></span></p>
+                {i.previewText && <p className="text-ink-soft">{i.previewText}</p>}
+                {i.sendTiming && <p className="text-stone">Send: {i.sendTiming}</p>}
+              </> : i.hook && <p className="mb-1 italic text-ink">“{i.hook}”</p>}
               {i.audience && <p className="text-stone">For: {i.audience}</p>}
-              <details className="mt-1 text-ink-soft"><summary className="cursor-pointer text-[12px] text-plum">Visual, shots and caption</summary>
+              <details className="mt-1 text-ink-soft"><summary className="cursor-pointer text-[12px] text-plum">{i.platform === 'email' ? 'Outline, visuals and CTA' : 'Visual, shots and caption'}</summary>
                 {i.visual && <p className="mt-1"><b className="font-medium">Visual:</b> {i.visual}</p>}
                 {i.shotList && <p className="mt-1 whitespace-pre-line"><b className="font-medium">Shots:</b>{'\n'}{i.shotList}</p>}
                 {i.caption && <p className="mt-1">{i.caption}</p>}{i.cta && <p className="mt-1"><b className="font-medium">CTA:</b> {i.cta}</p>}{i.hashtags && <p className="mt-1 text-stone">{i.hashtags}</p>}
