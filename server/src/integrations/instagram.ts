@@ -57,6 +57,20 @@ export class InstagramApi {
     return (await this.call<{ status_code?: string }>('GET', `/${containerId}`, { fields: 'status_code' })).status_code ?? 'FINISHED';
   }
 
+  /** A published post's numbers (whatever Instagram offers for its type; older metrics are skipped if refused). */
+  async insights(mediaId: string): Promise<Record<string, number>> {
+    const NAMES: Record<string, string> = { reach: 'reach', views: 'views', likes: 'likes', comments: 'comments', saved: 'saves', shares: 'shares', total_interactions: '' };
+    for (const metric of ['reach,views,likes,comments,saved,shares', 'reach,likes,comments,saved,shares', 'reach,likes,comments']) {
+      try {
+        const r = await this.call<{ data?: { name: string; values?: { value: number }[]; total_value?: { value: number } }[] }>('GET', `/${mediaId}/insights`, { metric });
+        const out: Record<string, number> = {};
+        for (const d of r.data ?? []) { const key = NAMES[d.name]; const v = d.total_value?.value ?? d.values?.[0]?.value; if (key && typeof v === 'number') out[key] = v; }
+        return out;
+      } catch (e) { if ((e as IntegrationError).authProblem) throw e; }
+    }
+    return {};
+  }
+
   async publish(containerId: string) {
     const { id } = await this.call<{ id: string }>('POST', `/${this.accountId}/media_publish`, { creation_id: containerId });
     const info = await this.call<{ permalink?: string }>('GET', `/${id}`, { fields: 'permalink' }).catch(() => ({ permalink: undefined }));

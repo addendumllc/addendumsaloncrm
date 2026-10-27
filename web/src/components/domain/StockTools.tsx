@@ -1703,7 +1703,8 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
   const collections = [...new Set(allTheirs.map(collOf))].sort((a, b) => a.localeCompare(b));
   const theirs = allTheirs.filter((p) => (!coll || collOf(p) === coll) && (showSkipped || !isSkipped(p)))
     .sort((a, b) => collOf(a).localeCompare(collOf(b)) || lenN(a) - lenN(b) || rank(a) - rank(b) || a.label.localeCompare(b.label));
-  const suggested = theirs.filter((p) => rank(p) <= 2 && !has(p.key) && !isSkipped(p));
+  // Suggested: would sell out within 2 weeks (and, for 18" packs, neither the 20g nor 25g pack is in stock).
+  const suggested = theirs.filter((p) => fc.get(p.key)?.suggestNow && !has(p.key) && !isSkipped(p));
   const skipOne = async (p: StockProductDTO, on: boolean) => {
     try {
       await api.put('/inventory-sync/stock/products/skip', { keys: [p.key], until: on ? '9999-12-31' : null });
@@ -1776,7 +1777,7 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
               <ul className="max-h-[45vh] divide-y divide-line overflow-auto rounded-xl border border-line bg-white">
                 {theirs.map((p, idx) => {
                   const f = fc.get(p.key);
-                  const low = rank(p) <= 2;
+                  const low = !!f?.suggestNow;
                   const c = collOf(p);
                   const inC = theirs.filter((x) => collOf(x) === c && !isSkipped(x));
                   const allIn = inC.length > 0 && inC.every((x) => has(x.key));

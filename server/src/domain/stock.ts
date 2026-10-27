@@ -809,6 +809,7 @@ export async function stockForecast(): Promise<StockForecastResponse> {
   const order: StockForecastDTO['status'][] = ['out', 'order_now', 'soon', 'watch', 'healthy', 'no_sales', 'discontinued'];
   items.sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status) || (a.orderBy ?? '9').localeCompare(b.orderBy ?? '9') || a.label.localeCompare(b.label));
   await markRecounts(items, settings);
+  markSuggestNow(items, today);
   const state = await getKV<{ updatedAt: string | null; note: string | null }>(SALES_KEY);
   const notes = await salesNotes();
   return {
@@ -992,7 +993,7 @@ export async function suggestedOrderPlan(store: 'salon' | 'shopify' | 'all', by:
   const f = await stockForecast();
   const fallback = await defaultSupplier();
   const inStore = (i: StockForecastDTO) => store === 'all' || (store === 'salon' ? i.stores.salon : i.stores.online);
-  const need = f.items.filter((i) => i.suggestedQty > 0 && !i.skippedUntil && ['out', 'order_now', 'soon'].includes(i.status) && inStore(i));
+  const need = f.items.filter((i) => i.suggestNow && inStore(i));
   const coll = collectionOfEach(f.items.filter(inStore));
   // One draft per collection and supplier — never two suppliers on one order; products without one are "Supplier needed".
   const groups = new Map<string, StockForecastDTO[]>();
@@ -1614,6 +1615,25 @@ export async function notifyNewPreorders(notify: (staffIds: string[], title: str
  * Bell notification when a product that sells runs out, or is at risk of running out before a new order could arrive.
  * Each product is announced once per state (out, or at risk) until it's back in stock.
  */
+// ---------------- What to suggest ordering now ----------------
+/** Only what would sell out within this many days is suggested (New purchase order, Draft suggested orders). */
+export const SUGGEST_WITHIN_DAYS = 14;
+/** "18-APRW-25g" → "APRW" for 18" packs sold as 20g or 25g; null for anything else. */
+const pack18 = (sku: string | null) => sku?.trim().match(/^18-(.+)-(20|25)\s*g$/i)?.[1]?.toUpperCase() ?? null;
+/**
+ * Suggested now: needs ordering (out and selling, order now, or reorder soon) with its order-by date within the next
+ * 2 weeks; skipped products never. An 18" pack isn't suggested while either the 20g or the 25g pack of that colour is in stock.
+ */
+export function markSuggestNow(items: StockForecastDTO[], today: string) {
+  const cutoff = addDays(today, SUGGEST_WITHIN_DAYS);
+  const packInStock = new Set(items.filter((i) => pack18(i.sku) && i.stock > 0).map((i) => pack18(i.sku)!));
+  for (const i of items) {
+    const due = i.status === 'out' ? i.ratePerDay > 0 || i.preorders > 0 : ['order_now', 'soon'].includes(i.status) && (!i.orderBy || i.orderBy <= cutoff);
+    const covered = !!pack18(i.sku) && packInStock.has(pack18(i.sku)!);
+    i.suggestNow = due && !covered && !i.skippedUntil && i.suggestedQty > 0;
+  }
+}
+
 // ---------------- Recount alerts (extensions running low) ----------------
 const RECOUNT_KEY = 'stock.recount.lowSince';
 const EXTENSION_WORDS = /\b(wefts?|clip-?ins?|k-?tips?|i-?tips?|tape-?ins?|tapes?|ponytails?|halos?|extensions?)\b/i;

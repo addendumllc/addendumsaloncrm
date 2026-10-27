@@ -23,4 +23,6 @@ export interface AIService {
   readonly provider: 'anthropic' | 'built_in';
   analyze(text: string): Promise<MessageInsight>;
   draft(ctx: DraftContext): Promise<string>;
+  /** Free-form writing (e.g. content drafts); only with a real model — the built-in service has none. */
+  write?(system: string, user: string, maxTokens?: number): Promise<string>;
 }

@@ -13,23 +13,60 @@ beforeAll(async () => { ({ api, app, agent } = await setup()); });
 
 const upload = async (mime = 'image/png', bytes = PNG) =>
   (await agent.post('/api/content/media').set('x-requested-with', 'addendum-crm').set('content-type', mime).set('x-file-name', 'a.png').send(bytes)).body.media;
-const base = (over: object = {}) => ({ account: 'a1', type: 'feed', scheduledAt: null, caption: 'Hello', status: 'idea', autoPost: false, mediaIds: [], link: null, assignedStaffId: null, notes: null, ...over });
+const base = (over: object = {}) => ({ accounts: ['a1'], title: 'Balayage reveal', platform: 'instagram', type: 'feed', caption: 'Hello', status: 'draft', ...over });
 
 describe('Content calendar', () => {
-  it('accounts are named in the CRM; posts are planned with media, a link and a person', async () => {
-    const acc = (await api.put('/api/content/accounts', { accounts: [{ id: 'a1', name: 'Addendum Salon', handle: '@addendumsalon', color: '#6b5242' }] })).body.accounts;
-    expect(acc[0]).toMatchObject({ id: 'a1', name: 'Addendum Salon', handle: 'addendumsalon', connected: false });
-    const m = await upload();
-    expect(m.mime).toBe('image/png');
-    const staff = (await db().one<any>('SELECT id FROM staff WHERE active LIMIT 1')).id;
-    const when = new Date(Date.now() + 3 * 86400_000).toISOString();
-    const r = await api.post('/api/content/posts', base({ scheduledAt: when, mediaIds: [m.id], link: { kind: 'service', ref: 'x', label: 'Balayage' }, assignedStaffId: staff, status: 'draft', type: 'reel' }));
+  it('has the three accounts, and one idea for several accounts makes separate linked posts', async () => {
+    const acc = (await api.get('/api/content/accounts')).body.accounts;
+    expect(acc.map((a: any) => a.name)).toEqual(['@addendum.salon', '@addendumhair', '@addendumhairpro']);
+    expect(acc[0].cta).toMatch(/Book/);
+    const r = await api.post('/api/content/posts', base({ accounts: ['a2', 'a3'], title: 'Heat shields' }));
     expect(r.status).toBe(201);
-    expect(r.body.post).toMatchObject({ type: 'reel', status: 'draft', link: { label: 'Balayage' }, assignedStaffId: staff });
-    const list = (await api.get(`/api/content/posts?from=${encodeURIComponent(new Date().toISOString())}&to=${encodeURIComponent(new Date(Date.now() + 30 * 86400_000).toISOString())}`)).body.posts;
-    expect(list.some((p: any) => p.id === r.body.post.id)).toBe(true);
-    // Wrong file types are refused.
-    expect((await agent.post('/api/content/media').set('x-requested-with', 'addendum-crm').set('content-type', 'application/pdf').send(Buffer.from('x'))).status).toBe(400);
+    expect(r.body.posts.map((p: any) => p.account)).toEqual(['a2', 'a3']);
+    expect(r.body.posts[0].groupId).toBeTruthy();
+    expect(r.body.posts[0].groupId).toBe(r.body.posts[1].groupId);
+    // Each is edited on its own.
+    const [a, b] = r.body.posts;
+    await api.put(`/api/content/posts/${a.id}`, { ...a, caption: 'Only for @addendumhair', mediaIds: [], link: null });
+    expect((await api.get(`/api/content/posts/${b.id}`)).body.post.caption).toBe('Hello');
+  });
+
+  it('workflow: review → changes requested → approved → scheduled → published by someone allowed, with history', async () => {
+    const p = (await api.post('/api/content/posts', base({ scheduledAt: new Date(Date.now() + 86400_000).toISOString() }))).body.posts[0];
+    // Approval required: can't schedule a draft.
+    expect((await api.post(`/api/content/posts/${p.id}/status`, { status: 'scheduled' })).status).toBe(400);
+    expect((await api.post(`/api/content/posts/${p.id}/status`, { status: 'in_review' })).status).toBe(200);
+    expect((await api.post(`/api/content/posts/${p.id}/status`, { status: 'changes_requested' })).status).toBe(400); // needs a comment
+    expect((await api.post(`/api/content/posts/${p.id}/status`, { status: 'changes_requested', comment: 'Shorter caption' })).status).toBe(200);
+    await api.post(`/api/content/posts/${p.id}/status`, { status: 'in_review' });
+    expect((await api.post(`/api/content/posts/${p.id}/status`, { status: 'approved' })).body.post.status).toBe('approved');
+    expect((await api.post(`/api/content/posts/${p.id}/status`, { status: 'scheduled' })).body.post.status).toBe('scheduled');
+    expect((await api.post(`/api/content/posts/${p.id}/status`, { status: 'published' })).body.post.status).toBe('published');
+    const hist = (await api.get(`/api/content/posts/${p.id}`)).body.comments.filter((c: any) => c.kind === 'status').map((c: any) => c.toStatus);
+    expect(hist).toEqual(['draft', 'in_review', 'changes_requested', 'in_review', 'approved', 'scheduled', 'published']);
+  });
+
+  it('editing approved copy keeps the old version and sends it back to review; repurposing makes a new linked draft', async () => {
+    let p = (await api.post('/api/content/posts', base())).body.posts[0];
+    for (const s of ['in_review', 'approved']) p = (await api.post(`/api/content/posts/${p.id}/status`, { status: s })).body.post;
+    const after = (await api.put(`/api/content/posts/${p.id}`, { ...p, caption: 'New copy', mediaIds: [] })).body.post;
+    expect(after).toMatchObject({ status: 'in_review', revision: 2 });
+    const rev = (await api.get(`/api/content/posts/${p.id}`)).body.comments.find((c: any) => c.kind === 'revision');
+    expect(JSON.parse(rev.body).caption).toBe('Hello');
+    const copies = (await api.post(`/api/content/posts/${p.id}/repurpose`, { targets: [{ account: 'a3', platform: 'tiktok', type: 'video' }] })).body.posts;
+    expect(copies[0]).toMatchObject({ account: 'a3', platform: 'tiktok', status: 'draft', sourcePostId: p.id });
+    expect((await api.get(`/api/content/posts/${p.id}`)).body.post.caption).toBe('New copy'); // original untouched
+  });
+
+  it('ideas library is preloaded per account; AI drafts are returned for editing (built-in without a key)', async () => {
+    const ideas = (await api.get('/api/content/ideas')).body.ideas;
+    expect(ideas.length).toBeGreaterThan(20);
+    for (const a of ['a1', 'a2', 'a3']) expect(ideas.some((i: any) => i.accounts.includes(a))).toBe(true);
+    await api.put(`/api/content/ideas/${ideas[0].id}/favorite`, { on: true });
+    expect((await api.get('/api/content/ideas')).body.ideas.find((i: any) => i.id === ideas[0].id).favorite).toBe(true);
+    const d = (await api.post('/api/content/generate', { account: 'a3', platform: 'instagram', format: 'reel', pillar: 'Installation education' })).body.draft;
+    expect(d.caption.length).toBeGreaterThan(10);
+    expect(d.cta).toMatch(/Learn more|professional/i);
   });
 
   it('media for Instagram is public only with its signed link', async () => {
@@ -37,34 +74,32 @@ describe('Content calendar', () => {
     const url = new URL(await publicMediaUrl(m.id));
     expect((await request(app).get(url.pathname)).status).toBe(200);
     expect((await request(app).get(`/content-media/${m.id}/wrong-signature-wrong-signature0`)).status).toBe(404);
-    expect((await request(app).get(`/api/content/media/${m.id}`)).status).toBe(401); // the CRM's own link needs sign-in
+    expect((await request(app).get(`/api/content/media/${m.id}`)).status).toBe(401);
+    expect((await agent.post('/api/content/media').set('x-requested-with', 'addendum-crm').set('content-type', 'application/pdf').send(Buffer.from('x'))).status).toBe(400);
   });
 
-  it('auto-posting checks the post first, then posts it when due (videos wait until processed)', async () => {
-    // Not connected: refused with the reason.
+  it('auto-posting posts only scheduled posts when due (videos wait until processed), and marks them published', async () => {
     const m = await upload();
     const due = new Date(Date.now() - 60_000).toISOString();
-    expect((await api.post('/api/content/posts', base({ status: 'scheduled', autoPost: true, scheduledAt: due, mediaIds: [m.id] }))).body.error.message).toMatch(/connected/);
-    // Saved directly (as if connected), then the posting job runs with a stand-in for Instagram.
-    const id = (await db().one<any>(`INSERT INTO content_posts(account, post_type, scheduled_at, caption, status, auto_post, media_ids) VALUES ('a2','feed',$1,'Hi','scheduled',true,$2::uuid[]) RETURNING id`, [due, [m.id]])).id;
-    const calls: string[] = [];
+    const id = (await db().one<any>(`INSERT INTO content_posts(account, platform, post_type, title, scheduled_at, caption, status, auto_post, media_ids) VALUES ('a2','instagram','feed','x',$1,'Hi','scheduled',true,$2::uuid[]) RETURNING id`, [due, [m.id]])).id;
     let ready = false;
-    const fake = { container: async (u: any) => { calls.push(`container ${u.url.includes('/content-media/')}`); return 'c1'; }, carousel: async () => 'p1', status: async () => (ready ? 'FINISHED' : 'IN_PROGRESS'), publish: async () => ({ mediaId: 'm1', permalink: 'https://instagram.com/p/x' }), username: async () => 'x' };
-    expect(await publishDueContent(new Date(), () => fake as any)).toBe(0); // processing
-    expect((await db().one<any>('SELECT status FROM content_posts WHERE id = $1', [id])).status).toBe('publishing');
+    const fake = { container: async () => 'c1', carousel: async () => 'p1', status: async () => (ready ? 'FINISHED' : 'IN_PROGRESS'), publish: async () => ({ mediaId: 'm1', permalink: 'https://instagram.com/p/x' }) };
+    expect(await publishDueContent(new Date(), () => fake as any)).toBe(0);
     ready = true;
     expect(await publishDueContent(new Date(), () => fake as any)).toBe(1);
-    expect(await db().one<any>('SELECT status, permalink FROM content_posts WHERE id = $1', [id])).toEqual({ status: 'posted', permalink: 'https://instagram.com/p/x' });
-    expect(calls).toEqual(['container true']); // made once, from the signed media link
+    expect(await db().one<any>('SELECT status, permalink FROM content_posts WHERE id = $1', [id])).toEqual({ status: 'published', permalink: 'https://instagram.com/p/x' });
   });
 
-  it('reminds the person on a post the day before and on the day, once each', async () => {
-    const staff = (await db().one<any>('SELECT id FROM staff WHERE active LIMIT 1')).id;
-    const tomorrow = new Date(Date.now() + 26 * 3600_000);
-    const id = (await db().one<any>(`INSERT INTO content_posts(account, post_type, scheduled_at, caption, status, assigned_staff_id) VALUES ('a1','story',$1,'','draft',$2) RETURNING id`, [tomorrow, staff])).id;
-    await remindContent(new Date());
-    await remindContent(new Date());
-    const n = await db().query<any>("SELECT title FROM notifications WHERE staff_id = $1 AND kind = 'content' AND link LIKE $2", [staff, `%${id}`]);
-    expect(n.length).toBeLessThanOrEqual(1);
+  it('planning shows goals vs planned; analytics totals manual numbers and marks them manual', async () => {
+    await api.put('/api/content/settings', { requireApproval: true, goals: { a1: { instagram: 3 } }, access: {} });
+    const plan = (await api.get('/api/content/planning')).body;
+    expect(plan.weeks[0].accounts.find((a: any) => a.account === 'a1').platforms.find((p: any) => p.platform === 'instagram').goal).toBe(3);
+    const p = (await api.post('/api/content/posts', base({ scheduledAt: new Date().toISOString() }))).body.posts[0];
+    for (const s of ['in_review', 'approved', 'published']) await api.post(`/api/content/posts/${p.id}/status`, { status: s });
+    await api.put(`/api/content/posts/${p.id}/metrics`, { reach: 1000, likes: 50, saves: 10 });
+    const a = (await api.get(`/api/content/analytics?from=${encodeURIComponent(new Date(Date.now() - 7 * 86400_000).toISOString())}&to=${encodeURIComponent(new Date(Date.now() + 86400_000).toISOString())}`)).body;
+    expect(a.totals.reach).toBeGreaterThanOrEqual(1000);
+    expect(a.manual).toBeGreaterThanOrEqual(1);
+    await remindContent();
   });
 });

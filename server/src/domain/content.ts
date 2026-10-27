@@ -1,145 +1,342 @@
 import crypto from 'node:crypto';
-import type { ContentAccount, ContentMediaDTO, ContentPostDTO, ContentPostType, ContentStatus } from '@addendum/shared';
+import type {
+  ContentAccount, ContentAccountId, ContentCampaignDTO, ContentCommentDTO, ContentIdeaDTO, ContentMediaDTO, ContentMetrics, ContentPlatform, ContentPostDTO,
+  ContentPostType, ContentSettings, ContentStatus, CurrentUser,
+} from '@addendum/shared';
 import { config } from '../config.js';
 import { db } from '../db/index.js';
+import { aiService } from '../integrations/registry.js';
 import { InstagramApi, instagramAccounts, type IgSlot } from '../integrations/instagram.js';
-import { badRequest, notFound } from '../lib/errors.js';
+import { badRequest, forbidden, notFound } from '../lib/errors.js';
 import { iso } from '../lib/time.js';
 import { getKV, getSettings, setKV } from '../repos/settings.js';
+import { BUILTIN_IDEAS } from './contentIdeas.js';
 
 /**
- * Content calendar: Instagram posts planned for the salon's three accounts — when, what type, caption, photos/videos,
- * what it promotes and who's on it — and, for connected accounts, posted automatically at the scheduled time.
+ * Content calendar for the three social accounts (@addendum.salon, @addendumhair, @addendumhairpro): planning,
+ * the ideas library and AI drafts, a review workflow (Idea → Draft → In review → Changes requested → Approved →
+ * Scheduled → Published), assets, goals and performance. AI never publishes; nothing is marked published unless it was
+ * posted (Instagram auto-posting) or someone allowed to publish confirms it.
  */
+type Who = Pick<CurrentUser, 'id' | 'permissions'>;
+const has = (u: Who, p: string) => u.permissions.includes(p) || u.permissions.includes('*');
+const ACCOUNT_IDS: ContentAccountId[] = ['a1', 'a2', 'a3'];
+
+// ---------------- Accounts ----------------
 const ACCOUNTS_KEY = 'content.accounts';
 const DEFAULT_ACCOUNTS: Omit<ContentAccount, 'connected'>[] = [
-  { id: 'a1', name: 'Account 1', handle: '', color: '#6b5242' },
-  { id: 'a2', name: 'Account 2', handle: '', color: '#8a9a5b' },
-  { id: 'a3', name: 'Account 3', handle: '', color: '#4b6a88' },
+  { id: 'a1', name: '@addendum.salon', handle: 'addendum.salon', color: '#6b5242', brand: 'salon', cta: 'Book an appointment',
+    voice: 'Luxury editorial: warm, confident, elevated and client-facing — the salon experience, never salesy.',
+    pillars: ['Transformations', 'Color, cuts, styling & treatments', 'Hair extensions & maintenance', 'Hair trends', 'Professional advice', 'Stylist spotlights & salon culture', 'Retail: Milbon & Oribe', 'The Insider & salon experience', 'Client testimonials', 'Appointments & booking promotions'] },
+  { id: 'a2', name: '@addendumhair', handle: 'addendumhair', color: '#8a9a5b', brand: 'hair', cta: 'Shop the collection',
+    voice: 'Professional and modern: product-led, clear benefits, confident brand storytelling.',
+    pillars: ['Product spotlights & demonstrations', 'Extension tools & accessories', 'Product features & benefits', 'Behind the scenes', 'Launches & restocks', 'Product education & storytelling', 'Shopify promotions'] },
+  { id: 'a3', name: '@addendumhairpro', handle: 'addendumhairpro', color: '#4b6a88', brand: 'hair', cta: 'Learn more or shop professional products',
+    voice: 'Education-led and peer-to-peer: precise technique, practical tips, supportive of the stylist community.',
+    pillars: ['Installation education', 'Methods: weft, K-Tip, tape, hybrid', 'Professional tips & best practices', 'Demonstrations & tutorials', 'Stylist education & FAQs', 'Transformations & case studies', 'Stylist spotlights & UGC', 'Maintenance & troubleshooting', 'Professional product recommendations'] },
 ];
-
 const connectedSlots = () => new Set(instagramAccounts(config()).map((a) => a.slot));
 export async function contentAccounts(): Promise<ContentAccount[]> {
-  const saved = (await getKV<Omit<ContentAccount, 'connected'>[]>(ACCOUNTS_KEY)) ?? [];
+  const saved = (await getKV<Partial<ContentAccount>[]>(ACCOUNTS_KEY)) ?? [];
   const on = connectedSlots();
-  return DEFAULT_ACCOUNTS.map((d) => ({ ...d, ...(saved.find((s) => s.id === d.id) ?? {}), connected: on.has(d.id) }));
+  return DEFAULT_ACCOUNTS.map((d) => {
+    const s = saved.find((x) => x.id === d.id) ?? {};
+    // Saved before the accounts had their own names: the generic "Account 1…" names give way to the handles.
+    const name = s.name && !/^Account \d$/.test(s.name) ? s.name : d.name;
+    return { ...d, ...s, name, handle: s.handle || d.handle, pillars: s.pillars?.length ? s.pillars : d.pillars, id: d.id, brand: d.brand, connected: on.has(d.id) } as ContentAccount;
+  });
 }
-export async function saveContentAccounts(list: { id: ContentAccount['id']; name: string; handle: string; color: string }[]) {
-  await setKV(ACCOUNTS_KEY, DEFAULT_ACCOUNTS.map((d) => { const x = list.find((l) => l.id === d.id); return x ? { id: d.id, name: x.name, handle: x.handle.replace(/^@/, ''), color: x.color } : d; }));
+export async function saveContentAccounts(list: { id: ContentAccountId; name: string; handle: string; color: string; cta?: string; voice?: string; pillars?: string[] }[]) {
+  const current = await contentAccounts();
+  await setKV(ACCOUNTS_KEY, current.map((c) => {
+    const x = list.find((l) => l.id === c.id);
+    return { id: c.id, name: x?.name ?? c.name, handle: (x?.handle ?? c.handle).replace(/^@/, ''), color: x?.color ?? c.color, cta: x?.cta ?? c.cta, voice: x?.voice ?? c.voice, pillars: x?.pillars ?? c.pillars };
+  }));
   return contentAccounts();
 }
 
-// ---------------- Media ----------------
+// ---------------- Settings and access ----------------
+const SETTINGS_KEY = 'content.settings';
+export async function contentSettings(): Promise<ContentSettings> {
+  return { requireApproval: true, goals: {}, access: {}, ...((await getKV<ContentSettings>(SETTINGS_KEY)) ?? {}) };
+}
+export async function saveContentSettings(s: ContentSettings) { await setKV(SETTINGS_KEY, s); return contentSettings(); }
+/** The accounts this person may work on (administrators: all). */
+export async function accountsFor(u: Who): Promise<ContentAccountId[]> {
+  if (has(u, 'settings:write')) return ACCOUNT_IDS;
+  const { access } = await contentSettings();
+  return ACCOUNT_IDS.filter((a) => !access[a]?.length || access[a]!.includes(u.id));
+}
+async function assertAccount(u: Who, account: string) {
+  if (!(await accountsFor(u)).includes(account as ContentAccountId)) throw forbidden('You don’t have access to that account.');
+}
+
+// ---------------- Media and the asset library ----------------
 export const MEDIA_LIMITS = { image: 15 * 1024 * 1024, video: 100 * 1024 * 1024 };
 const MEDIA_TYPES = /^(image\/(jpeg|png|webp|heic|heif)|video\/(mp4|quicktime))$/;
-
-/** A secret for the public media links (Instagram downloads media from them); made once. */
 async function mediaSecret() {
   let s = await getKV<string>('content.mediaSecret');
   if (!s) { s = crypto.randomBytes(32).toString('hex'); await setKV('content.mediaSecret', s); }
   return s;
 }
 const sign = (secret: string, id: string) => crypto.createHmac('sha256', secret).update(id).digest('base64url').slice(0, 32);
-/** The public, unguessable link to one file (for Instagram to download). */
-export async function publicMediaUrl(id: string) {
-  return `${config().APP_URL.replace(/\/+$/, '')}/content-media/${id}/${sign(await mediaSecret(), id)}`;
-}
+/** The public, unguessable link to one file (Instagram downloads media from it when posting). */
+export async function publicMediaUrl(id: string) { return `${config().APP_URL.replace(/\/+$/, '')}/content-media/${id}/${sign(await mediaSecret(), id)}`; }
 export async function checkMediaSignature(id: string, sig: string) {
   const want = sign(await mediaSecret(), id);
   return sig.length === want.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want));
 }
-
-export async function saveMedia(bytes: Buffer, mime: string, name: string | null, staffId: string | null): Promise<ContentMediaDTO> {
+const mediaDTO = (m: any): ContentMediaDTO => ({ id: m.id, mime: m.mime, name: m.name, size: m.size, url: `/api/content/media/${m.id}`, title: m.title ?? null, tags: m.tags ?? [], account: m.account ?? null, approved: !!m.approved, createdAt: iso(m.created_at) ?? undefined });
+export async function saveMedia(bytes: Buffer, mime: string, name: string | null, staffId: string | null, account: string | null = null): Promise<ContentMediaDTO> {
   const type = mime.toLowerCase().split(';')[0].trim();
   if (!MEDIA_TYPES.test(type)) throw badRequest('Photos (JPG, PNG, WebP, HEIC) or videos (MP4, MOV) only.');
-  const limit = type.startsWith('video/') ? MEDIA_LIMITS.video : MEDIA_LIMITS.image;
   if (!bytes.length) throw badRequest('That file is empty.');
-  if (bytes.length > limit) throw badRequest(`Too big — ${type.startsWith('video/') ? 'videos up to 100 MB' : 'photos up to 15 MB'}.`);
-  const r = (await db().one<{ id: string }>('INSERT INTO content_media(mime, name, bytes, size, created_by_staff_id) VALUES ($1,$2,$3,$4,$5) RETURNING id', [type, name?.slice(0, 200) ?? null, bytes, bytes.length, staffId]))!;
-  return { id: r.id, mime: type, name, size: bytes.length, url: `/api/content/media/${r.id}` };
+  if (bytes.length > (type.startsWith('video/') ? MEDIA_LIMITS.video : MEDIA_LIMITS.image)) throw badRequest(`Too big — ${type.startsWith('video/') ? 'videos up to 100 MB' : 'photos up to 15 MB'}.`);
+  const r = (await db().one<any>('INSERT INTO content_media(mime, name, bytes, size, created_by_staff_id, account, title) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, mime, name, size, title, tags, account, approved, created_at',
+    [type, name?.slice(0, 200) ?? null, bytes, bytes.length, staffId, ACCOUNT_IDS.includes(account as ContentAccountId) ? account : null, name ? name.replace(/\.[a-z0-9]+$/i, '').slice(0, 120) : null]))!;
+  return mediaDTO(r);
 }
-export async function readMedia(id: string) {
-  return db().one<{ mime: string; bytes: Buffer; name: string | null }>('SELECT mime, bytes, name FROM content_media WHERE id = $1', [id]);
+export async function readMedia(id: string) { return db().one<{ mime: string; bytes: Buffer; name: string | null }>('SELECT mime, bytes, name FROM content_media WHERE id = $1', [id]); }
+/** The asset library: files the person's accounts may use (an account's own, or shared), newest first. */
+export async function listAssets(u: Who, f: { q?: string; account?: string; tag?: string; approved?: boolean }) {
+  const mine = await accountsFor(u);
+  const rows = await db().query<any>(`SELECT id, mime, name, size, title, tags, account, approved, created_at FROM content_media
+     WHERE (account IS NULL OR account = ANY($1::text[])) ORDER BY created_at DESC LIMIT 500`, [mine]);
+  const words = (f.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+  return rows.filter((m) => (!f.account || m.account === f.account || (f.account && !m.account)) && (!f.tag || (m.tags ?? []).includes(f.tag)) && (f.approved == null || m.approved === f.approved)
+    && words.every((w) => `${m.title ?? ''} ${m.name ?? ''} ${(m.tags ?? []).join(' ')}`.toLowerCase().includes(w))).map(mediaDTO);
+}
+export async function updateAsset(u: Who, id: string, p: { title?: string | null; tags?: string[]; account?: ContentAccountId | null; approved?: boolean }) {
+  if (p.approved !== undefined && !has(u, 'content:approve')) throw forbidden('Only people who approve content can mark assets approved.');
+  if (p.account) await assertAccount(u, p.account);
+  await db().query(`UPDATE content_media SET title = COALESCE($2, title), tags = COALESCE($3, tags), account = CASE WHEN $4 THEN $5 ELSE account END, approved = COALESCE($6, approved) WHERE id = $1`,
+    [id, p.title ?? null, p.tags ? [...new Set(p.tags.map((t) => t.trim().toLowerCase()).filter(Boolean))] : null, p.account !== undefined, p.account ?? null, p.approved ?? null]);
+}
+export async function deleteAsset(id: string) {
+  const used = await db().one('SELECT 1 FROM content_posts WHERE $1 = ANY(media_ids) LIMIT 1', [id]);
+  if (used) throw badRequest('It’s used in a post — remove it from the post first.');
+  await db().query('DELETE FROM content_media WHERE id = $1', [id]);
 }
 
 // ---------------- Posts ----------------
-const SELECT = `SELECT p.*, s.name AS assigned_name FROM content_posts p LEFT JOIN staff s ON s.id = p.assigned_staff_id`;
+const SELECT = `SELECT p.*, a.name AS assigned_name, r.name AS reviewer_name, b.name AS publisher_name, c.name AS campaign_name
+  FROM content_posts p LEFT JOIN staff a ON a.id = p.assigned_staff_id LEFT JOIN staff r ON r.id = p.reviewer_staff_id
+  LEFT JOIN staff b ON b.id = p.publisher_staff_id LEFT JOIN content_campaigns c ON c.id = p.campaign_id`;
 async function toDTO(rows: any[]): Promise<ContentPostDTO[]> {
   const ids = [...new Set(rows.flatMap((r) => r.media_ids ?? []))];
-  const media = new Map((ids.length ? await db().query<any>('SELECT id, mime, name, size FROM content_media WHERE id = ANY($1::uuid[])', [ids]) : [])
-    .map((m) => [m.id as string, { id: m.id, mime: m.mime, name: m.name, size: m.size, url: `/api/content/media/${m.id}` } as ContentMediaDTO]));
+  const media = new Map((ids.length ? await db().query<any>('SELECT id, mime, name, size, title, tags, account, approved, created_at FROM content_media WHERE id = ANY($1::uuid[])', [ids]) : []).map((m) => [m.id as string, mediaDTO(m)]));
   return rows.map((r) => ({
-    id: r.id, account: r.account, type: r.post_type, scheduledAt: iso(r.scheduled_at), caption: r.caption, status: r.status, autoPost: r.auto_post,
-    media: (r.media_ids ?? []).map((id: string) => media.get(id)).filter(Boolean),
+    id: r.id, account: r.account, platform: r.platform, type: r.post_type, title: r.title, scheduledAt: iso(r.scheduled_at), dueAt: iso(r.due_at),
+    headline: r.headline, caption: r.caption, cta: r.cta, hashtags: r.hashtags, pillar: r.pillar, status: r.status, autoPost: r.auto_post,
+    media: (r.media_ids ?? []).map((id: string) => media.get(id)).filter(Boolean), externalLinks: r.external_links ?? [],
     link: r.link_kind ? { kind: r.link_kind, ref: r.link_ref, label: r.link_label ?? '' } : null,
-    assignedStaffId: r.assigned_staff_id, assignedName: r.assigned_name ?? null, notes: r.notes,
+    campaignId: r.campaign_id, campaignName: r.campaign_name ?? null, groupId: r.group_id, sourcePostId: r.source_post_id, ideaId: r.idea_id,
+    assignedStaffId: r.assigned_staff_id, assignedName: r.assigned_name ?? null, reviewerStaffId: r.reviewer_staff_id, reviewerName: r.reviewer_name ?? null,
+    publisherStaffId: r.publisher_staff_id, publisherName: r.publisher_name ?? null, notes: r.notes, revision: r.revision,
+    metrics: r.metrics ?? {}, metricsSource: r.metrics_source, metricsUpdatedAt: iso(r.metrics_updated_at),
     permalink: r.permalink, postedAt: iso(r.posted_at), error: r.error, createdAt: iso(r.created_at)!, updatedAt: iso(r.updated_at)!,
   }));
 }
-/** Posts scheduled in [from, to) — plus ideas with no date yet. */
-export async function listPosts(from: string, to: string) {
-  return toDTO(await db().query(`${SELECT} WHERE (p.scheduled_at >= $1 AND p.scheduled_at < $2) OR p.scheduled_at IS NULL ORDER BY p.scheduled_at NULLS LAST, p.created_at`, [from, to]));
+/** Posts scheduled in [from, to), plus ideas with no date — only the person's accounts. */
+export async function listPosts(u: Who, from: string, to: string) {
+  return toDTO(await db().query(`${SELECT} WHERE p.account = ANY($3::text[]) AND ((p.scheduled_at >= $1 AND p.scheduled_at < $2) OR p.scheduled_at IS NULL)
+    ORDER BY p.scheduled_at NULLS LAST, p.created_at`, [from, to, await accountsFor(u)]));
 }
-export async function getPost(id: string) {
+export async function getPost(u: Who, id: string) {
   const r = await db().one(`${SELECT} WHERE p.id = $1`, [id]);
   if (!r) throw notFound('Post not found');
+  await assertAccount(u, r.account);
   return (await toDTO([r]))[0];
 }
 
-export interface PostInput {
-  account: ContentAccount['id']; type: ContentPostType; scheduledAt: string | null; caption: string; status: ContentStatus; autoPost: boolean;
-  mediaIds: string[]; link: { kind: 'product' | 'service'; ref: string; label: string } | null; assignedStaffId: string | null; notes: string | null;
+export interface PostFields {
+  platform: ContentPlatform; type: ContentPostType; title: string; scheduledAt: string | null; dueAt: string | null;
+  headline: string | null; caption: string; cta: string | null; hashtags: string | null; pillar: string | null; autoPost: boolean;
+  mediaIds: string[]; externalLinks: string[]; link: ContentPostDTO['link']; campaignId: string | null;
+  assignedStaffId: string | null; reviewerStaffId: string | null; publisherStaffId: string | null; notes: string | null; ideaId?: string | null;
 }
 
-/** What auto-posting needs for this post (null = ready). */
-export function autoPostProblem(p: { type: ContentPostType; scheduledAt: string | null; media: { mime: string }[] }, connected: boolean) {
+/** What Instagram auto-posting needs for this post (null = ready). */
+export function autoPostProblem(p: { platform: string; type: ContentPostType; scheduledAt: string | null; media: { mime: string }[] }, connected: boolean) {
+  if (p.platform !== 'instagram') return 'Auto-posting is for Instagram; schedule others and confirm them as published.';
+  if (!['feed', 'carousel', 'reel', 'story'].includes(p.type)) return 'Pick Post, Carousel, Reel or Story to auto-post to Instagram.';
   if (!connected) return 'This account isn’t connected for auto-posting yet (Settings → API & Integrations → Instagram).';
   if (!p.scheduledAt) return 'Pick a date and time to post it.';
   const videos = p.media.filter((m) => m.mime.startsWith('video/')).length;
   if (!p.media.length) return 'Add a photo or video.';
   if (p.type === 'carousel' && (p.media.length < 2 || p.media.length > 10)) return 'A carousel needs 2 to 10 photos or videos.';
   if (p.type === 'reel' && (p.media.length !== 1 || videos !== 1)) return 'A Reel is one video.';
-  if ((p.type === 'feed' || p.type === 'story') && p.media.length !== 1) return `A ${p.type === 'story' ? 'Story' : 'feed post'} is one photo or video (use Carousel for several).`;
+  if ((p.type === 'feed' || p.type === 'story') && p.media.length !== 1) return `A ${p.type === 'story' ? 'Story' : 'post'} is one photo or video (use Carousel for several).`;
   if (p.media.some((m) => /heic|heif/.test(m.mime))) return 'Instagram can’t take HEIC photos — upload a JPG or PNG.';
   return null;
 }
+const fullCaption = (r: { caption: string; cta?: string | null; hashtags?: string | null }) => [r.caption.trim(), r.cta?.trim(), r.hashtags?.trim()].filter(Boolean).join('\n\n');
+function checkFields(f: PostFields) {
+  if (fullCaption(f).length > 2200 && f.platform === 'instagram') throw badRequest('Instagram captions (with the CTA and hashtags) are up to 2,200 characters.');
+  if (!f.title.trim()) throw badRequest('Give the post a title.');
+}
+const VALUES = (f: PostFields) => [f.platform, f.type, f.title.trim().slice(0, 200), f.scheduledAt, f.dueAt, f.headline, f.caption, f.cta, f.hashtags, f.pillar, f.autoPost, f.mediaIds, f.externalLinks,
+  f.link?.kind ?? null, f.link?.ref ?? null, f.link?.label ?? null, f.campaignId, f.assignedStaffId, f.reviewerStaffId, f.publisherStaffId, f.notes];
 
-async function check(input: PostInput) {
-  if (input.autoPost && input.status === 'scheduled') {
-    const media = input.mediaIds.length ? await db().query<{ mime: string }>('SELECT mime FROM content_media WHERE id = ANY($1::uuid[])', [input.mediaIds]) : [];
-    const problem = autoPostProblem({ type: input.type, scheduledAt: input.scheduledAt, media }, connectedSlots().has(input.account));
-    if (problem) throw badRequest(problem);
+async function log(postId: string, staffId: string | null, kind: 'comment' | 'status' | 'revision', body: string | null, from?: string | null, to?: string | null) {
+  await db().query('INSERT INTO content_comments(post_id, staff_id, kind, body, from_status, to_status) VALUES ($1,$2,$3,$4,$5,$6)', [postId, staffId, kind, body, from ?? null, to ?? null]);
+}
+async function notify(staffId: string | null | undefined, title: string, body: string, postId: string, except?: string) {
+  if (!staffId || staffId === except) return;
+  await db().query("INSERT INTO notifications(staff_id, kind, title, body, link) VALUES ($1,'content',$2,$3,$4)", [staffId, title, body.slice(0, 300), `/content?post=${postId}`]);
+}
+
+/**
+ * New posts: one per chosen account (linked by a group, each edited, approved and tracked on its own). A new post starts
+ * as an Idea or a Draft; it moves on through the workflow.
+ */
+export async function createPosts(u: Who, accounts: ContentAccountId[], f: PostFields, status: 'idea' | 'draft', sourcePostId: string | null = null) {
+  if (!accounts.length) throw badRequest('Choose at least one account.');
+  for (const a of accounts) await assertAccount(u, a);
+  checkFields(f);
+  const group = accounts.length > 1 ? crypto.randomUUID() : null;
+  const out: ContentPostDTO[] = [];
+  for (const account of accounts) {
+    const r = (await db().one<{ id: string }>(
+      `INSERT INTO content_posts(account, platform, post_type, title, scheduled_at, due_at, headline, caption, cta, hashtags, pillar, auto_post, media_ids, external_links,
+         link_kind, link_ref, link_label, campaign_id, assigned_staff_id, reviewer_staff_id, publisher_staff_id, notes, status, group_id, source_post_id, idea_id, created_by_staff_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::boolean,$13::uuid[],$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) RETURNING id`,
+      [account, ...VALUES({ ...f, autoPost: false }), status, group, sourcePostId, f.ideaId ?? null, u.id]))!;
+    await log(r.id, u.id, 'status', null, null, status);
+    out.push(await getPost(u, r.id));
   }
-  if (input.caption.length > 2200) throw badRequest('Instagram captions are up to 2,200 characters.');
+  return out;
 }
 
-export async function createPost(input: PostInput, staffId: string | null) {
-  await check(input);
-  const r = (await db().one<{ id: string }>(
-    `INSERT INTO content_posts(account, post_type, scheduled_at, caption, status, auto_post, media_ids, link_kind, link_ref, link_label, assigned_staff_id, notes, created_by_staff_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7::uuid[],$8,$9,$10,$11,$12,$13) RETURNING id`,
-    [input.account, input.type, input.scheduledAt, input.caption, input.status, input.autoPost, input.mediaIds, input.link?.kind ?? null, input.link?.ref ?? null, input.link?.label ?? null, input.assignedStaffId, input.notes, staffId]))!;
-  return getPost(r.id);
-}
-
-export async function updatePost(id: string, input: PostInput) {
-  const before = await getPost(id);
-  if (before.status === 'publishing') throw badRequest('It’s being posted right now — try again in a minute.');
-  await check(input);
-  const moved = before.scheduledAt !== input.scheduledAt || before.assignedStaffId !== input.assignedStaffId;
+/** Edits the post's content. Changing the caption, headline, CTA or hashtags keeps the previous version (a revision). */
+export async function updatePost(u: Who, id: string, f: PostFields) {
+  const before = await getPost(u, id);
+  if (['publishing', 'published'].includes(before.status)) throw badRequest(before.status === 'published' ? 'It’s published — repurpose it to make a new version.' : 'It’s being posted right now — try again in a minute.');
+  checkFields(f);
+  if (f.autoPost && !has(u, 'content:publish')) throw forbidden('Only people who publish content can turn on auto-posting.');
+  const changedCopy = before.caption !== f.caption || before.headline !== f.headline || before.cta !== f.cta || before.hashtags !== f.hashtags;
+  if (changedCopy) await log(id, u.id, 'revision', JSON.stringify({ revision: before.revision, headline: before.headline, caption: before.caption, cta: before.cta, hashtags: before.hashtags }));
+  // Approved copy that changes goes back for review (when approval is required).
+  const { requireApproval } = await contentSettings();
+  const backToReview = changedCopy && requireApproval && ['approved', 'scheduled'].includes(before.status);
+  const moved = before.scheduledAt !== f.scheduledAt || before.assignedStaffId !== f.assignedStaffId;
   await db().query(
-    `UPDATE content_posts SET account=$2, post_type=$3, scheduled_at=$4, caption=$5, status=$6, auto_post=$7, media_ids=$8::uuid[], link_kind=$9, link_ref=$10, link_label=$11,
-       assigned_staff_id=$12, notes=$13, error = CASE WHEN $6 = 'failed' THEN error ELSE NULL END,
-       reminded_day_before = reminded_day_before AND NOT $14, reminded_today = reminded_today AND NOT $14, updated_at = now() WHERE id = $1`,
-    [id, input.account, input.type, input.scheduledAt, input.caption, input.status, input.autoPost, input.mediaIds, input.link?.kind ?? null, input.link?.ref ?? null, input.link?.label ?? null, input.assignedStaffId, input.notes, moved]);
-  return getPost(id);
+    `UPDATE content_posts SET platform=$2, post_type=$3, title=$4, scheduled_at=$5, due_at=$6, headline=$7, caption=$8, cta=$9, hashtags=$10, pillar=$11, auto_post=$12,
+       media_ids=$13::uuid[], external_links=$14, link_kind=$15, link_ref=$16, link_label=$17, campaign_id=$18, assigned_staff_id=$19, reviewer_staff_id=$20, publisher_staff_id=$21, notes=$22,
+       revision = revision + $23::int, status = CASE WHEN $24 THEN 'in_review' ELSE status END,
+       reminded_day_before = reminded_day_before AND NOT $25, reminded_today = reminded_today AND NOT $25, updated_at = now() WHERE id = $1`,
+    [id, ...VALUES(f), changedCopy ? 1 : 0, backToReview, moved]);
+  if (backToReview) {
+    await log(id, u.id, 'status', 'Copy changed after approval', before.status, 'in_review');
+    await notify(f.reviewerStaffId, 'Post back in review', `“${f.title}” changed after it was approved.`, id, u.id);
+  }
+  return getPost(u, id);
 }
 
-export async function deletePost(id: string) {
-  const p = await getPost(id);
+/** Moves a post to another day (drag and drop), keeping the time. */
+export async function reschedule(u: Who, id: string, scheduledAt: string | null) {
+  const p = await getPost(u, id);
+  if (['publishing', 'published'].includes(p.status)) throw badRequest('Published posts stay where they are.');
+  await db().query('UPDATE content_posts SET scheduled_at = $2, reminded_day_before = false, reminded_today = false, updated_at = now() WHERE id = $1', [id, scheduledAt]);
+  return getPost(u, id);
+}
+
+/**
+ * The workflow. Creators move Idea → Draft → In review (and back from Changes requested); reviewers approve or request
+ * changes; publishers schedule and confirm publication. With approval required, only approved posts are scheduled.
+ */
+export async function transition(u: Who, id: string, to: ContentStatus, comment: string | null) {
+  const p = await getPost(u, id);
+  const from = p.status;
+  if (from === to) return p;
+  const { requireApproval } = await contentSettings();
+  const creator = has(u, 'content:manage'); const reviewer = has(u, 'content:approve'); const publisher = has(u, 'content:publish');
+  const allowed: Partial<Record<ContentStatus, () => boolean>> = {
+    idea: () => creator && ['draft', 'changes_requested'].includes(from),
+    draft: () => creator && ['idea', 'in_review', 'changes_requested', 'approved', 'scheduled', 'failed'].includes(from),
+    in_review: () => creator && ['idea', 'draft', 'changes_requested'].includes(from),
+    changes_requested: () => reviewer && ['in_review', 'approved', 'scheduled'].includes(from),
+    approved: () => reviewer && ['in_review', 'changes_requested', 'draft', 'scheduled', 'failed'].includes(from),
+    scheduled: () => publisher && (from === 'approved' || (!requireApproval && ['draft', 'in_review'].includes(from)) || (from === 'failed' && (!requireApproval || true))),
+    published: () => publisher && ['approved', 'scheduled', 'failed'].includes(from) && (!requireApproval || from !== 'draft'),
+  };
+  if (!allowed[to]?.()) {
+    if (to === 'scheduled' && requireApproval && from !== 'approved') throw badRequest('Approve it first — posts need approval before they’re scheduled.');
+    throw forbidden(`You can’t move a post from ${from.replace('_', ' ')} to ${to.replace('_', ' ')}.`);
+  }
+  if (to === 'scheduled') {
+    if (!p.scheduledAt) throw badRequest('Pick a date and time first.');
+    if (p.autoPost) { const problem = autoPostProblem(p, connectedSlots().has(p.account)); if (problem) throw badRequest(problem); }
+  }
+  if (to === 'changes_requested' && !comment?.trim()) throw badRequest('Say what needs changing.');
+  // Published by hand: confirmed by someone allowed to publish (auto-posting sets it itself).
+  await db().query(`UPDATE content_posts SET status = $2, posted_at = CASE WHEN $2 = 'published' THEN COALESCE(posted_at, now()) ELSE posted_at END,
+    error = CASE WHEN $2 IN ('scheduled','approved') THEN NULL ELSE error END, updated_at = now() WHERE id = $1`, [id, to]);
+  await log(id, u.id, 'status', comment?.trim() || (to === 'published' ? 'Confirmed as published' : null), from, to);
+  const t = `“${p.title}”`;
+  if (to === 'in_review') await notify(p.reviewerStaffId, 'Post to review', `${t} is ready for review.`, id, u.id);
+  if (to === 'changes_requested') await notify(p.assignedStaffId, 'Changes requested', `${t}: ${comment}`, id, u.id);
+  if (to === 'approved') { await notify(p.assignedStaffId, 'Post approved', `${t} was approved.`, id, u.id); await notify(p.publisherStaffId, 'Post approved — ready to schedule', t, id, u.id); }
+  return getPost(u, id);
+}
+
+export async function deletePost(u: Who, id: string) {
+  const p = await getPost(u, id);
+  if (p.status === 'published' && !has(u, 'content:publish')) throw forbidden('Only people who publish content can delete published posts.');
   await db().query('DELETE FROM content_posts WHERE id = $1', [id]);
-  // Its files go too, unless another post uses them.
-  if (p.media.length) await db().query('DELETE FROM content_media m WHERE m.id = ANY($1::uuid[]) AND NOT EXISTS (SELECT 1 FROM content_posts x WHERE m.id = ANY(x.media_ids))', [p.media.map((m) => m.id)]);
+}
+
+export async function comments(u: Who, id: string): Promise<ContentCommentDTO[]> {
+  await getPost(u, id);
+  return (await db().query<any>(`SELECT c.*, s.name AS staff_name FROM content_comments c LEFT JOIN staff s ON s.id = c.staff_id WHERE c.post_id = $1 ORDER BY c.created_at`, [id]))
+    .map((c) => ({ id: c.id, kind: c.kind, body: c.body, fromStatus: c.from_status, toStatus: c.to_status, staffName: c.staff_name ?? null, createdAt: iso(c.created_at)! }));
+}
+export async function addComment(u: Who, id: string, body: string) {
+  const p = await getPost(u, id);
+  await log(id, u.id, 'comment', body.trim().slice(0, 2000));
+  for (const s of new Set([p.assignedStaffId, p.reviewerStaffId, p.publisherStaffId])) await notify(s, `Comment on “${p.title}”`, body, id, u.id);
+}
+
+/**
+ * Repurpose: new drafts for other accounts or platforms from a post — the original isn't changed. Each new draft is
+ * rewritten for its account's audience and CTA (with AI when available, else the account's CTA and the same copy).
+ */
+export async function repurpose(u: Who, id: string, targets: { account: ContentAccountId; platform: ContentPlatform; type: ContentPostType }[]) {
+  const src = await getPost(u, id);
+  const accounts = await contentAccounts();
+  const out: ContentPostDTO[] = [];
+  for (const t of targets) {
+    const acc = accounts.find((a) => a.id === t.account)!;
+    const g = await generate({ account: t.account, platform: t.platform, format: t.type, pillar: src.pillar, tone: null, objective: null, campaign: src.campaignName,
+      brief: `Repurpose this post for ${acc.name} (${t.platform}, ${t.type}). Keep the idea; adapt the message for this account's audience.\nTitle: ${src.title}\nHeadline: ${src.headline ?? ''}\nCaption: ${src.caption}\nCTA: ${src.cta ?? ''}` });
+    const [p] = await createPosts(u, [t.account], {
+      platform: t.platform, type: t.type, title: `${src.title} (${acc.name})`.slice(0, 200), scheduledAt: null, dueAt: null, headline: g.headline ?? src.headline, caption: g.caption || src.caption,
+      cta: g.cta ?? acc.cta, hashtags: g.hashtags ?? src.hashtags, pillar: src.pillar, autoPost: false, mediaIds: src.media.map((m) => m.id), externalLinks: src.externalLinks, link: src.link,
+      campaignId: src.campaignId, assignedStaffId: src.assignedStaffId, reviewerStaffId: src.reviewerStaffId, publisherStaffId: src.publisherStaffId,
+      notes: [g.extra, `Repurposed from “${src.title}”.`].filter(Boolean).join('\n\n'),
+    }, 'draft', src.id);
+    out.push(p);
+  }
+  return out;
+}
+
+/** Performance by hand (marked manual), or imported from Instagram for posts it published. */
+export async function setMetrics(u: Who, id: string, m: ContentMetrics) {
+  await getPost(u, id);
+  await db().query("UPDATE content_posts SET metrics = $2, metrics_source = 'manual', metrics_updated_at = now() WHERE id = $1", [id, JSON.stringify(m)]);
+  return getPost(u, id);
+}
+export async function importMetrics(u: Who | null, id: string) {
+  const r = await db().one<any>('SELECT account, platform, ig_media_id, metrics FROM content_posts WHERE id = $1', [id]);
+  if (!r) throw notFound('Post not found');
+  if (u) await assertAccount(u, r.account);
+  if (r.platform !== 'instagram' || !r.ig_media_id) throw badRequest('Only posts the CRM published to Instagram can import their numbers — enter others by hand.');
+  const a = instagramAccounts(config()).find((x) => x.slot === r.account);
+  if (!a) throw badRequest('This account isn’t connected (Settings → API & Integrations → Instagram).');
+  const got = await new InstagramApi(a.accountId, a.token).insights(r.ig_media_id);
+  const m: ContentMetrics = { ...(r.metrics ?? {}), ...got };
+  await db().query("UPDATE content_posts SET metrics = $2, metrics_source = 'imported', metrics_updated_at = now() WHERE id = $1", [id, JSON.stringify(m)]);
+  return m;
 }
 
 /** What a post can promote: products (inventory) and services, by name. */
@@ -152,25 +349,167 @@ export async function linkOptions(q: string) {
   return [...products.map((p) => ({ kind: 'product' as const, ref: p.key, label: p.label })), ...services.map((s) => ({ kind: 'service' as const, ref: s.id, label: s.name }))];
 }
 
-// ---------------- Scheduler: reminders and auto-posting ----------------
-/** Bell reminders for the person on a post: the day before and on the day (posts not done yet). */
+// ---------------- Campaigns ----------------
+export async function listCampaigns(): Promise<ContentCampaignDTO[]> {
+  return (await db().query<any>(`SELECT c.*, (SELECT count(*)::int FROM content_posts p WHERE p.campaign_id = c.id) AS posts FROM content_campaigns c ORDER BY c.starts_on NULLS LAST, c.name`))
+    .map((c) => ({ id: c.id, name: c.name, accounts: c.accounts ?? [], startsOn: c.starts_on ? String(iso(c.starts_on)).slice(0, 10) : null, endsOn: c.ends_on ? String(iso(c.ends_on)).slice(0, 10) : null, notes: c.notes, posts: c.posts }));
+}
+export async function saveCampaign(c: { id?: string; name: string; accounts: ContentAccountId[]; startsOn: string | null; endsOn: string | null; notes: string | null }) {
+  if (c.id) await db().query('UPDATE content_campaigns SET name=$2, accounts=$3, starts_on=$4, ends_on=$5, notes=$6 WHERE id=$1', [c.id, c.name, c.accounts, c.startsOn, c.endsOn, c.notes]);
+  else await db().query('INSERT INTO content_campaigns(name, accounts, starts_on, ends_on, notes) VALUES ($1,$2,$3,$4,$5)', [c.name, c.accounts, c.startsOn, c.endsOn, c.notes]);
+  return listCampaigns();
+}
+export async function deleteCampaign(id: string) {
+  await db().query('UPDATE content_posts SET campaign_id = NULL WHERE campaign_id = $1', [id]);
+  await db().query('DELETE FROM content_campaigns WHERE id = $1', [id]);
+  return listCampaigns();
+}
+
+// ---------------- Ideas library ----------------
+const REMOVED_IDEAS_KEY = 'content.ideas.removed';
+/** Adds any built-in ideas not there yet (one someone removed isn't added back). */
+export async function seedContentIdeas() {
+  const removed = new Set((await getKV<string[]>(REMOVED_IDEAS_KEY)) ?? []);
+  const have = new Set((await db().query<{ key: string }>('SELECT key FROM content_ideas WHERE key IS NOT NULL')).map((r) => r.key));
+  for (const i of BUILTIN_IDEAS) {
+    if (have.has(i.key) || removed.has(i.key)) continue;
+    await db().query(
+      `INSERT INTO content_ideas(key, accounts, title, pillar, audience, platform, format, hook, visual, shot_list, caption, cta, hashtags, season, effort, builtin)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,true) ON CONFLICT (key) DO NOTHING`,
+      [i.key, i.accounts, i.title, i.pillar, i.audience, i.platform, i.format, i.hook, i.visual, i.shots, i.caption, i.cta, i.hashtags, i.season, i.effort]);
+  }
+}
+const ideaDTO = (r: any, favs: Set<string>): ContentIdeaDTO => ({
+  id: r.id, accounts: r.accounts ?? [], title: r.title, pillar: r.pillar, audience: r.audience, platform: r.platform, format: r.format, hook: r.hook, visual: r.visual,
+  shotList: r.shot_list, caption: r.caption, cta: r.cta, hashtags: r.hashtags, season: r.season, effort: r.effort, builtin: r.builtin, favorite: favs.has(r.id),
+});
+export async function listIdeas(u: Who) {
+  await seedContentIdeas();
+  const mine = await accountsFor(u);
+  const favs = new Set((await db().query<{ idea_id: string }>('SELECT idea_id FROM content_idea_favorites WHERE staff_id = $1', [u.id])).map((r) => r.idea_id));
+  return (await db().query<any>(`SELECT * FROM content_ideas WHERE accounts && $1::text[] OR accounts = '{}' ORDER BY builtin, created_at DESC`, [mine])).map((r) => ideaDTO(r, favs));
+}
+export async function saveIdea(u: Who, i: Omit<ContentIdeaDTO, 'id' | 'builtin' | 'favorite'> & { id?: string }) {
+  const vals = [i.accounts, i.title, i.pillar, i.audience, i.platform, i.format, i.hook, i.visual, i.shotList, i.caption, i.cta, i.hashtags, i.season, i.effort];
+  if (i.id) await db().query('UPDATE content_ideas SET accounts=$2, title=$3, pillar=$4, audience=$5, platform=$6, format=$7, hook=$8, visual=$9, shot_list=$10, caption=$11, cta=$12, hashtags=$13, season=$14, effort=$15 WHERE id=$1', [i.id, ...vals]);
+  else await db().query('INSERT INTO content_ideas(accounts, title, pillar, audience, platform, format, hook, visual, shot_list, caption, cta, hashtags, season, effort, created_by_staff_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)', [...vals, u.id]);
+  return listIdeas(u);
+}
+export async function deleteIdea(u: Who, id: string) {
+  const r = await db().one<{ key: string | null }>('DELETE FROM content_ideas WHERE id = $1 RETURNING key', [id]);
+  if (r?.key) await setKV(REMOVED_IDEAS_KEY, [...new Set([...((await getKV<string[]>(REMOVED_IDEAS_KEY)) ?? []), r.key])]);
+  return listIdeas(u);
+}
+export async function favoriteIdea(u: Who, id: string, on: boolean) {
+  if (on) await db().query('INSERT INTO content_idea_favorites(staff_id, idea_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [u.id, id]);
+  else await db().query('DELETE FROM content_idea_favorites WHERE staff_id = $1 AND idea_id = $2', [u.id, id]);
+}
+
+// ---------------- AI drafts ----------------
+export interface GenerateInput { account: ContentAccountId; platform: ContentPlatform; format: ContentPostType; pillar: string | null; tone: string | null; objective: string | null; campaign: string | null; brief: string | null; kind?: string | null }
+export interface Generated { title: string; headline: string | null; caption: string; cta: string | null; hashtags: string | null; extra: string | null; ai: boolean }
+const KIND_ASK: Record<string, string> = {
+  caption: 'an Instagram caption', reel: 'a Reels script with a shot list (in "extra")', story: 'an Instagram Story sequence, frame by frame (in "extra")',
+  carousel: 'a carousel outline with copy for each slide (in "extra")', tiktok: 'a TikTok concept with hook, beats and on-screen text (in "extra")',
+  pinterest: 'a Pinterest pin title and description', promo: 'a promotional post', product: 'a product spotlight', email: 'an email campaign: subject line in "headline", body in "caption"',
+};
+/** A draft written for the account's voice, audience and CTA — with Claude when set up, else from the closest library idea. Always editable; never posted. */
+export async function generate(i: GenerateInput): Promise<Generated> {
+  const acc = (await contentAccounts()).find((a) => a.id === i.account)!;
+  const kind = i.kind ?? (i.platform === 'email' ? 'email' : i.platform === 'tiktok' ? 'tiktok' : i.platform === 'pinterest' ? 'pinterest' : i.format === 'reel' ? 'reel' : i.format === 'story' ? 'story' : i.format === 'carousel' ? 'carousel' : 'caption');
+  const ai = aiService();
+  if (ai.write) {
+    const salon = (await getSettings()).business.name;
+    const system = `You write social media content for ${acc.name} (${acc.brand === 'salon' ? `${salon}, a luxury hair salon` : 'Addendum Hair, a professional hair extension brand'}). Voice: ${acc.voice} Primary call to action: ${acc.cta}. Content pillars: ${acc.pillars.join('; ')}. Never invent prices, discounts or claims that weren't given. Reply with ONLY a JSON object: {"title": short internal title, "headline": string|null, "caption": string, "cta": string, "hashtags": string (space-separated, 5-12, or "" for email), "extra": string|null}.`;
+    const user = [`Write ${KIND_ASK[kind] ?? KIND_ASK.caption} for ${i.platform} (${i.format}).`, i.pillar && `Pillar: ${i.pillar}.`, i.objective && `Objective: ${i.objective}.`, i.tone && `Tone: ${i.tone}.`, i.campaign && `Campaign: ${i.campaign}.`, i.brief && `Brief:\n${i.brief}`].filter(Boolean).join('\n');
+    try {
+      const text = await ai.write(system, user, 1500);
+      const j = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1));
+      return { title: String(j.title ?? '').slice(0, 200) || 'AI draft', headline: j.headline ?? null, caption: String(j.caption ?? ''), cta: j.cta ?? acc.cta, hashtags: j.hashtags ?? null, extra: j.extra ?? null, ai: true };
+    } catch (e) { console.warn('[content] AI draft failed:', (e as Error).message); }
+  }
+  // Built-in: the closest library idea for this account (pillar and format), with the account's CTA.
+  const ideas = BUILTIN_IDEAS.filter((x) => x.accounts.includes(i.account));
+  const best = ideas.find((x) => x.pillar === i.pillar && x.format === i.format) ?? ideas.find((x) => x.pillar === i.pillar) ?? ideas.find((x) => x.format === i.format) ?? ideas[0];
+  const brief = i.brief?.trim();
+  return {
+    title: best ? best.title : 'Draft', headline: best?.hook ?? null,
+    caption: [best?.hook, brief && !brief.startsWith('Repurpose') ? brief : best?.caption].filter(Boolean).join('\n\n'),
+    cta: acc.cta, hashtags: best?.hashtags ?? null, extra: best ? `Visual: ${best.visual}\n\nShot list:\n${best.shots}` : null, ai: false,
+  };
+}
+
+// ---------------- Planning and analytics ----------------
+const SEASONS: Record<number, string[]> = { 0: ['new-year'], 1: ['valentines'], 2: ['spring'], 3: ['spring'], 4: ['spring', 'mothers-day'], 5: ['summer'], 6: ['summer'], 7: ['summer', 'back-to-school'], 8: ['fall', 'back-to-school'], 9: ['fall'], 10: ['fall', 'holiday'], 11: ['holiday'] };
+/** This week and the next few: planned and published per account and platform against the weekly goals, empty weeks, and ideas for them. */
+export async function planning(u: Who, weeks = 5, now = new Date()) {
+  const mine = await accountsFor(u);
+  const { goals } = await contentSettings();
+  const monday = new Date(now); monday.setHours(0, 0, 0, 0); monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  const end = new Date(monday.getTime() + weeks * 7 * 86400_000);
+  const rows = await db().query<any>(`SELECT account, platform, status, scheduled_at, campaign_id FROM content_posts WHERE account = ANY($1::text[]) AND scheduled_at >= $2 AND scheduled_at < $3`, [mine, monday, end]);
+  const out = Array.from({ length: weeks }, (_, w) => {
+    const from = new Date(monday.getTime() + w * 7 * 86400_000); const to = new Date(from.getTime() + 7 * 86400_000);
+    const inWeek = rows.filter((r) => new Date(r.scheduled_at) >= from && new Date(r.scheduled_at) < to && r.status !== 'idea');
+    const accounts = mine.map((a) => {
+      const platforms = [...new Set([...Object.keys(goals[a] ?? {}), ...inWeek.filter((r) => r.account === a).map((r) => r.platform)])].map((pl) => ({
+        platform: pl, goal: goals[a]?.[pl as ContentPlatform] ?? 0,
+        planned: inWeek.filter((r) => r.account === a && r.platform === pl).length, published: inWeek.filter((r) => r.account === a && r.platform === pl && r.status === 'published').length,
+      }));
+      return { account: a, platforms, empty: !inWeek.some((r) => r.account === a) };
+    });
+    return { weekOf: from.toISOString().slice(0, 10), accounts };
+  });
+  // Ideas for what's coming: seasonal ones for the coming weeks' months, and campaigns without posts yet.
+  const seasons = new Set([now.getMonth(), new Date(end).getMonth()].flatMap((m) => SEASONS[m]));
+  const ideas = (await listIdeas(u)).filter((i) => i.season && seasons.has(i.season)).slice(0, 8);
+  const campaigns = (await listCampaigns()).filter((c) => !c.posts && (!c.endsOn || c.endsOn >= now.toISOString().slice(0, 10)));
+  return { weeks: out, seasonalIdeas: ideas, campaignsWithoutPosts: campaigns };
+}
+
+const ENGAGE = (m: ContentMetrics) => (m.likes ?? 0) + (m.comments ?? 0) + (m.saves ?? 0) + (m.shares ?? 0);
+/** Totals per account and platform for published posts in the range, the top posts, and what to make more of. */
+export async function analytics(u: Who, from: string, to: string) {
+  const mine = await accountsFor(u);
+  const posts = await toDTO(await db().query(`${SELECT} WHERE p.account = ANY($3::text[]) AND p.status = 'published' AND COALESCE(p.posted_at, p.scheduled_at) >= $1 AND COALESCE(p.posted_at, p.scheduled_at) < $2`, [from, to, mine]));
+  const KEYS: (keyof ContentMetrics)[] = ['reach', 'impressions', 'views', 'likes', 'comments', 'saves', 'shares', 'clicks', 'bookingInquiries', 'productClicks', 'salesCents'];
+  const sum = (list: ContentPostDTO[]) => Object.fromEntries(KEYS.map((k) => [k, list.reduce((n, p) => n + (p.metrics[k] ?? 0), 0)])) as Required<ContentMetrics>;
+  const group = (key: (p: ContentPostDTO) => string) => [...new Set(posts.map(key))].map((k) => { const l = posts.filter((p) => key(p) === k); return { key: k, posts: l.length, withMetrics: l.filter((p) => p.metricsSource).length, totals: sum(l), engagement: l.reduce((n, p) => n + ENGAGE(p.metrics), 0) }; });
+  const byAccount = group((p) => p.account); const byPlatform = group((p) => p.platform);
+  const top = [...posts].filter((p) => p.metricsSource).sort((a, b) => ENGAGE(b.metrics) - ENGAGE(a.metrics) || (b.metrics.reach ?? 0) - (a.metrics.reach ?? 0)).slice(0, 5);
+  // Suggest more of each account's best pillar and format (by average engagement, 2+ posts with numbers).
+  const accs = await contentAccounts();
+  const suggestions = mine.flatMap((a) => {
+    const withNums = posts.filter((p) => p.account === a && p.metricsSource);
+    const best = (key: (p: ContentPostDTO) => string | null) => [...new Set(withNums.map(key).filter(Boolean) as string[])]
+      .map((k) => { const l = withNums.filter((p) => key(p) === k); return { k, n: l.length, avg: l.reduce((x, p) => x + ENGAGE(p.metrics), 0) / l.length }; })
+      .filter((x) => x.n >= 2).sort((x, y) => y.avg - x.avg)[0];
+    const name = accs.find((x) => x.id === a)?.name ?? a;
+    const pillar = best((p) => p.pillar); const format = best((p) => p.type);
+    return [pillar && `${name}: “${pillar.k}” gets the most engagement (about ${Math.round(pillar.avg)} per post) — plan more of it.`, format && `${name}: ${format.k} posts perform best — use that format more.`].filter(Boolean) as string[];
+  });
+  return { posts: posts.length, totals: sum(posts), byAccount, byPlatform, top, suggestions, manual: posts.filter((p) => p.metricsSource === 'manual').length, imported: posts.filter((p) => p.metricsSource === 'imported').length };
+}
+
+// ---------------- Scheduler: reminders, auto-posting and metrics ----------------
+/** Bell reminders for the creator: the day before and on the day (posts not published yet). */
 export async function remindContent(now = new Date()) {
   const tz = (await getSettings()).business.timezone;
   const day = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: tz });
   const today = day(now); const tomorrow = day(new Date(now.getTime() + 86400_000));
-  const rows = await db().query<any>(`SELECT id, account, post_type, scheduled_at, assigned_staff_id, reminded_day_before, reminded_today FROM content_posts
-     WHERE assigned_staff_id IS NOT NULL AND scheduled_at IS NOT NULL AND status NOT IN ('posted','publishing') AND scheduled_at > $1::timestamptz - interval '1 day'`, [now]);
+  const rows = await db().query<any>(`SELECT id, title, account, post_type, scheduled_at, assigned_staff_id, publisher_staff_id, reminded_day_before, reminded_today FROM content_posts
+     WHERE scheduled_at IS NOT NULL AND status NOT IN ('published','publishing','idea') AND scheduled_at > $1::timestamptz - interval '1 day' AND (assigned_staff_id IS NOT NULL OR publisher_staff_id IS NOT NULL)`, [now]);
   const names = new Map((await contentAccounts()).map((a) => [a.id, a.name]));
   let sent = 0;
   for (const r of rows) {
     const d = day(new Date(r.scheduled_at));
     const when = new Date(r.scheduled_at).toLocaleString('en-US', { timeZone: tz, weekday: 'short', hour: 'numeric', minute: '2-digit' });
-    const what = `${names.get(r.account) ?? 'Instagram'} ${r.post_type === 'reel' ? 'Reel' : r.post_type === 'story' ? 'Story' : r.post_type === 'carousel' ? 'carousel' : 'post'}`;
+    const who = [...new Set([r.assigned_staff_id, r.publisher_staff_id].filter(Boolean))];
     if (d === tomorrow && !r.reminded_day_before) {
-      await db().query("INSERT INTO notifications(staff_id, kind, title, body, link) VALUES ($1,'content',$2,$3,$4)", [r.assigned_staff_id, `Tomorrow: ${what}`, `Scheduled ${when}. Make sure it’s ready.`, `/content?post=${r.id}`]);
+      for (const s of who) await notify(s, `Tomorrow: ${r.title}`, `${names.get(r.account) ?? ''} · ${when}. Make sure it’s ready.`, r.id);
       await db().query('UPDATE content_posts SET reminded_day_before = true WHERE id = $1', [r.id]); sent++;
     } else if (d === today && !r.reminded_today) {
-      await db().query("INSERT INTO notifications(staff_id, kind, title, body, link) VALUES ($1,'content',$2,$3,$4)", [r.assigned_staff_id, `Today: ${what}`, `Scheduled ${when}.`, `/content?post=${r.id}`]);
+      for (const s of who) await notify(s, `Today: ${r.title}`, `${names.get(r.account) ?? ''} · ${when}.`, r.id);
       await db().query('UPDATE content_posts SET reminded_today = true, reminded_day_before = true WHERE id = $1', [r.id]); sent++;
     }
   }
@@ -179,50 +518,61 @@ export async function remindContent(now = new Date()) {
 
 const PARENT = 'P:';
 /**
- * Auto-posting: due posts get their Instagram containers made (videos are processed by Instagram first), then
- * published once ready — over a few checks if needed. A problem marks the post Failed with the reason (and tells the
- * person on it); nothing is retried on its own.
+ * Instagram auto-posting: scheduled, auto-post posts that are due get their containers made (videos are processed
+ * first), then published once ready. Only scheduled posts — so approval rules are already met. A problem marks the post
+ * Failed with the reason and tells the people on it; nothing is retried on its own.
  */
 export async function publishDueContent(now = new Date(), api = (slot: IgSlot) => { const a = instagramAccounts(config()).find((x) => x.slot === slot); return a ? new InstagramApi(a.accountId, a.token) : null; }) {
-  const due = await db().query<any>(`SELECT * FROM content_posts WHERE auto_post AND ((status = 'scheduled' AND scheduled_at <= $1) OR status = 'publishing') ORDER BY scheduled_at LIMIT 10`, [now]);
+  const due = await db().query<any>(`SELECT * FROM content_posts WHERE auto_post AND platform = 'instagram' AND ((status = 'scheduled' AND scheduled_at <= $1) OR status = 'publishing') ORDER BY scheduled_at LIMIT 10`, [now]);
   let posted = 0;
   for (const r of due) {
     const ig = api(r.account);
     const fail = async (msg: string) => {
       await db().query("UPDATE content_posts SET status = 'failed', error = $2, updated_at = now() WHERE id = $1", [r.id, msg.slice(0, 500)]);
-      if (r.assigned_staff_id) await db().query("INSERT INTO notifications(staff_id, kind, title, body, link) VALUES ($1,'content','Instagram post didn’t go out',$2,$3)", [r.assigned_staff_id, msg.slice(0, 300), `/content?post=${r.id}`]);
+      await log(r.id, null, 'status', msg.slice(0, 500), r.status, 'failed');
+      for (const s of new Set([r.assigned_staff_id, r.publisher_staff_id])) await notify(s, 'Post didn’t go out', `“${r.title}”: ${msg}`, r.id);
     };
     if (!ig) { await fail('This account isn’t connected for auto-posting (Settings → API & Integrations → Instagram).'); continue; }
     try {
       const media = await db().query<{ id: string; mime: string }>('SELECT id, mime FROM content_media WHERE id = ANY($1::uuid[])', [r.media_ids]);
       const ordered = (r.media_ids as string[]).map((id) => media.find((m) => m.id === id)).filter((m): m is { id: string; mime: string } => !!m);
-      const problem = autoPostProblem({ type: r.post_type, scheduledAt: iso(r.scheduled_at), media: ordered }, true);
+      const problem = autoPostProblem({ platform: r.platform, type: r.post_type, scheduledAt: iso(r.scheduled_at), media: ordered }, true);
       if (problem) { await fail(problem); continue; }
       let ids: string[] = r.ig_container_ids ?? [];
       if (r.status === 'scheduled') {
-        // Make the containers: one, or each carousel item (the carousel itself once they're ready).
         const urls = await Promise.all(ordered.map(async (m) => ({ url: await publicMediaUrl(m.id), video: m.mime.startsWith('video/') })));
+        const caption = fullCaption(r);
         ids = r.post_type === 'carousel'
           ? await Promise.all(urls.map((u) => ig.container(u, { kind: 'carousel_item' })))
-          : [await ig.container(urls[0], { kind: r.post_type, caption: r.caption })];
+          : [await ig.container(urls[0], { kind: r.post_type, caption })];
         await db().query("UPDATE content_posts SET status = 'publishing', ig_container_ids = $2, updated_at = now() WHERE id = $1", [r.id, ids]);
       }
       const statuses = await Promise.all(ids.filter((x) => !x.startsWith(PARENT)).map((x) => ig.status(x)));
       if (statuses.some((s) => s === 'ERROR' || s === 'EXPIRED')) { await fail('Instagram couldn’t process the media (check the format and size).'); continue; }
-      if (statuses.some((s) => s !== 'FINISHED')) continue; // still processing: next check
+      if (statuses.some((s) => s !== 'FINISHED')) continue;
       let final = ids[0];
       if (r.post_type === 'carousel') {
-        const parent = ids.find((x) => x.startsWith(PARENT))?.slice(PARENT.length) ?? await ig.carousel(ids, r.caption);
+        const parent = ids.find((x) => x.startsWith(PARENT))?.slice(PARENT.length) ?? await ig.carousel(ids, fullCaption(r));
         if (!ids.some((x) => x.startsWith(PARENT))) await db().query('UPDATE content_posts SET ig_container_ids = $2 WHERE id = $1', [r.id, [...ids, `${PARENT}${parent}`]]);
         if ((await ig.status(parent)) !== 'FINISHED') continue;
         final = parent;
       }
       const out = await ig.publish(final);
-      await db().query("UPDATE content_posts SET status = 'posted', ig_media_id = $2, permalink = $3, posted_at = now(), error = NULL, updated_at = now() WHERE id = $1", [r.id, out.mediaId, out.permalink]);
+      await db().query("UPDATE content_posts SET status = 'published', ig_media_id = $2, permalink = $3, posted_at = now(), error = NULL, updated_at = now() WHERE id = $1", [r.id, out.mediaId, out.permalink]);
+      await log(r.id, null, 'status', 'Posted to Instagram', 'publishing', 'published');
       posted++;
     } catch (e) {
       await fail((e as { userMessage?: string }).userMessage ?? (e as Error).message);
     }
   }
   return posted;
+}
+
+/** Daily: imports Instagram numbers for posts it published in the last 30 days (manual numbers aren't overwritten). */
+export async function importRecentMetrics() {
+  const rows = await db().query<{ id: string }>(`SELECT id FROM content_posts WHERE status = 'published' AND ig_media_id IS NOT NULL AND posted_at > now() - interval '30 days'
+     AND (metrics_source IS NULL OR metrics_source = 'imported') AND (metrics_updated_at IS NULL OR metrics_updated_at < now() - interval '20 hours')`);
+  let n = 0;
+  for (const r of rows) { try { await importMetrics(null, r.id); n++; } catch { /* next time */ } }
+  return n;
 }

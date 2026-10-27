@@ -28,6 +28,10 @@ export class AnthropicAIService implements AIService {
     return (json.content ?? []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('').trim();
   }
 
+  async write(system: string, user: string, maxTokens = 1500) {
+    return this.complete(system, user, maxTokens);
+  }
+
   async analyze(text: string): Promise<MessageInsight> {
     try {
       const out = await this.complete(

@@ -1,53 +1,122 @@
 import express, { Router } from 'express';
 import { z } from 'zod';
-import { createPost, contentAccounts, deletePost, getPost, linkOptions, listPosts, MEDIA_LIMITS, publishDueContent, readMedia, saveContentAccounts, saveMedia, updatePost } from '../domain/content.js';
-import { notFound } from '../lib/errors.js';
+import { CONTENT_PLATFORMS, CONTENT_FORMATS } from '@addendum/shared';
+import {
+  accountsFor, addComment, analytics, comments, contentAccounts, contentSettings, createPosts, deleteAsset, deleteCampaign, deleteIdea, deletePost, favoriteIdea, generate,
+  getPost, importMetrics, linkOptions, listAssets, listCampaigns, listIdeas, listPosts, MEDIA_LIMITS, planning, readMedia, repurpose, reschedule, saveCampaign,
+  saveContentAccounts, saveContentSettings, saveIdea, saveMedia, setMetrics, transition, updateAsset, updatePost,
+} from '../domain/content.js';
+import { can } from '../auth/permissions.js';
+import { forbidden, notFound } from '../lib/errors.js';
 import { ah, logAction, parse } from './util.js';
 
-/** Content calendar (Instagram) — everything needs "Content calendar" (permissions.ts). */
+/** Content calendar — needs "Content calendar" (permissions.ts); approving and publishing need their own permissions (checked in the domain). */
 export const contentRouter = Router();
+const who = (req: express.Request) => req.user!;
+const admin = (req: express.Request) => { if (!can(req.user, 'settings:write') && !can(req.user, '*')) throw forbidden('Only administrators can change content settings.'); };
 
-const slot = z.enum(['a1', 'a2', 'a3']);
-contentRouter.get('/accounts', ah(async (_req, res) => res.json({ accounts: await contentAccounts() })));
+const account = z.enum(['a1', 'a2', 'a3']);
+const platform = z.enum(CONTENT_PLATFORMS.map((p) => p.value) as [string, ...string[]]);
+const format = z.enum(CONTENT_FORMATS.map((f) => f.value) as [string, ...string[]]);
+const status = z.enum(['idea', 'draft', 'in_review', 'changes_requested', 'approved', 'scheduled', 'published']);
+const when = z.string().datetime({ offset: true }).nullable();
+const text = (n: number) => z.string().max(n).nullable().default(null);
+
+contentRouter.get('/accounts', ah(async (req, res) => res.json({ accounts: await contentAccounts(), mine: await accountsFor(who(req)) })));
 contentRouter.put('/accounts', ah(async (req, res) => {
-  const b = parse(z.object({ accounts: z.array(z.object({ id: slot, name: z.string().trim().min(1).max(60), handle: z.string().trim().max(60), color: z.string().regex(/^#[0-9a-fA-F]{6}$/) })).max(3) }), req.body);
-  res.json({ accounts: await saveContentAccounts(b.accounts) });
+  admin(req);
+  const b = parse(z.object({ accounts: z.array(z.object({ id: account, name: z.string().trim().min(1).max(60), handle: z.string().trim().max(60), color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+    cta: z.string().trim().max(200).optional(), voice: z.string().trim().max(500).optional(), pillars: z.array(z.string().trim().min(1).max(80)).max(20).optional() })).max(3) }), req.body);
+  res.json({ accounts: await saveContentAccounts(b.accounts as any) });
+}));
+contentRouter.get('/settings', ah(async (_req, res) => res.json({ settings: await contentSettings() })));
+contentRouter.put('/settings', ah(async (req, res) => {
+  admin(req);
+  const b = parse(z.object({ requireApproval: z.boolean(), goals: z.record(account, z.record(platform, z.number().int().min(0).max(100))), access: z.record(account, z.array(z.string().uuid()).max(200)) }), req.body);
+  await logAction(req, 'content.settings', undefined, undefined, { requireApproval: b.requireApproval });
+  res.json({ settings: await saveContentSettings(b as any) });
 }));
 
-const postBody = z.object({
-  account: slot, type: z.enum(['feed', 'reel', 'story', 'carousel']), scheduledAt: z.string().datetime({ offset: true }).nullable(),
-  caption: z.string().max(2200).default(''), status: z.enum(['idea', 'draft', 'ready', 'scheduled', 'posted', 'failed']), autoPost: z.boolean().default(false),
-  mediaIds: z.array(z.string().uuid()).max(10).default([]),
+const fields = z.object({
+  platform: platform.default('instagram'), type: format.default('feed'), title: z.string().trim().min(1).max(200), scheduledAt: when.default(null), dueAt: when.default(null),
+  headline: text(300), caption: z.string().max(10_000).default(''), cta: text(300), hashtags: text(1000), pillar: text(120), autoPost: z.boolean().default(false),
+  mediaIds: z.array(z.string().uuid()).max(10).default([]), externalLinks: z.array(z.string().url().max(500)).max(10).default([]),
   link: z.object({ kind: z.enum(['product', 'service']), ref: z.string().min(1).max(200), label: z.string().max(200) }).nullable().default(null),
-  assignedStaffId: z.string().uuid().nullable().default(null), notes: z.string().max(2000).nullable().default(null),
+  campaignId: z.string().uuid().nullable().default(null), assignedStaffId: z.string().uuid().nullable().default(null), reviewerStaffId: z.string().uuid().nullable().default(null),
+  publisherStaffId: z.string().uuid().nullable().default(null), notes: text(4000), ideaId: z.string().uuid().nullable().optional(),
 });
 contentRouter.get('/posts', ah(async (req, res) => {
   const q = parse(z.object({ from: z.string().datetime({ offset: true }), to: z.string().datetime({ offset: true }) }), req.query);
-  res.json({ posts: await listPosts(q.from, q.to) });
+  res.json({ posts: await listPosts(who(req), q.from, q.to) });
 }));
-contentRouter.get('/posts/:id', ah(async (req, res) => res.json({ post: await getPost(req.params.id) })));
+contentRouter.get('/posts/:id', ah(async (req, res) => res.json({ post: await getPost(who(req), req.params.id), comments: await comments(who(req), req.params.id) })));
+// One post per chosen account (each its own entry, linked by a group).
 contentRouter.post('/posts', ah(async (req, res) => {
-  const post = await createPost(parse(postBody, req.body), req.user!.id);
-  await logAction(req, 'content.create', 'content_post', post.id, { account: post.account, type: post.type });
-  res.status(201).json({ post });
+  const b = parse(fields.extend({ accounts: z.array(account).min(1).max(3), status: z.enum(['idea', 'draft']).default('draft') }), req.body);
+  const { accounts, status: st, ...f } = b;
+  const posts = await createPosts(who(req), accounts as any, f as any, st);
+  await logAction(req, 'content.create', 'content_post', posts[0].id, { accounts });
+  res.status(201).json({ posts });
 }));
-contentRouter.put('/posts/:id', ah(async (req, res) => {
-  const post = await updatePost(req.params.id, parse(postBody, req.body));
-  await logAction(req, 'content.update', 'content_post', post.id, { status: post.status });
+contentRouter.put('/posts/:id', ah(async (req, res) => res.json({ post: await updatePost(who(req), req.params.id, parse(fields, req.body) as any) })));
+contentRouter.post('/posts/:id/status', ah(async (req, res) => {
+  const b = parse(z.object({ status, comment: text(2000) }), req.body);
+  const post = await transition(who(req), req.params.id, b.status, b.comment);
+  await logAction(req, 'content.status', 'content_post', post.id, { status: b.status });
   res.json({ post });
 }));
+contentRouter.post('/posts/:id/reschedule', ah(async (req, res) => res.json({ post: await reschedule(who(req), req.params.id, parse(z.object({ scheduledAt: when }), req.body).scheduledAt) })));
+contentRouter.post('/posts/:id/comments', ah(async (req, res) => {
+  await addComment(who(req), req.params.id, parse(z.object({ body: z.string().trim().min(1).max(2000) }), req.body).body);
+  res.json({ comments: await comments(who(req), req.params.id) });
+}));
+contentRouter.post('/posts/:id/repurpose', ah(async (req, res) => {
+  const b = parse(z.object({ targets: z.array(z.object({ account, platform, type: format })).min(1).max(6) }), req.body);
+  res.status(201).json({ posts: await repurpose(who(req), req.params.id, b.targets as any) });
+}));
+const metric = z.number().min(0).max(1e10).optional();
+contentRouter.put('/posts/:id/metrics', ah(async (req, res) => {
+  const m = parse(z.object({ reach: metric, impressions: metric, views: metric, likes: metric, comments: metric, saves: metric, shares: metric, clicks: metric, bookingInquiries: metric, productClicks: metric, salesCents: metric }), req.body);
+  res.json({ post: await setMetrics(who(req), req.params.id, m) });
+}));
+contentRouter.post('/posts/:id/metrics/import', ah(async (req, res) => { await importMetrics(who(req), req.params.id); res.json({ post: await getPost(who(req), req.params.id) }); }));
 contentRouter.delete('/posts/:id', ah(async (req, res) => {
-  await deletePost(req.params.id);
+  await deletePost(who(req), req.params.id);
   await logAction(req, 'content.delete', 'content_post', req.params.id);
   res.json({ ok: true });
 }));
 contentRouter.get('/links', ah(async (req, res) => res.json({ options: await linkOptions(String(req.query.q ?? '')) })));
 
-// Uploads: the file itself as the body (photos up to 15 MB, videos up to 100 MB).
+// AI drafts: always returned for editing — nothing is saved or posted.
+contentRouter.post('/generate', ah(async (req, res) => {
+  const b = parse(z.object({ account, platform, format, pillar: text(120), tone: text(120), objective: text(300), campaign: text(120), brief: text(4000), kind: text(40) }), req.body);
+  await (async () => { if (!(await accountsFor(who(req))).includes(b.account as any)) throw forbidden('You don’t have access to that account.'); })();
+  res.json({ draft: await generate(b as any) });
+}));
+
+contentRouter.get('/campaigns', ah(async (_req, res) => res.json({ campaigns: await listCampaigns() })));
+const campaign = z.object({ id: z.string().uuid().optional(), name: z.string().trim().min(1).max(120), accounts: z.array(account).max(3).default([]), startsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null), endsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null), notes: text(2000) });
+contentRouter.post('/campaigns', ah(async (req, res) => res.json({ campaigns: await saveCampaign(parse(campaign, req.body) as any) })));
+contentRouter.delete('/campaigns/:id', ah(async (req, res) => res.json({ campaigns: await deleteCampaign(req.params.id) })));
+
+contentRouter.get('/ideas', ah(async (req, res) => res.json({ ideas: await listIdeas(who(req)) })));
+const idea = z.object({ id: z.string().uuid().optional(), accounts: z.array(account).min(1).max(3), title: z.string().trim().min(1).max(200), pillar: z.string().trim().min(1).max(120), audience: text(300),
+  platform, format, hook: text(500), visual: text(1000), shotList: text(2000), caption: text(4000), cta: text(300), hashtags: text(1000), season: text(40), effort: z.enum(['low', 'medium', 'high']).default('medium') });
+contentRouter.post('/ideas', ah(async (req, res) => res.json({ ideas: await saveIdea(who(req), parse(idea, req.body) as any) })));
+contentRouter.delete('/ideas/:id', ah(async (req, res) => res.json({ ideas: await deleteIdea(who(req), req.params.id) })));
+contentRouter.put('/ideas/:id/favorite', ah(async (req, res) => { await favoriteIdea(who(req), req.params.id, parse(z.object({ on: z.boolean() }), req.body).on); res.json({ ok: true }); }));
+
+contentRouter.get('/planning', ah(async (req, res) => res.json(await planning(who(req)))));
+contentRouter.get('/analytics', ah(async (req, res) => {
+  const q = parse(z.object({ from: z.string().datetime({ offset: true }), to: z.string().datetime({ offset: true }) }), req.query);
+  res.json(await analytics(who(req), q.from, q.to));
+}));
+
+// Assets: uploads (the file as the body; photos up to 15 MB, videos up to 100 MB) and the library.
 contentRouter.post('/media', express.raw({ type: () => true, limit: MEDIA_LIMITS.video + 1024 }), ah(async (req, res) => {
   const name = req.get('x-file-name') ? decodeURIComponent(req.get('x-file-name')!) : null;
-  const media = await saveMedia(Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0), req.get('content-type') ?? '', name, req.user!.id);
-  res.status(201).json({ media });
+  const acc = req.get('x-account') ?? null;
+  res.status(201).json({ media: await saveMedia(Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0), req.get('content-type') ?? '', name, req.user!.id, acc) });
 }));
 contentRouter.get('/media/:id', ah(async (req, res) => {
   const m = await readMedia(req.params.id);
@@ -56,5 +125,12 @@ contentRouter.get('/media/:id', ah(async (req, res) => {
   res.setHeader('Cache-Control', 'private, max-age=86400');
   res.send(m.bytes);
 }));
-// Post now (auto-posting accounts): runs the posting check straight away.
-contentRouter.post('/publish-due', ah(async (_req, res) => res.json({ posted: await publishDueContent() })));
+contentRouter.get('/assets', ah(async (req, res) => {
+  const q = parse(z.object({ q: z.string().max(100).optional(), account: account.optional(), tag: z.string().max(60).optional(), approved: z.enum(['true', 'false']).optional() }), req.query);
+  res.json({ assets: await listAssets(who(req), { ...q, approved: q.approved == null ? undefined : q.approved === 'true' }) });
+}));
+contentRouter.patch('/assets/:id', ah(async (req, res) => {
+  await updateAsset(who(req), req.params.id, parse(z.object({ title: text(200).optional(), tags: z.array(z.string().max(40)).max(30).optional(), account: account.nullable().optional(), approved: z.boolean().optional() }), req.body) as any);
+  res.json({ ok: true });
+}));
+contentRouter.delete('/assets/:id', ah(async (req, res) => { await deleteAsset(req.params.id); res.json({ ok: true }); }));

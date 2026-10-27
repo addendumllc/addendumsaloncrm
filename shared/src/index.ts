@@ -135,7 +135,9 @@ export const PERMISSIONS_CATALOG: PermissionDef[] = [
   // Which businesses (workspaces) a person can switch to. What they see inside still follows their other permissions.
   { key: 'workspace:salon', category: 'Businesses', action: 'view', label: 'Addendum Salon workspace', description: 'Can switch to the Addendum Salon workspace (its look, menu and defaults).' },
   { key: 'workspace:hair', category: 'Businesses', action: 'view', label: 'Addendum Hair workspace', description: 'Can switch to the Addendum Hair workspace. Data in it (Hair clients, Shopify inventory…) still needs its own permission.' },
-  { key: 'content:manage', category: 'Marketing', action: 'edit', label: 'Content calendar', description: 'Plan Instagram posts for the salon’s accounts, upload their photos and videos, and schedule auto-posting.' },
+  { key: 'content:manage', category: 'Marketing', action: 'edit', label: 'Content calendar', description: 'Plan and draft posts for the social accounts, use the ideas library and AI drafts, upload photos and videos, and send posts for review.' },
+  { key: 'content:approve', category: 'Marketing', action: 'edit', label: 'Approve content', description: 'Approve posts or request changes.' },
+  { key: 'content:publish', category: 'Marketing', action: 'edit', label: 'Schedule and publish content', description: 'Schedule approved posts, turn on auto-posting, and confirm posts as published.' },
   { key: 'hair:manage', category: 'Addendum Hair', action: 'edit', label: 'Manage Addendum Hair clients and tasks', description: 'Addendum Hair’s own client list, tasks and follow-ups (separate from salon clients).' },
   { key: 'suppliers:details', category: 'Square and Shopify sync', action: 'view', label: 'See supplier company names and contacts', description: 'Each supplier’s real company name, email, phone, website and notes. Without it, people with inventory access see only the name a supplier is shown as (e.g. Addendum Hair).', sensitive: true },
 
@@ -2246,6 +2248,11 @@ export interface StockForecastDTO {
   key: string;
   /** Extensions that dropped to the recount level and haven't been counted since (Forecast settings → Recount). */
   recount?: boolean;
+  /**
+   * Suggested to order now: it would sell out within the next 2 weeks (or is out and selling), and — for 18" packs —
+   * neither the 20g nor the 25g pack of that colour is in stock.
+   */
+  suggestNow?: boolean;
   label: string;
   sku: string | null;
   supplier: string | null;
@@ -2450,20 +2457,61 @@ export function suggestHairTask(email: { subject?: string; body?: string }, toda
   return { type, title, dueOn, excerpt: body.slice(0, 600) };
 }
 
-// ---------------- Content calendar (Instagram) ----------------
-/** One of the salon's Instagram accounts (names in Settings; its connection in API & Integrations). */
-export interface ContentAccount { id: 'a1' | 'a2' | 'a3'; name: string; handle: string; color: string; connected: boolean }
-export type ContentPostType = 'feed' | 'reel' | 'story' | 'carousel';
-export type ContentStatus = 'idea' | 'draft' | 'ready' | 'scheduled' | 'publishing' | 'posted' | 'failed';
-export interface ContentMediaDTO { id: string; mime: string; name: string | null; size: number; url: string }
+// ---------------- Content calendar ----------------
+/**
+ * The three social accounts: a1 @addendum.salon (the salon), a2 @addendumhair (the brand's products), a3 @addendumhairpro
+ * (professional education). Names, handles and colours are editable; each has its own pillars, audience and CTA.
+ */
+export type ContentAccountId = 'a1' | 'a2' | 'a3';
+export interface ContentAccount { id: ContentAccountId; name: string; handle: string; color: string; brand: 'salon' | 'hair'; cta: string; voice: string; pillars: string[]; connected: boolean }
+export type ContentPlatform = 'instagram' | 'facebook' | 'tiktok' | 'pinterest' | 'email';
+export const CONTENT_PLATFORMS: { value: ContentPlatform; label: string }[] = [
+  { value: 'instagram', label: 'Instagram' }, { value: 'facebook', label: 'Facebook' }, { value: 'tiktok', label: 'TikTok' }, { value: 'pinterest', label: 'Pinterest' }, { value: 'email', label: 'Email' },
+];
+export type ContentPostType = 'feed' | 'carousel' | 'reel' | 'story' | 'video' | 'pin' | 'email' | 'promo';
+export const CONTENT_FORMATS: { value: ContentPostType; label: string }[] = [
+  { value: 'feed', label: 'Post' }, { value: 'carousel', label: 'Carousel' }, { value: 'reel', label: 'Reel' }, { value: 'story', label: 'Story' },
+  { value: 'video', label: 'Video (TikTok)' }, { value: 'pin', label: 'Pin' }, { value: 'email', label: 'Email' }, { value: 'promo', label: 'Promotion' },
+];
+export type ContentStatus = 'idea' | 'draft' | 'in_review' | 'changes_requested' | 'approved' | 'scheduled' | 'publishing' | 'published' | 'failed';
+export const CONTENT_STATUSES: { value: ContentStatus; label: string }[] = [
+  { value: 'idea', label: 'Idea' }, { value: 'draft', label: 'Draft' }, { value: 'in_review', label: 'In review' }, { value: 'changes_requested', label: 'Changes requested' },
+  { value: 'approved', label: 'Approved' }, { value: 'scheduled', label: 'Scheduled' }, { value: 'publishing', label: 'Publishing…' }, { value: 'published', label: 'Published' }, { value: 'failed', label: 'Failed' },
+];
+export interface ContentMediaDTO { id: string; mime: string; name: string | null; size: number; url: string; title?: string | null; tags?: string[]; account?: ContentAccountId | null; approved?: boolean; createdAt?: string }
+/** Reach, views… — imported from the platform, or entered by hand (metricsSource says which). */
+export interface ContentMetrics { reach?: number; impressions?: number; views?: number; likes?: number; comments?: number; saves?: number; shares?: number; clicks?: number; bookingInquiries?: number; productClicks?: number; salesCents?: number }
 export interface ContentPostDTO {
-  id: string; account: ContentAccount['id']; type: ContentPostType; scheduledAt: string | null; caption: string; status: ContentStatus;
-  /** Posted by the CRM at the scheduled time (the account must be connected). */
+  id: string; account: ContentAccountId; platform: ContentPlatform; type: ContentPostType; title: string; scheduledAt: string | null; dueAt: string | null;
+  headline: string | null; caption: string; cta: string | null; hashtags: string | null; pillar: string | null; status: ContentStatus;
+  /** Posted by the CRM at the scheduled time (Instagram, connected accounts). */
   autoPost: boolean;
-  media: ContentMediaDTO[];
+  media: ContentMediaDTO[]; externalLinks: string[];
   /** What it promotes: a product (by product key) or a service. */
   link: { kind: 'product' | 'service'; ref: string; label: string } | null;
-  assignedStaffId: string | null; assignedName: string | null; notes: string | null;
+  campaignId: string | null; campaignName: string | null;
+  /** Posts made together for several accounts share a group; a repurposed post points to its source. */
+  groupId: string | null; sourcePostId: string | null; ideaId: string | null;
+  /** Creator (assigned), reviewer and publishing owner. */
+  assignedStaffId: string | null; assignedName: string | null; reviewerStaffId: string | null; reviewerName: string | null; publisherStaffId: string | null; publisherName: string | null;
+  notes: string | null; revision: number;
+  metrics: ContentMetrics; metricsSource: 'imported' | 'manual' | null; metricsUpdatedAt: string | null;
   permalink: string | null; postedAt: string | null; error: string | null;
   createdAt: string; updatedAt: string;
+}
+export interface ContentCommentDTO { id: string; kind: 'comment' | 'status' | 'revision'; body: string | null; fromStatus: string | null; toStatus: string | null; staffName: string | null; createdAt: string }
+export interface ContentCampaignDTO { id: string; name: string; accounts: ContentAccountId[]; startsOn: string | null; endsOn: string | null; notes: string | null; posts: number }
+export interface ContentIdeaDTO {
+  id: string; accounts: ContentAccountId[]; title: string; pillar: string; audience: string | null; platform: ContentPlatform; format: ContentPostType;
+  hook: string | null; visual: string | null; shotList: string | null; caption: string | null; cta: string | null; hashtags: string | null; season: string | null;
+  effort: 'low' | 'medium' | 'high'; builtin: boolean; favorite: boolean;
+}
+/** Content settings (administrators). */
+export interface ContentSettings {
+  /** Posts must be approved before they can be scheduled or published. */
+  requireApproval: boolean;
+  /** Weekly publishing goals per account and platform. */
+  goals: Partial<Record<ContentAccountId, Partial<Record<ContentPlatform, number>>>>;
+  /** Who may work on each account (staff ids); empty = everyone with Content calendar. */
+  access: Partial<Record<ContentAccountId, string[]>>;
 }
