@@ -87,8 +87,8 @@
 :root .text-plum, :root .hover\:text-plum:hover { color: rgb(var(--accent-ink, var(--accent))); }
 
 /* Button size (the theme's, or each person's): one size for every button. Standard is the built-in sizes. */
-[data-buttons="compact"] .btn-md { height: 2.25rem; padding-left: 0.75rem; padding-right: 0.75rem; font-size: 13px; }
-[data-buttons="compact"] .btn-sm { height: 1.75rem; padding-left: 0.5rem; padding-right: 0.5rem; font-size: 12px; }
+[data-buttons="compact"] .btn-md { height: 2rem; padding-left: 0.625rem; padding-right: 0.625rem; font-size: 12px; }
+[data-buttons="compact"] .btn-sm { height: 1.625rem; padding-left: 0.5rem; padding-right: 0.5rem; font-size: 11px; }
 [data-buttons="large"] .btn-md { height: 3rem; padding-left: 1.25rem; padding-right: 1.25rem; font-size: 16px; }
 [data-buttons="xsmall"] .btn-md { height: 1.875rem; padding-left: 0.625rem; padding-right: 0.625rem; font-size: 12px; }
 [data-buttons="xsmall"] .btn-sm { height: 1.5rem; padding-left: 0.5rem; padding-right: 0.5rem; font-size: 11px; }
@@ -99,12 +99,12 @@
 /* Link-style (text-only) buttons: the links font, a step smaller than filled buttons at every button size. */
 .btn-link { font-family: var(--font-link, var(--font-button, inherit)); }
 /* Buttons at the bottom of a popup: one compact size at every button size setting. */
-.modal-footer .btn-md, [data-buttons] .modal-footer .btn-md, [data-btn-height] .modal-footer .btn-md { height: 2.25rem; padding-left: 0.875rem; padding-right: 0.875rem; font-size: 13px; }
+.modal-footer .btn-md, [data-buttons] .modal-footer .btn-md, [data-btn-height] .modal-footer .btn-md { height: 2.25rem; padding-left: 0.75rem; padding-right: 0.75rem; font-size: 12px; }
 .modal-footer .btn-sm, [data-buttons] .modal-footer .btn-sm, [data-btn-height] .modal-footer .btn-sm { height: 2rem; padding-left: 0.625rem; padding-right: 0.625rem; font-size: 12px; }
 /* …and the button text size setting doesn't enlarge them, nor wide letter spacing. */
 .modal-footer :is(.btn-sm, .btn-md), [data-caps-button] .modal-footer .font-button { zoom: 1; letter-spacing: 0.04em; }
-.btn-link.btn-md, [data-buttons] .btn-link.btn-md { font-size: 13px; }
-.btn-link.btn-sm, [data-buttons] .btn-link.btn-sm { font-size: 12px; }
+.btn-link.btn-md, [data-buttons] .btn-link.btn-md { font-size: 12px; }
+.btn-link.btn-sm, [data-buttons] .btn-link.btn-sm { font-size: 11px; }
 /* Small text and labels (the theme's "small text" size). */
 :is(.label, .text-xs, .text-\[11px\], .text-\[12px\], .text-\[13px\]) { zoom: var(--size-small, 1); }
 
@@ -134,6 +134,16 @@
 body { font-weight: var(--w-body, var(--body-weight, 400)); }
 .font-nav { font-weight: var(--w-menu, inherit); }
 .font-button { font-weight: var(--w-button, 500); }
+/* Text sizes (Font styles → Size, on top of the theme's sizes); 1 when not set. */
+:is(h1, h2):is(.h-display, .font-display) { zoom: var(--z-heading, var(--size-heading, 1)); }
+:is(h3, h4):is(.h-display, .font-display) { zoom: var(--z-subheading, var(--size-heading, 1)); }
+:is(p, dd, td:not(:has(p))):not(.label, .h-display, .font-display) { zoom: var(--z-body, 1); }
+:is(p, dd, td:not(:has(p))):not(.label, .h-display, .font-display):is(.text-xs, .text-\[11px\], .text-\[12px\], .text-\[13px\]) { zoom: var(--z-body-small, var(--size-small, 1)); }
+.font-nav { zoom: var(--z-menu, var(--size-nav, 1)); }
+:is(.btn-sm, .btn-md, [role="tablist"]) { zoom: var(--z-button, 1); }
+.btn-link:is(.btn-sm, .btn-md) { zoom: var(--z-link, 1); }
+:is(.label, thead th) { zoom: var(--z-label, var(--size-small, 1)); }
+:is(a.text-plum, a.underline, a[class*="hover:underline"]):not(.btn-sm, .btn-md) { zoom: var(--z-link, 1); }
 [data-caps-heading] :is(h1, h2):is(.h-display, .font-display),
 [data-caps-subheading] :is(h3, h4):is(.h-display, .font-display),
 [data-caps-menu] .font-nav a,

@@ -29,7 +29,7 @@ export function Button({
         'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-[var(--radius-button,0px)] font-button font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
         // Taller on phones so they're easy to tap; compact on larger screens. "Button size" (Display) adjusts btn-sm/btn-md.
         // One sizing system everywhere (both businesses): the theme changes colours, fonts and corners, never these.
-        size === 'sm' ? 'btn-sm h-9 px-3 text-[13px] sm:h-8 sm:px-2.5' : size === 'icon' ? 'btn-md h-11 w-11 sm:h-10 sm:w-10' : 'btn-md h-11 px-4 text-[15px] sm:h-10 sm:px-3.5 sm:text-sm',
+        size === 'sm' ? 'btn-sm h-9 px-3 text-[12px] sm:h-7 sm:px-2' : size === 'icon' ? 'btn-md h-11 w-11 sm:h-9 sm:w-9' : 'btn-md h-10 px-3.5 text-[13px] sm:h-9 sm:px-3',
         VARIANTS[variant],
         className,
       )}

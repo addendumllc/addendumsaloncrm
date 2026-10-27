@@ -264,6 +264,13 @@ export function applyAppearance(input: Partial<Appearance> | undefined | null, p
   const fsSettings = { ...DEFAULT_FONT_STYLES, ...(org.fontStyles ?? {}) };
   const style = resolveFontStyle(fsSettings, lastPersonal);
   const ROLE_VAR: Record<FontRole, string> = { heading: '--font-display', subheading: '--font-subheading', body: '--font-body', menu: '--font-nav', button: '--font-button', label: '--font-label', link: '--font-link' };
+  // Each kind of text's zoom: the theme's size (headings, small text, menu) times the font style's own size.
+  const pct = (role: FontRole) => (style?.sizes?.[role] ?? 100) / 100;
+  const ZOOM: Record<string, number> = {
+    heading: scale(ty.heading) * pct('heading'), subheading: scale(ty.heading) * pct('subheading'), body: pct('body'), 'body-small': scale(ty.small) * pct('body'),
+    menu: scale(ty.base) * pct('menu'), button: pct('button'), label: scale(ty.small) * pct('label'), link: pct('link'),
+  };
+  for (const [k, v] of Object.entries(ZOOM)) root.setProperty(`--z-${k}`, String(Math.round(v * 1000) / 1000));
   for (const role of Object.keys(ROLE_VAR) as FontRole[]) {
     root.removeProperty(`--w-${role}`);
     delete html.dataset[`caps${role[0].toUpperCase()}${role.slice(1)}`];

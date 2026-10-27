@@ -10,6 +10,8 @@ import { Card, SaveBar } from './shared';
 
 type Section = { draft?: Appearance; set: <K extends keyof Appearance>(k: K, v: Appearance[K]) => void; dirty: boolean; saving: boolean; save: () => unknown; reset: () => void };
 const WEIGHTS: FontWeight[] = [300, 400, 500, 600, 700];
+/** Text sizes offered (percent of standard). */
+const SIZES = [80, 90, 110, 120, 135, 150];
 const SAMPLE: Record<FontRole, string> = {
   heading: 'Today’s Priorities', subheading: 'Upcoming appointments', body: 'Sarah is due for a colour refresh and has a cut on Friday.',
   menu: 'Dashboard', button: 'Book appointment', label: 'Client name', link: 'View client profile',
@@ -37,7 +39,7 @@ export function FontStylesCard({ sec, locked }: { sec: Section; locked: boolean 
   const newStyle = (from?: FontStyle): FontStyle => {
     const base = from ?? DEFAULT_FONT_STYLES.styles[0];
     const name = from ? `${from.name} copy` : 'New font style';
-    return { ...base, fonts: { ...base.fonts }, weights: { ...(base.weights ?? {}) }, caps: { ...(base.caps ?? {}) }, id: slug(name, fs.styles.map((x) => x.id)), name, description: from?.description ?? '', status: 'draft' };
+    return { ...base, fonts: { ...base.fonts }, weights: { ...(base.weights ?? {}) }, caps: { ...(base.caps ?? {}) }, sizes: { ...(base.sizes ?? {}) }, id: slug(name, fs.styles.map((x) => x.id)), name, description: from?.description ?? '', status: 'draft' };
   };
   return (
     <Card title="Font styles" description="Only administrators make font styles. Each sets the font, weight and capitals for headings, subheadings, paragraphs, the menu, buttons, labels and links — from the built-in fonts or fonts you upload. Published styles are offered to everyone in their Appearance."
@@ -129,7 +131,7 @@ function FontStyleEditor({ style, library: libraryIn, onClose, onDone }: { style
   const file = useRef<HTMLInputElement>(null);
   const setFont = (role: FontRole, v: string) => setS((x) => ({ ...x, fonts: { ...x.fonts, [role]: v } }));
   return (
-    <Modal open wide onClose={onClose} title={style.name === 'New font style' ? 'New font style' : `Edit ${style.name}`} footer={<>
+    <Modal open xl onClose={onClose} title={style.name === 'New font style' ? 'New font style' : `Edit ${style.name}`} footer={<>
       <Button variant="ghost" onClick={onClose}>Cancel</Button>
       <Button variant="primary" disabled={!s.name.trim()} onClick={() => onDone({ ...s, name: s.name.trim() })}>Done</Button>
     </>}>
@@ -153,7 +155,7 @@ function FontStyleEditor({ style, library: libraryIn, onClose, onDone }: { style
                 <div><p className="text-[14px] font-medium text-ink">{r.label}</p><p className="text-[12px] text-stone">{r.hint}</p></div>
                 <div className="min-w-0 space-y-2">
                   <p className={cx('truncate text-ink', r.key === 'heading' ? 'text-[26px]' : r.key === 'subheading' ? 'text-[19px]' : 'text-[15px]', r.key === 'link' && 'text-plum underline')}
-                    style={{ fontFamily: stack, fontWeight: s.weights?.[r.key] ?? (r.key === 'button' || r.key === 'label' ? 500 : 400), textTransform: s.caps?.[r.key] ? 'uppercase' : 'none', letterSpacing: s.caps?.[r.key] ? '0.04em' : undefined }}>{SAMPLE[r.key]}</p>
+                    style={{ fontFamily: stack, fontWeight: s.weights?.[r.key] ?? (r.key === 'button' || r.key === 'label' ? 500 : 400), textTransform: s.caps?.[r.key] ? 'uppercase' : 'none', letterSpacing: s.caps?.[r.key] ? '0.04em' : undefined, zoom: (s.sizes?.[r.key] ?? 100) / 100 }}>{SAMPLE[r.key]}</p>
                   <div className="flex flex-wrap items-center gap-2">
                     <select className="field h-9 w-auto py-1 text-sm" value={s.fonts[r.key]} onChange={(e) => setFont(r.key, e.target.value)} aria-label={`${r.label} font`}>
                       {library.length > 0 && <optgroup label="Your fonts">{library.map((f) => <option key={f.id} value={`file:${f.id}`}>{f.name}</option>)}</optgroup>}
@@ -164,6 +166,10 @@ function FontStyleEditor({ style, library: libraryIn, onClose, onDone }: { style
                     <select className="field h-9 w-auto py-1 text-sm" value={s.weights?.[r.key] ?? ''} onChange={(e) => setS({ ...s, weights: { ...(s.weights ?? {}), [r.key]: e.target.value ? Number(e.target.value) as FontWeight : undefined } })} aria-label={`${r.label} weight`}>
                       <option value="">Standard weight</option>
                       {WEIGHTS.map((w) => <option key={w} value={w}>{w === 300 ? 'Light' : w === 400 ? 'Regular' : w === 500 ? 'Medium' : w === 600 ? 'Semibold' : 'Bold'} ({w})</option>)}
+                    </select>
+                    <select className="field h-9 w-auto py-1 text-sm" value={s.sizes?.[r.key] ?? ''} onChange={(e) => setS({ ...s, sizes: { ...(s.sizes ?? {}), [r.key]: e.target.value ? Number(e.target.value) : undefined } })} aria-label={`${r.label} size`}>
+                      <option value="">Standard size</option>
+                      {SIZES.map((p) => <option key={p} value={p}>{p < 100 ? 'Smaller' : 'Larger'} ({p}%)</option>)}
                     </select>
                     <label className="flex items-center gap-1.5 text-[13px] text-ink-soft">
                       <input type="checkbox" className="h-4 w-4 accent-plum" checked={!!s.caps?.[r.key]} onChange={(e) => setS({ ...s, caps: { ...(s.caps ?? {}), [r.key]: e.target.checked } })} />Capitals

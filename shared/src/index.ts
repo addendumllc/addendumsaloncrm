@@ -1570,6 +1570,8 @@ export interface FontStyle {
   fonts: Record<FontRole, string>;
   weights?: Partial<Record<FontRole, FontWeight>>;
   caps?: Partial<Record<FontRole, boolean>>;
+  /** Text size as a percentage of standard (100); unset = standard. */
+  sizes?: Partial<Record<FontRole, number>>;
   status: 'draft' | 'published';
 }
 /** An uploaded font file (administrators): usable in any font style. */
