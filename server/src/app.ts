@@ -104,7 +104,14 @@ export function createApp() {
   })().catch(next));
   // Stylists' booking pages (public): addendumsalon.info/book and /book/<first name>.
   app.get('/book', (_req, res, next) => stylistIndexPage().then((h) => res.type('html').setHeader('Cache-Control', 'no-cache').send(h)).catch(next));
-  app.get('/book/:slug', (req, res, next) => stylistPage(String(req.params.slug)).then((h) => (h ? res.type('html').setHeader('Cache-Control', 'no-cache').send(h) : res.redirect(302, '/book'))).catch(next));
+  // A stylist's link opens Square's booking with them already chosen (their services page when Square's address isn't set).
+  app.get('/book/:slug', (req, res, next) => (async () => {
+    const { stylistLinks } = await import('./domain/bookingPages.js');
+    const l = (await stylistLinks()).find((x) => x.slug === String(req.params.slug).toLowerCase());
+    if (l?.squareUrl) return res.redirect(302, l.squareUrl);
+    const h = await stylistPage(String(req.params.slug));
+    return h ? res.type('html').setHeader('Cache-Control', 'no-cache').send(h) : res.redirect(302, '/book');
+  })().catch(next));
 
   // CSRF defence: state-changing API calls must carry a custom header, which other sites can't send
   // cross-origin without a CORS preflight (and no CORS is enabled).

@@ -6,12 +6,13 @@ import { getSettings } from '../repos/settings.js';
  * that service in Square's booking site (the client then taps the stylist there — Square has no link that picks the
  * stylist). Public: no sign-in, nothing private (first names, services, prices and times only).
  */
-export interface StylistLink { staffId: string; firstName: string; slug: string; services: number }
+export interface StylistLink { staffId: string; firstName: string; slug: string; services: number; squareUrl: string | null }
 
 const slugOf = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
 /** Bookable stylists with their link (first name; a shared first name adds the last initial, e.g. lisa-h). */
 export async function stylistLinks(): Promise<StylistLink[]> {
+  const base = (await getSettings()).business.squareBookingBase ?? '';
   const rows = await db().query<{ id: string; name: string; tm: string; n: number }>(
     `SELECT s.id, s.name, s.square_team_member_id AS tm,
             (SELECT count(*)::int FROM services v WHERE v.available_for_booking AND s.square_team_member_id = ANY(v.team_member_ids)) AS n
@@ -23,9 +24,16 @@ export async function stylistLinks(): Promise<StylistLink[]> {
     const f = first(r.name);
     const last = r.name.trim().split(/\s+/).slice(1).join(' ');
     const slug = (count.get(slugOf(f)) ?? 0) > 1 && last ? `${slugOf(f)}-${slugOf(last)[0]}` : slugOf(f);
-    return { staffId: r.id, firstName: f, slug, services: r.n };
+    return { staffId: r.id, firstName: f, slug, services: r.n, squareUrl: base ? squareStylistUrl(base, r.tm) : null };
   });
 }
+
+/**
+ * Square's booking site with the stylist already chosen (team_member_id), in the salon's booking colours — e.g.
+ * …/location/LE47CFZ0ED4X1/services?…&team_member_id=TMU1eY-TUjsaSooC.
+ */
+export const squareStylistUrl = (base: string, teamMemberId: string) =>
+  `${base.replace(/\/+$/, '')}/services?${new URLSearchParams({ buttonTextColor: '000000', color: 'edece8', locale: 'en', referrer: 'so', team_member_id: teamMemberId })}`;
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const money = (c: number | null) => (c == null ? '' : `$${(c / 100).toFixed(c % 100 ? 2 : 0)}`);

@@ -44,14 +44,14 @@ export function BusinessSettings({ onSaved }: { onSaved?: () => void }) {
 /** Each bookable stylist's booking page (their services, each opening Square's booking) — copy and share. */
 function StylistBookingLinks() {
   const toast = useToast();
-  const { data } = useQuery({ queryKey: ['booking-links'], queryFn: () => api.get<{ links: { staffId: string; firstName: string; slug: string; services: number }[] }>('/settings/booking-links') });
+  const { data } = useQuery({ queryKey: ['booking-links'], queryFn: () => api.get<{ links: { staffId: string; firstName: string; slug: string; services: number; squareUrl: string | null }[] }>('/settings/booking-links') });
   if (!data?.links.length) return null;
   const url = (slug: string) => `${window.location.origin}/book/${slug}`;
   const copy = async (u: string) => { try { await navigator.clipboard.writeText(u); toast('Link copied'); } catch { window.prompt('Copy the link', u); } };
   return (
     <div className="mt-6 border-t border-line pt-4">
       <p className="text-[14px] font-medium text-ink">Stylists’ booking links</p>
-      <p className="mb-2 text-[13px] text-stone">Each shows that stylist’s services (from Square); clients pick a service, then the stylist, in Square. All stylists: <a className="text-plum hover:underline" href="/book" target="_blank" rel="noreferrer">{window.location.host}/book</a></p>
+      <p className="mb-2 text-[13px] text-stone">Each opens Square’s booking with that stylist already chosen (or copy the full Square link). All stylists: <a className="text-plum hover:underline" href="/book" target="_blank" rel="noreferrer">{window.location.host}/book</a></p>
       <ul className="divide-y divide-line border border-line text-[14px]">
         {data.links.map((l) => (
           <li key={l.staffId} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
@@ -59,6 +59,7 @@ function StylistBookingLinks() {
             <a className="min-w-0 flex-1 truncate font-mono text-[13px] text-plum hover:underline" href={url(l.slug)} target="_blank" rel="noreferrer">{url(l.slug).replace(/^https?:\/\//, '')}</a>
             <span className="text-[12px] text-stone">{l.services ? `${l.services} service${l.services === 1 ? '' : 's'}` : 'No online services'}</span>
             <Button size="sm" variant="ghost" icon={<Copy className="h-4 w-4" />} onClick={() => copy(url(l.slug))}>Copy</Button>
+            {l.squareUrl && <Button size="sm" variant="ghost" icon={<Copy className="h-4 w-4" />} onClick={() => copy(l.squareUrl!)}>Copy Square link</Button>}
           </li>
         ))}
       </ul>
