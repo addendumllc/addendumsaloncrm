@@ -73,7 +73,7 @@ export function suggestColors(field: keyof ThemeColors, c: ThemeColors): string[
 function Swatch({ hex, on, label, disabled, onPick }: { hex: string; on: boolean; label: string; disabled?: boolean; onPick: () => void }) {
   return (
     <button type="button" disabled={disabled} onClick={onPick} aria-label={`${label}: ${hex}`} aria-pressed={on} title={hex}
-      className={cx('flex h-7 w-7 items-center justify-center border disabled:opacity-60', on ? 'border-ink ring-2 ring-ink ring-offset-2 ring-offset-white' : 'border-black/15 hover:border-black/40')} style={{ background: hex }}>
+      className={cx('flex h-7 w-7 items-center justify-center rounded-full border disabled:opacity-60', on ? 'border-ink ring-2 ring-ink ring-offset-2 ring-offset-white' : 'border-black/15 hover:border-black/40')} style={{ background: hex }}>
       {on && <Check className="h-3.5 w-3.5" style={{ color: contrastRatio(hex, '#FFFFFF') >= contrastRatio(hex, '#111111') ? '#FFFFFF' : '#111111' }} />}
     </button>
   );
@@ -96,20 +96,20 @@ export function ColorField({ label, hint, field, value, fallback, onChange, disa
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <p className="text-[14px] font-medium text-ink">{label} <span className="font-normal text-stone">— {hint}</span></p>
         <span className="flex gap-3">
-          {action && !disabled && <button type="button" className="inline-flex items-center gap-1 text-[12px] text-plum hover:underline" onClick={() => onChange(action.color.toUpperCase())}><span className="h-3 w-3 border border-black/15" style={{ background: action.color }} />{action.label}</button>}
+          {action && !disabled && <button type="button" className="inline-flex items-center gap-1 text-[12px] text-plum hover:underline" onClick={() => onChange(action.color.toUpperCase())}><span className="h-3 w-3 rounded-full border border-black/15" style={{ background: action.color }} />{action.label}</button>}
           {value && value.toUpperCase() !== fallback.toUpperCase() && !disabled && <button type="button" className="text-[12px] text-plum hover:underline" onClick={() => onChange(undefined)}>Use the theme’s</button>}
         </span>
       </div>
       <div className="mt-2 flex items-start gap-3">
         {/* The chosen colour, large, so it's always clear what's selected. */}
         <span className="flex w-16 shrink-0 flex-col items-center gap-1" aria-hidden>
-          <span className="h-12 w-16 border border-black/15" style={{ background: shown }} />
+          <span className="h-12 w-12 rounded-full border border-black/15" style={{ background: shown }} />
           <span className="font-mono text-[10px] text-stone">{shown}</span>
         </span>
         <div className="min-w-0 flex-1 space-y-2">
           <div className="flex flex-wrap items-center gap-1.5">
             {(swatches ?? SWATCHES[field]).map((hex) => <Swatch key={hex} hex={hex} on={shown === hex.toUpperCase()} label={label} disabled={disabled} onPick={() => onChange(hex)} />)}
-            <input type="color" disabled={disabled} value={shown} onChange={(e) => onChange(e.target.value.toUpperCase())} className="h-7 w-9 cursor-pointer border border-line-strong bg-white p-0.5" aria-label={`${label}: any colour`} />
+            <input type="color" disabled={disabled} value={shown} onChange={(e) => onChange(e.target.value.toUpperCase())} className="color-circle h-7 w-7 cursor-pointer overflow-hidden rounded-full border border-line-strong bg-white p-0" aria-label={`${label}: any colour`} />
             <input className="field h-8 w-28 py-0 font-mono text-[13px] uppercase" disabled={disabled} value={text ?? shown} maxLength={7} aria-label={`${label} hex value`}
               onChange={(e) => { const v = e.target.value.trim(); setText(v); if (isHex(v)) onChange(v.toUpperCase()); }} onBlur={() => setText(null)} />
           </div>

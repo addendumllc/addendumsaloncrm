@@ -150,3 +150,8 @@ body { font-weight: var(--w-body, var(--body-weight, 400)); }
 [data-caps-button] .font-button,
 [data-caps-label] :is(.label, thead th),
 [data-caps-body] body { text-transform: uppercase; letter-spacing: 0.04em; }
+
+/* A round colour picker (Appearance colours), matching the round swatches. */
+input[type="color"].color-circle::-webkit-color-swatch-wrapper { padding: 0; }
+input[type="color"].color-circle::-webkit-color-swatch { border: 0; border-radius: 9999px; }
+input[type="color"].color-circle::-moz-color-swatch { border: 0; border-radius: 9999px; }
