@@ -17,6 +17,18 @@ const VARIANTS: Record<Variant, string> = {
   quiet: 'btn-link text-plum hover:bg-plum-tint',
   danger: 'bg-rose text-white hover:bg-rose/90',
 };
+/** The classes of a Button — also for links that look like buttons (Call, downloads), so every button matches. */
+export function buttonClass(variant: Variant = 'secondary', size: 'sm' | 'md' | 'icon' = 'md', className?: string) {
+  return cx(
+    'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-[var(--radius-button,0px)] font-button font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+    // Taller on phones so they're easy to tap; compact on larger screens. "Button size" (Display) adjusts btn-sm/btn-md.
+    // One sizing system everywhere (both businesses): the theme changes colours, fonts and corners, never these.
+    size === 'sm' ? 'btn-sm h-9 px-3 text-[12px] sm:h-7 sm:px-2' : size === 'icon' ? 'btn-md h-11 w-11 sm:h-9 sm:w-9' : 'btn-md h-10 px-3.5 text-[13px] sm:h-9 sm:px-3',
+    VARIANTS[variant],
+    className,
+  );
+}
+
 export function Button({
   variant = 'secondary', size = 'md', loading, icon, children, className, ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; size?: 'sm' | 'md' | 'icon'; loading?: boolean; icon?: ReactNode }) {
@@ -25,14 +37,7 @@ export function Button({
       type="button"
       {...rest}
       disabled={rest.disabled || loading}
-      className={cx(
-        'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-[var(--radius-button,0px)] font-button font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60',
-        // Taller on phones so they're easy to tap; compact on larger screens. "Button size" (Display) adjusts btn-sm/btn-md.
-        // One sizing system everywhere (both businesses): the theme changes colours, fonts and corners, never these.
-        size === 'sm' ? 'btn-sm h-9 px-3 text-[12px] sm:h-7 sm:px-2' : size === 'icon' ? 'btn-md h-11 w-11 sm:h-9 sm:w-9' : 'btn-md h-10 px-3.5 text-[13px] sm:h-9 sm:px-3',
-        VARIANTS[variant],
-        className,
-      )}
+      className={buttonClass(variant, size, className)}
     >
       {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : icon}
       {tc(children)}

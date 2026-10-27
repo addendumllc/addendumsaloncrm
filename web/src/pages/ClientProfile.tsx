@@ -8,7 +8,7 @@ import type { AppointmentDTO } from '@addendum/shared';
 import { api } from '../api/client';
 import { useClient, useIntegrations, useMe, useRefreshAll, useSettings, useCanDo, useStaff } from '../api/hooks';
 import { dateLong, dateShort, dateTime, phone, relative, time } from '../lib/format';
-import { Avatar, Badge, Button, EmptyState, ErrorNote, Field, Menu, Modal, PageLoading, SectionTitle, cx, useToast } from '../components/ui';
+import { buttonClass, Avatar, Badge, Button, EmptyState, ErrorNote, Field, Menu, Modal, PageLoading, SectionTitle, cx, useToast } from '../components/ui';
 import { useActions } from '../components/domain/ActionsProvider';
 import { TaskCard } from '../components/domain/TaskCard';
 import { ClientFormModal } from '../components/domain/ClientFormModal';
@@ -90,7 +90,7 @@ export function ClientProfilePage() {
       {/* Quick actions */}
       <div className="mt-5 flex flex-wrap gap-2">
         <Button variant="primary" icon={<MessageSquare className="h-4 w-4" />} disabled={!c.phone || c.smsOptedOut} onClick={() => compose({ name: c.name, phone: c.phone, clientId: c.id, conversationId: data.conversationId })}>Text</Button>
-        {c.phone && <a href={`tel:${c.phone}`} className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-line-strong bg-white px-3.5 text-sm font-medium hover:bg-mist/60"><Phone className="h-4 w-4" />Call</a>}
+        {c.phone && <a href={`tel:${c.phone}`} className={buttonClass('secondary', 'md')}><Phone className="h-4 w-4" />Call</a>}
         <Button icon={<CalendarPlus className="h-4 w-4" />} onClick={() => openSquareBooking(integ?.square.environment, c.name, toast)}>Book in Square</Button>
         <Button icon={<StickyNote className="h-4 w-4" />} onClick={() => setNoteOpen(true)}>Add note</Button>
         <Button icon={<Plus className="h-4 w-4" />} onClick={() => newFollowUp({ contact })}>Create follow-up</Button>

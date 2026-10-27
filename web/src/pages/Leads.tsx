@@ -5,7 +5,7 @@ import { MessageSquare, Phone, Plus, Sparkles, UserCheck, Archive } from 'lucide
 import { api } from '../api/client';
 import { useLead, useLeads, useRefreshAll, useStaff } from '../api/hooks';
 import { dateTime, phone, relative } from '../lib/format';
-import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, Segmented, cx, useToast } from '../components/ui';
+import { buttonClass, Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, Segmented, cx, useToast } from '../components/ui';
 import { useActions } from '../components/domain/ActionsProvider';
 import { TaskCard } from '../components/domain/TaskCard';
 import { Tc } from '../lib/titleCase';
@@ -155,7 +155,7 @@ function LeadDrawer({ id, onClose }: { id: string; onClose: () => void }) {
             <p className="mt-1 text-sm text-stone">Added {relative(lead.createdAt)} from {lead.source ?? 'unknown source'}{lead.lastContactAt ? ` · last contacted ${relative(lead.lastContactAt)}` : ' · not contacted yet'}</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {lead.phone && <Button size="sm" variant="primary" icon={<MessageSquare className="h-4 w-4" />} onClick={() => compose({ name: lead.name, phone: lead.phone, leadId: lead.id, conversationId: data.conversationId, autoDraft: data.messages.length === 0 })}>Text</Button>}
-              {lead.phone && <a href={`tel:${lead.phone}`} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line-strong px-2.5 text-[13px] font-medium hover:bg-mist"><Phone className="h-4 w-4" />Call</a>}
+              {lead.phone && <a href={`tel:${lead.phone}`} className={buttonClass('secondary', 'sm')}><Phone className="h-4 w-4" />Call</a>}
               <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => newFollowUp({ contact: { kind: 'lead', id: lead.id, name: lead.name, phone: lead.phone } })}>Follow-up</Button>
               {lead.clientId ? (
                 <Button size="sm" icon={<UserCheck className="h-4 w-4" />} onClick={() => nav(`/clients/${lead.clientId}`)}>View client</Button>

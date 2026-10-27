@@ -5,7 +5,7 @@ import { AlertTriangle, ArrowLeft, Download, Info, Lock, RefreshCw, UserCheck } 
 import { api, ApiError } from '../api/client';
 import { useCanDo, useMe } from '../api/hooks';
 import { addDaysKey, dayKey, labelOfKey, relative } from '../lib/format';
-import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, Segmented, Spinner, cx, useToast } from '../components/ui';
+import { buttonClass, Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, Segmented, Spinner, cx, useToast } from '../components/ui';
 import { DateRangeBar, EntriesList, SummaryCards, usd, useDateRange } from '../components/domain/Commission';
 import { PayrollTimesheet } from '../components/domain/Payroll';
 import { PayGate, PayLockBar } from '../components/domain/PayGate';
@@ -171,10 +171,10 @@ function TeamTable({ dr, onOpen }: { dr: ReturnType<typeof useDateRange>; onOpen
         <DateRangeBar {...dr} />
         {canDo('commission:export') && (
           <span className="flex flex-wrap gap-2">
-            <a className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line-strong bg-white px-3 text-[13px] font-medium hover:bg-mist/60" href={`/api/commission/export/summary?from=${dr.range.from}&to=${dr.range.to}`}>
+            <a className={buttonClass('secondary', 'md')} href={`/api/commission/export/summary?from=${dr.range.from}&to=${dr.range.to}`}>
               <Download className="h-4 w-4" />Pay summary (CSV)
             </a>
-            <a className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line-strong bg-white px-3 text-[13px] font-medium hover:bg-mist/60" href={`/api/commission/export?from=${dr.range.from}&to=${dr.range.to}`}>
+            <a className={buttonClass('secondary', 'md')} href={`/api/commission/export?from=${dr.range.from}&to=${dr.range.to}`}>
               <Download className="h-4 w-4" />Every transaction (CSV)
             </a>
           </span>
@@ -291,7 +291,7 @@ function StaffDetail({ id, dr, onBack }: { id: string; dr: ReturnType<typeof use
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <h2 className="h-display flex-1 text-[28px]">{data?.staff.name ?? ''}</h2>
         {canDo('commission:approve') && <Button onClick={() => setAdjust(true)}>Add adjustment</Button>}
-        {canDo('commission:export') && <a className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line-strong bg-white px-3 text-[13px] font-medium hover:bg-mist/60" href={`/api/commission/export?from=${dr.range.from}&to=${dr.range.to}&staffId=${id}`}><Download className="h-4 w-4" />CSV</a>}
+        {canDo('commission:export') && <a className={buttonClass('secondary', 'md')} href={`/api/commission/export?from=${dr.range.from}&to=${dr.range.to}&staffId=${id}`}><Download className="h-4 w-4" />CSV</a>}
       </div>
       <Segmented className="mb-4" value={view} onChange={setView} options={PAY_VIEWS} />
       {view === 'year' ? <YearTable url={`/commission/staff/${id}/year`} staffId={adminPay ? id : undefined} /> : <DateRangeBar {...dr} />}

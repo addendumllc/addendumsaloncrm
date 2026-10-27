@@ -5,7 +5,7 @@ import { CalendarPlus, Check, Clock, MessageSquare, MoreHorizontal, Pencil, Phon
 import { api } from '../../api/client';
 import { useMe, useRefreshAll, useSettings, useStaff } from '../../api/hooks';
 import { dueLabel, toInputValue } from '../../lib/format';
-import { Badge, Button, Field, Menu, Modal, Segmented, cx, useToast } from '../ui';
+import { buttonClass, Badge, Button, Field, Menu, Modal, Segmented, cx, useToast } from '../ui';
 import { useActions } from './ActionsProvider';
 import { ScheduleEditorLoader, dayLabel, weeksLabel } from './Rebooking';
 import { useCanDo, useIntegrations } from '../../api/hooks';
@@ -216,7 +216,7 @@ export function TaskCard({ task, compact }: { task: TaskDTO; compact?: boolean }
                   {isReview ? 'Send review request' : 'Text'}
                 </Button>
               )}
-              {task.contactPhone && <a href={`tel:${task.contactPhone}`} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line-strong bg-white px-2.5 text-[13px] font-medium hover:bg-mist/60"><Phone className="h-4 w-4" />Call</a>}
+              {task.contactPhone && <a href={`tel:${task.contactPhone}`} className={buttonClass('secondary', 'sm')}><Phone className="h-4 w-4" />Call</a>}
               {isRebook && (
                 <Button size="sm" icon={<CalendarPlus className="h-4 w-4" />} onClick={() => openSquareBooking(integ?.square.environment, task.contactName, toast)}>Book in Square</Button>
               )}

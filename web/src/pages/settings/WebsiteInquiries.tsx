@@ -9,7 +9,7 @@ import { Badge, Button, EmptyState, Field, PageLoading, Toggle, cx, useToast } f
 import { Card } from './shared';
 
 interface Settings { account: string; label: string; senders: string[]; extensionAssigneeId: string | null; frontDeskAssigneeId: string | null; enabled: boolean; since: string | null }
-interface Item {
+export interface Item {
   gmailId: string; receivedAt: string; sender: string; subject: string | null; status: 'processed' | 'review' | 'failed' | 'duplicate' | 'ignored'; kind: 'extension' | 'general' | null;
   contact: { name: string | null; email: string | null; phone: string | null; instagram: string | null }; fields: { label: string; value: string }[]; page: string | null; reason: string | null; leadId: string | null; leadName: string | null;
 }
@@ -19,7 +19,7 @@ interface Overview {
 }
 interface Candidate { id: string; from: string; sender: string; subject: string; date: string; fields: { label: string; value: string }[]; contact: Item['contact']; classification: { kind: string | null; reason: string | null } }
 
-const STATUS: Record<Item['status'], { label: string; tone: 'sage' | 'amber' | 'rose' | 'neutral' }> = {
+export const STATUS: Record<Item['status'], { label: string; tone: 'sage' | 'amber' | 'rose' | 'neutral' }> = {
   processed: { label: 'Filed', tone: 'sage' }, review: { label: 'Needs review', tone: 'amber' }, failed: { label: 'Failed', tone: 'rose' }, duplicate: { label: 'Duplicate', tone: 'neutral' }, ignored: { label: 'Ignored', tone: 'neutral' },
 };
 
@@ -38,7 +38,6 @@ export function WebsiteInquiriesSettings() {
   const [looking, setLooking] = useState(false);
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
   const [newSender, setNewSender] = useState('');
-  const [open, setOpen] = useState<string | null>(null);
 
   // Coming back from Google's sign-in.
   useEffect(() => {
@@ -79,7 +78,6 @@ export function WebsiteInquiriesSettings() {
   const resolve = async (it: Item, action: 'extension' | 'general' | 'ignore', contact: { name?: string; email?: string; phone?: string } = {}) => {
     try { await api.post(`/integrations/showit/${encodeURIComponent(it.gmailId)}/resolve`, { action, ...contact }); refresh(); toast(action === 'ignore' ? 'Ignored' : 'Filed as a new-client inquiry'); } catch (e) { toast((e as Error).message, 'error'); }
   };
-  const person = (id: string | null) => data.staff.find((x) => x.id === id)?.name;
   const review = data.history.filter((h) => h.status === 'review' || h.status === 'failed');
 
   return (
@@ -159,41 +157,15 @@ export function WebsiteInquiriesSettings() {
         {data.lastRun && <p className={cx('mt-2 text-[12px]', data.lastRun.ok ? 'text-stone' : 'text-rose')}>Last checked {relative(data.lastRun.at)}: {data.lastRun.message}</p>}
       </Card>
 
-      <Card title={`Needs review${review.length ? ` (${review.length})` : ''}`} description="Notifications that couldn’t be filed with confidence, or that failed. File each one, or ignore it.">
-        {!review.length ? <p className="text-[13px] text-stone">Nothing waiting.</p> : (
-          <ul className="space-y-2">{review.map((it) => <ReviewItem key={it.gmailId} it={it} onResolve={resolve} />)}</ul>
-        )}
-      </Card>
-
-      <Card title="History" description="Every Showit notification the CRM has read, newest first.">
-        {!data.history.length ? <EmptyState title="Nothing read yet">Once connected and a sender is verified, new website inquiries appear here.</EmptyState> : (
-          <ul className="divide-y divide-line text-[13px]">
-            {data.history.map((h) => (
-              <li key={h.gmailId} className="py-2">
-                <button type="button" className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 text-left" onClick={() => setOpen(open === h.gmailId ? null : h.gmailId)}>
-                  <Badge tone={STATUS[h.status].tone}>{STATUS[h.status].label}</Badge>
-                  <span className="font-medium text-ink">{h.contact.name ?? '(no name)'}</span>
-                  {h.kind && <span className="text-stone">{h.kind === 'extension' ? 'Extension consultation' : 'General inquiry'}</span>}
-                  <span className="ml-auto text-stone">{relative(h.receivedAt)}</span>
-                </button>
-                {open === h.gmailId && (
-                  <div className="mt-1 space-y-1 pl-1 text-[12px]">
-                    <p className="text-stone">{h.subject} · from {h.sender}{h.page ? ` · ${h.page}` : ''}</p>
-                    {h.reason && <p className="text-amber">{h.reason}</p>}
-                    {h.leadId && <p><Link className="text-plum hover:underline" to={`/leads?open=${h.leadId}`}>Open {h.leadName ?? 'the inquiry'}</Link>{h.kind === 'extension' && !data.settings.extensionAssigneeId ? ' · flagged for the front desk' : person(h.kind === 'extension' ? data.settings.extensionAssigneeId : data.settings.frontDeskAssigneeId) ? ` · routed to ${person(h.kind === 'extension' ? data.settings.extensionAssigneeId : data.settings.frontDeskAssigneeId)}` : ''}</p>}
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+      <Card title="Submissions" description="What came in, and anything that needs review, is under Follow-Ups → Website inquiries.">
+        <Link className="text-[14px] text-plum hover:underline" to="/follow-ups?view=inquiries">Open website inquiries{review.length ? ` (${review.length} to review)` : ''}</Link>
       </Card>
     </div>
   );
 }
 
 /** One notification waiting for review: its fields, contact details to fill in if missing, and how to file it. */
-function ReviewItem({ it, onResolve }: { it: Item; onResolve: (it: Item, action: 'extension' | 'general' | 'ignore', contact?: { name?: string; email?: string; phone?: string }) => void }) {
+export function ReviewItem({ it, onResolve }: { it: Item; onResolve: (it: Item, action: 'extension' | 'general' | 'ignore', contact?: { name?: string; email?: string; phone?: string }) => void }) {
   const [c, setC] = useState({ name: it.contact.name ?? '', email: it.contact.email ?? '', phone: it.contact.phone ?? '' });
   return (
     <li className="rounded-lg border border-line p-3 text-[13px]">

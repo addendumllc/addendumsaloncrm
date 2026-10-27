@@ -9,6 +9,7 @@ import { iso } from '../lib/time.js';
 import { runRules } from '../domain/rulesEngine.js';
 import { listTasks } from '../domain/tasks.js';
 import { toMessageDTO } from '../domain/messaging.js';
+import { resolveShowit, showitOverview } from '../domain/showit.js';
 import { ah, logAction, optionalText, parse } from './util.js';
 
 export const leadsRouter = Router();
@@ -83,6 +84,18 @@ leadsRouter.post('/', requirePermission('leads:write'), ah(async (req, res) => {
   res.status(201).json({ id: row!.id });
 }));
 
+// Website inquiries (Showit form submissions) for Follow-Ups: what came in, and what needs review — without the
+// mailbox settings (Settings → Website Inquiries, administrators).
+leadsRouter.get('/website-inquiries', requirePermission('leads:read'), ah(async (_req, res) => {
+  const o = await showitOverview();
+  res.json({ connected: o.connection.connected, lastRun: o.lastRun, history: o.history.filter((h) => h.status !== 'ignored' && h.status !== 'duplicate') });
+}));
+leadsRouter.post('/website-inquiries/:id/resolve', requirePermission('leads:write'), ah(async (req, res) => {
+  const b = parse(z.object({ action: z.enum(['extension', 'general', 'ignore']), name: z.string().trim().max(120).optional(), email: z.string().trim().max(200).optional(), phone: z.string().trim().max(40).optional() }), req.body);
+  const leadId = await resolveShowit(req.params.id, b.action, req.user!.id, { name: b.name, email: b.email, phone: b.phone });
+  await logAction(req, 'integration.showit_resolve', 'lead', leadId, { action: b.action });
+  res.json({ leadId });
+}));
 leadsRouter.get('/:id', requirePermission('leads:read'), ah(async (req, res) => {
   const row = await db().one(`${SELECT} WHERE l.id = $1`, [req.params.id]);
   if (!row) throw notFound('That lead');

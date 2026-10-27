@@ -96,15 +96,14 @@
 [data-btn-height] .btn-md { height: var(--btn-h); }
 [data-btn-height] .btn-sm { height: max(1.25rem, calc(var(--btn-h) - 8px)); }
 [data-buttons="large"] .btn-sm { height: 2.5rem; padding-left: 0.875rem; padding-right: 0.875rem; font-size: 14px; }
-/* Link-style (text-only) buttons: the links font, a step smaller than filled buttons at every button size. */
-.btn-link { font-family: var(--font-link, var(--font-button, inherit)); }
+/* Link-style (text-only) buttons: the same font and size as every other button. */
+.btn-link { font-family: var(--font-button, inherit); }
 /* Buttons at the bottom of a popup: one compact size at every button size setting. */
 .modal-footer .btn-md, [data-buttons] .modal-footer .btn-md, [data-btn-height] .modal-footer .btn-md { height: 2.25rem; padding-left: 0.75rem; padding-right: 0.75rem; font-size: 12px; }
 .modal-footer .btn-sm, [data-buttons] .modal-footer .btn-sm, [data-btn-height] .modal-footer .btn-sm { height: 2rem; padding-left: 0.625rem; padding-right: 0.625rem; font-size: 12px; }
 /* …and the button text size setting doesn't enlarge them, nor wide letter spacing. */
 .modal-footer :is(.btn-sm, .btn-md), [data-caps-button] .modal-footer .font-button { zoom: 1; letter-spacing: 0.04em; }
-.btn-link.btn-md, [data-buttons] .btn-link.btn-md { font-size: 12px; }
-.btn-link.btn-sm, [data-buttons] .btn-link.btn-sm { font-size: 11px; }
+/* (Link-style buttons are the same size as the others: every button matches.) */
 /* Small text and labels (the theme's "small text" size). */
 :is(.label, .text-xs, .text-\[11px\], .text-\[12px\], .text-\[13px\]) { zoom: var(--size-small, 1); }
 
@@ -141,7 +140,6 @@ body { font-weight: var(--w-body, var(--body-weight, 400)); }
 :is(p, dd, td:not(:has(p))):not(.label, .h-display, .font-display):is(.text-xs, .text-\[11px\], .text-\[12px\], .text-\[13px\]) { zoom: var(--z-body-small, var(--size-small, 1)); }
 .font-nav { zoom: var(--z-menu, var(--size-nav, 1)); }
 :is(.btn-sm, .btn-md, [role="tablist"]) { zoom: var(--z-button, 1); }
-.btn-link:is(.btn-sm, .btn-md) { zoom: var(--z-link, 1); }
 :is(.label, thead th) { zoom: var(--z-label, var(--size-small, 1)); }
 :is(a.text-plum, a.underline, a[class*="hover:underline"]):not(.btn-sm, .btn-md) { zoom: var(--z-link, 1); }
 [data-caps-heading] :is(h1, h2):is(.h-display, .font-display),

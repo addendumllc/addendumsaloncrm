@@ -6,7 +6,7 @@ import {
 import { api } from '../api/client';
 import { useCanDo, useConversation, useConversations, useIntegrations, useRefreshAll, useSettings } from '../api/hooks';
 import { dateShort, dateTime, phone as fmtPhone, relative, time } from '../lib/format';
-import { Avatar, Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, Segmented, cx, useToast } from '../components/ui';
+import { buttonClass, Avatar, Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, Segmented, cx, useToast } from '../components/ui';
 import { useActions } from '../components/domain/ActionsProvider';
 import { ContactPicker, type PickedContact } from '../components/domain/ContactPicker';
 import { SavedRepliesPicker } from '../components/domain/SavedRepliesPicker';
@@ -236,7 +236,7 @@ function Thread({ id }: { id: string }) {
             </p>
             <p className="text-[13px] text-stone">{fmtPhone(c.phone)}{contactKind ? ` · ${contactKind === 'client' ? 'Client' : 'New client'}` : ' · Unknown number'}</p>
           </div>
-          <a href={`tel:${c.phone}`} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-line-strong bg-white px-2.5 text-[13px] font-medium hover:bg-mist"><Phone className="h-4 w-4" /><span className="hidden sm:inline">Call</span></a>
+          <a href={`tel:${c.phone}`} className={buttonClass('secondary', 'sm')}><Phone className="h-4 w-4" /><span className="hidden sm:inline">Call</span></a>
           <Button size="sm" icon={<Plus className="h-4 w-4" />} onClick={() => newFollowUp({
             contact: c.clientId ? { kind: 'client', id: c.clientId, name: c.displayName, phone: c.phone } : c.leadId ? { kind: 'lead', id: c.leadId, name: c.displayName, phone: c.phone } : undefined,
           })}><span className="hidden sm:inline">Follow-up</span></Button>

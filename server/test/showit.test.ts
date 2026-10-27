@@ -81,8 +81,11 @@ describe('Website Inquiries (Showit → Gmail)', () => {
     gmail.msgs.at(-1)!.date = gmail.msgs.find((m) => m.id === 'm2')!.date;
     expect((await api.post('/api/integrations/showit/check')).body.result.duplicate).toBe(1);
     expect((await db().query("SELECT 1 FROM leads WHERE email = 'ava@example.com'")).length).toBe(1);
-    // The unclear one is filed by an administrator.
-    const resolved = await api.post('/api/integrations/showit/m4/resolve', { action: 'extension', phone: '949 555 0199' });
+    // Follow-Ups → Website inquiries lists the submissions (not duplicates), the unclear one waiting for review.
+    const listed = (await api.get('/api/leads/website-inquiries')).body.history;
+    expect(listed.map((h: any) => h.status).sort()).toEqual(['processed', 'processed', 'review']);
+    // The unclear one is filed (from Follow-Ups or Settings).
+    const resolved = await api.post('/api/leads/website-inquiries/m4/resolve', { action: 'extension', phone: '949 555 0199' });
     expect(resolved.status).toBe(200);
     expect(await db().one<any>("SELECT service_interest FROM leads WHERE email = 'cy@example.com'")).toMatchObject({ service_interest: 'Extension consultation' });
     const overview = (await api.get('/api/integrations/showit')).body;

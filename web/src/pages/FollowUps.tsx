@@ -12,6 +12,7 @@ import { Button, EmptyState, ErrorNote, PageHeader, PageLoading, Segmented, cx }
 import { TaskCard, PRIORITY_DOT } from '../components/domain/TaskCard';
 import { useActions } from '../components/domain/ActionsProvider';
 import { RebookingScheduleList } from '../components/domain/Rebooking';
+import { WebsiteInquiriesList } from '../components/domain/WebsiteInquiries';
 import { Tc } from '../lib/titleCase';
 
 const GROUPS: { p: Priority; label: string }[] = [
@@ -24,7 +25,7 @@ const GROUPS: { p: Priority; label: string }[] = [
 export function FollowUpsPage() {
   const [params, setParams] = useSearchParams();
   const due = (params.get('due') ?? 'today') as 'today' | 'overdue' | 'upcoming' | 'done';
-  const view = params.get('view') === 'schedule' ? 'schedule' : 'queue';
+  const view = params.get('view') === 'schedule' ? 'schedule' : params.get('view') === 'inquiries' ? 'inquiries' : 'queue';
   const type = params.get('type') ?? '';
   const staffId = params.get('staff') ?? '';
   const focus = params.get('task');
@@ -78,13 +79,13 @@ export function FollowUpsPage() {
     <div>
       {picker}
       <PageHeader
-        title={view === 'schedule' ? 'Rebooking schedule' : due === 'overdue' ? 'Overdue follow-ups' : due === 'upcoming' ? 'Upcoming follow-ups' : due === 'done' ? 'Completed follow-ups' : 'Today’s follow-ups'}
-        subtitle={tasks ? `${tasks.length} ${due === 'done' ? 'completed' : 'to do'}${type ? ` · ${TASK_TYPE_LABELS[type as keyof typeof TASK_TYPE_LABELS]}` : ''}` : undefined}
+        title={view === 'inquiries' ? 'Website inquiries' : view === 'schedule' ? 'Rebooking schedule' : due === 'overdue' ? 'Overdue follow-ups' : due === 'upcoming' ? 'Upcoming follow-ups' : due === 'done' ? 'Completed follow-ups' : 'Today’s follow-ups'}
+        subtitle={view === 'inquiries' ? 'Forms sent from the website' : tasks ? `${tasks.length} ${due === 'done' ? 'completed' : 'to do'}${type ? ` · ${TASK_TYPE_LABELS[type as keyof typeof TASK_TYPE_LABELS]}` : ''}` : undefined}
         actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => newFollowUp()}>Follow-up</Button>}
       />
       {/* Due today / Overdue / Upcoming / Completed / Rebooking schedule are in the side menu; on phones, a dropdown. */}
       <SectionPicker path="/follow-ups" names={names} can={(p) => !!me?.permissions.includes(p)} className="mb-4" />
-      {view === 'schedule' ? <RebookingScheduleList /> : <>
+      {view === 'inquiries' ? <WebsiteInquiriesList /> : view === 'schedule' ? <RebookingScheduleList /> : <>
       <div className="mb-5 flex flex-wrap items-center gap-3">
         <select className="field h-9 w-auto py-1 text-sm" value={type} onChange={(e) => set('type', e.target.value)} aria-label="Type">
           <option value="">All types</option>

@@ -8,7 +8,7 @@ import { useCanDo, useInventory, useInventorySuggestions, useIntegrations, useMe
 import { addDaysKey, dateShort, dateTime, dayKey, relative } from '../lib/format';
 import { SquareInventoryView } from './SquareInventory';
 import { useWorkspace } from '../lib/workspace';
-import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, Segmented, cx, useToast } from '../components/ui';
+import { buttonClass, Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, Segmented, cx, useToast } from '../components/ui';
 import { Tc } from '../lib/titleCase';
 
 /**
@@ -46,7 +46,7 @@ export function InventoryPage() {
         title="Order Hair"
         subtitle={`Hair, tools and accessories from ${ws.names.hair.name}, sent from the salon`}
         actions={<>
-          {canDo('inventory:sync') && <Link to="/inventory-sync" className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-line-strong bg-white px-3 text-sm font-medium hover:bg-mist/60"><ArrowLeftRight className="h-4 w-4" />Inventory</Link>}
+          {canDo('inventory:sync') && <Link to="/inventory-sync" className={buttonClass('secondary', 'md')}><ArrowLeftRight className="h-4 w-4" />Inventory</Link>}
           {canDo('inventory:order') && <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setComposing(true)}>New hair order</Button>}
         </>}
       />

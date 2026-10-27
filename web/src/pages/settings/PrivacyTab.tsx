@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Download, ShieldCheck } from 'lucide-react';
 import { api } from '../../api/client';
 import { dateTime } from '../../lib/format';
-import { PageLoading } from '../../components/ui';
+import { buttonClass, PageLoading } from '../../components/ui';
 import { Card, useCan } from './shared';
 
 interface AuditEntry { id: string; action: string; entityType: string | null; entityId: string | null; createdAt: string; staffName: string | null }
@@ -35,7 +35,7 @@ export function PrivacySettings() {
           <li className="flex gap-2"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-sage" />To archive, export or permanently delete one client (e.g. a privacy request), open their profile → ⋯ menu.</li>
         </ul>
         {can('privacy:export_all') && (
-          <a href="/api/privacy/export" download className="mt-4 inline-flex h-10 items-center gap-1.5 rounded-lg border border-line-strong bg-white px-3.5 text-sm font-medium text-ink hover:bg-mist/60">
+          <a href="/api/privacy/export" download className={buttonClass('secondary', 'md', 'mt-4')}>
             <Download className="h-4 w-4" />Export all salon data (JSON)
           </a>
         )}

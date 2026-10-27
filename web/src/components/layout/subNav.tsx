@@ -51,6 +51,7 @@ export const SUB_NAV: Record<string, SubNav> = {
       { to: '/follow-ups?due=upcoming', label: 'Upcoming' },
       { to: '/follow-ups?due=done', label: 'Completed' },
       { to: '/follow-ups?view=schedule', label: 'Rebooking schedule', anyOf: ['clients:read', 'clients:read_assigned'] },
+      { to: '/follow-ups?view=inquiries', label: 'Website inquiries', anyOf: ['leads:read'] },
     ],
   },
   '/my-commission': {
