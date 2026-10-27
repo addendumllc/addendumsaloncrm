@@ -178,8 +178,10 @@ export function MyAppearance() {
             </div>
           </Part>
         )}
-        <Part title={fontStyles.length ? 'Text size & weight' : 'Fonts, text size & weight'} hint={fontStyles.length ? 'Base text, headings, small text and labels, and text weight — applied evenly across the CRM, for you only.' : 'The interface font, sizes for text, headings and small labels, and text weight — applied evenly across the CRM, for you only.'} locked={ts.allow.type ? undefined : locked}>
-          <TypeFields hideFonts={fontStyles.length > 0} value={r.type} onChange={(p) => setCustom({ ...custom, type: { ...(custom.type ?? {}), ...p } })}
+        {/* Fonts come only from the theme or the font styles made in Theme Management; people pick sizes and weight. */}
+        {!fontStyles.length && <p className="text-[13px] text-stone">Fonts come from the theme. Your administrator can add font styles to choose from in Theme Management.</p>}
+        <Part title="Text size & weight" hint="Base text, headings, small text and labels, and text weight — applied evenly across the CRM, for you only." locked={ts.allow.type ? undefined : locked}>
+          <TypeFields hideFonts value={r.type} onChange={(p) => setCustom({ ...custom, type: { ...(custom.type ?? {}), ...p } })}
             customFonts={{ heading: fontFile(org, 'heading')?.name, body: fontFile(org, 'body')?.name }} />
         </Part>
         </>}

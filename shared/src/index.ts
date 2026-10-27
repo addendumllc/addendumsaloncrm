@@ -1630,7 +1630,8 @@ export function resolveTheme(settings: Partial<ThemeSettings> | undefined, perso
   return {
     theme: base,
     colors: { ...base.colors, ...(t.allow.colors ? { ...c.colors, ...(ownAccent ? { accent: ownAccent } : {}) } : {}) } as ThemeColors,
-    type: { ...base.type, ...(t.allow.type ? c.type : {}) } as ThemeType,
+    // People choose sizes and weight; fonts come only from the theme or a published font style.
+    type: { ...base.type, ...(t.allow.type ? { ...c.type, font: undefined, headingFont: undefined } : {}), font: base.type.font, headingFont: base.type.headingFont } as ThemeType,
     buttons: { ...base.buttons, ...(t.allow.buttons ? c.buttons : {}) } as ThemeButtons,
     sidebarOpacity: (t.allow.colors ? c.sidebarOpacity : undefined) ?? base.sidebarOpacity ?? 100,
     opacity: { ...(base.opacity ?? {}), ...(t.allow.colors ? c.opacity : {}) } as ThemeOpacity,
