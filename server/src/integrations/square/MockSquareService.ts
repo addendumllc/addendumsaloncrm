@@ -91,6 +91,14 @@ export class MockSquareService implements SquareService {
     DEMO_PRODUCTS.splice(at, 0, { ...DEMO_PRODUCTS[at], variationId: id, variationName: v.name, sku: v.sku, upc: null, priceCents: v.priceCents, trackInventory: true });
     return { sku: v.sku, variationId: id };
   }
+  async moveVariationFirst(itemId: string, variationId: string) {
+    const first = DEMO_PRODUCTS.findIndex((p) => p.itemId === itemId);
+    const at = DEMO_PRODUCTS.findIndex((p) => p.variationId === variationId);
+    if (first < 0 || at <= first) return false;
+    const [v] = DEMO_PRODUCTS.splice(at, 1);
+    DEMO_PRODUCTS.splice(first, 0, v);
+    return true;
+  }
   async setVariationPrice(variationId: string, priceCents: number) {
     if (!DEMO_PRODUCTS.some((p) => p.variationId === variationId)) throw new Error('not found');
     demoSquarePrices.set(variationId, priceCents);

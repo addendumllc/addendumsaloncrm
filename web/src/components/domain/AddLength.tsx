@@ -35,6 +35,14 @@ function AddLength({ onClose }: { onClose: () => void }) {
   const [stores, setStores] = useState({ pro: true, retail: true, square: true });
   const swatch = mode === 'swatch';
   const setMode = (m: 'length' | 'swatch') => { setModeState(m); setPlan(null); };
+  const [moving, setMoving] = useState(false);
+  const toTop = async () => {
+    setMoving(true);
+    try {
+      const r = await api.post<{ moved: number; failed: { label: string; store: string; message: string }[] }>('/inventory-sync/stock/swatches/to-top');
+      toast(r.failed.length ? `${r.moved} moved · ${r.failed.length} didn’t (${r.failed[0].label}: ${r.failed[0].message})` : r.moved ? `${r.moved} swatch${r.moved === 1 ? '' : 'es'} moved to the top` : 'All swatches are already at the top', r.failed.length ? 'error' : 'success');
+    } catch (e) { toast((e as Error).message, 'error'); } finally { setMoving(false); }
+  };
   const [plan, setPlan] = useState<Plan | null>(null);
   const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof f, v: string) => { setF((x) => ({ ...x, [k]: v })); setPlan(null); };
@@ -84,6 +92,12 @@ function AddLength({ onClose }: { onClose: () => void }) {
           {!swatch && <Field label="Copy length"><input className="field" inputMode="numeric" value={f.from} onChange={(e) => set('from', e.target.value)} placeholder="18" /></Field>}
           {!swatch && <Field label="New length"><input className="field" inputMode="numeric" value={f.to} onChange={(e) => set('to', e.target.value)} placeholder="22" /></Field>}
         </div>
+        {swatch && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line px-3 py-2 text-[13px] text-ink-soft">
+            <span className="flex-1">Swatches already in the stores (even ones added in Shopify or Square) not at the top?</span>
+            <Button size="sm" loading={moving} onClick={toTop}>Move swatches to the top</Button>
+          </div>
+        )}
         {swatch && (
           <div className="flex flex-wrap gap-4 text-[13px] text-ink-soft">
             {([['pro', 'Pro store'], ['retail', 'Retail store (and its Pro listings)'], ['square', 'Salon (Square)']] as const).map(([k, label]) => (

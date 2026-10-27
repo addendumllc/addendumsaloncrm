@@ -342,6 +342,11 @@ describe('Add a sample swatch', () => {
       expect(MockShopifyService.firstValues.filter((x) => x.value === 'Sample Swatch').length).toBe(2);
       // Already there: nothing more to create.
       expect((await api.post('/api/inventory-sync/stock/swatches/preview', body)).body.plan).toEqual([]);
+      // One added by hand at the bottom in Square is moved to the top.
+      DEMO_PRODUCTS.push({ ...DEMO_PRODUCTS[0], variationId: 'demo-hand-swatch', itemId: 'item-clips', itemName: 'Black Magic Clip-Ins', variationName: 'Sample Swatch', sku: 'SW-HAND', upc: null, priceCents: 0, trackInventory: true });
+      DEMO_PRODUCTS.splice(DEMO_PRODUCTS.findIndex((p) => p.sku === 'SWATCH-BMCI'), 1);
+      expect((await api.post('/api/inventory-sync/stock/swatches/to-top')).status).toBe(200);
+      expect(DEMO_PRODUCTS.filter((p) => p.itemId === 'item-clips')[0].variationName).toBe('Sample Swatch');
     } finally {
       MockShopifyService.catalog.splice(c1); MockShopifyStore2.catalog.splice(c2); DEMO_PRODUCTS.splice(sq);
     }

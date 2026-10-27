@@ -332,6 +332,15 @@ export class SquareApiService implements SquareService {
     return id ? { sku: v.sku, variationId: id } : null;
   }
 
+  async moveVariationFirst(itemId: string, variationId: string, idempotencyKey: string) {
+    const item = (await this.call<{ object?: any }>('GET', `/v2/catalog/object/${encodeURIComponent(itemId)}`))?.object;
+    const vars: any[] = item?.item_data?.variations ?? [];
+    const at = vars.findIndex((v) => v.id === variationId);
+    if (at <= 0) return false;
+    await this.call('POST', '/v2/catalog/batch-upsert', { idempotency_key: idempotencyKey.slice(0, 128), batches: [{ objects: [{ ...item, item_data: { ...item.item_data, variations: [vars[at], ...vars.filter((_, i) => i !== at)] } }] }] });
+    return true;
+  }
+
   async setInventoryCounts(counts: SquareSetCount[], idempotencyKey: string) {
     // Square accepts up to 100 changes per request. Each chunk has its own key, so a retry can't apply it twice.
     for (let i = 0; i < counts.length; i += 100) {

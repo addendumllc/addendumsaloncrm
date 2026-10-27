@@ -6,7 +6,7 @@ import {
   copyShopifySkuToSquare, editLinkedProduct, getRun, linkByIds, linkBySku, listLinks, listRuns, markSeparate, resolveLink, setProductKind, setShopifySync, skuCandidates, startInventorySync, syncOverview, unlink,
   unmarkSeparate,
 } from '../domain/inventorySync.js';
-import { addToSquare, confirmCounts, applyNewLength, applySwatches, swatchPlan, applyPrices, applyProPrices, newLengthPlan, priceList, proPricePlan, squareCandidates,
+import { addToSquare, confirmCounts, applyNewLength, applySwatches, moveSwatchesFirst, swatchPlan, applyPrices, applyProPrices, newLengthPlan, priceList, proPricePlan, squareCandidates,
   applyStockChanges, assignCollection, createPurchaseOrders, deleteLeadRule, setSupplierLeadDefault, leadRules, leadTimesFor, saveLeadRule, internalCollections, mergeSuppliers, renameCollection, saveCollectionList, productSales, skipProducts, suggestPurchaseOrders, suggestedOrderPlan, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
   assignSupplier, deleteSupplier, refreshShopifySales, renameSupplier, saveProductSettings, saveSupplier, setForecastSettings, setSupplierLeadTime, stockForecast, stockHistory, stockProducts, updatePurchaseOrder,
 } from '../domain/stock.js';
@@ -234,6 +234,11 @@ const swatchBody = z.object({
 inventorySyncRouter.post('/stock/swatches/preview', ah(async (req, res) => {
   const { services: _s, ...plan } = await swatchPlan(parse(swatchBody, req.body));
   res.json({ ...plan, plan: plan.plan.map(({ options: _o, productId: _p, ...p }) => ({ ...p, priceCents: p.priceCents < 0 ? null : p.priceCents })) });
+}));
+inventorySyncRouter.post('/stock/swatches/to-top', ah(async (req, res) => {
+  const r = await moveSwatchesFirst();
+  await logAction(req, 'stock.swatches_top', 'stock', null, { moved: r.moved, failed: r.failed.length });
+  res.json(r);
 }));
 inventorySyncRouter.post('/stock/swatches', ah(async (req, res) => {
   const r = await applySwatches(parse(swatchBody, req.body));

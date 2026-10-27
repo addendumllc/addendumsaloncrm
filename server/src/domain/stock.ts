@@ -2104,6 +2104,36 @@ export async function swatchPlan(input: SwatchInput) {
   return { stores: names, plan, skipped, services: { pro, retail, sq } };
 }
 
+/**
+ * Puts every existing "Sample Swatch" first (above 18 inch) — in both Shopify stores and Square — including swatches
+ * added by hand in the stores. Returns how many were moved and any that couldn't be.
+ */
+export async function moveSwatchesFirst() {
+  const failed: { label: string; store: string; message: string }[] = [];
+  let moved = 0;
+  const isSwatch = (v: string) => /sample\s*swatch/i.test(v);
+  for (const [which, svc] of [['shopify', shopifyService()], ['shopify2', shopifyService2()]] as const) {
+    if (!svc) continue;
+    const prices = await svc.listPrices();
+    const ids = [...new Set(prices.filter((p) => isSwatch(`${p.label}`) || /^swatch-/i.test(p.sku ?? '')).map((p) => p.productId))];
+    for (const pv of await svc.productVariants(ids)) {
+      const opt = pv.variants.flatMap((v) => v.options).find((o) => isSwatch(o.value));
+      if (!opt) continue;
+      try { await svc.moveOptionValueFirst(pv.productId, opt.name, opt.value); moved++; }
+      catch (e) { failed.push({ label: prices.find((p) => p.productId === pv.productId)?.productTitle ?? pv.productId, store: shopifyNameOf(which), message: (e as Error).message }); }
+    }
+  }
+  const sq = await squareService();
+  if (sq) {
+    for (const p of (await sq.listProducts()).filter((x) => isSwatch(x.variationName ?? '') || /^swatch-/i.test(x.sku ?? ''))) {
+      try { if (await sq.moveVariationFirst(p.itemId, p.variationId, `swatch-top-${p.variationId}-${Date.now().toString(36)}`)) moved++; }
+      catch (e) { failed.push({ label: p.itemName, store: storeNames().square, message: e instanceof IntegrationError && e.authProblem ? 'Square needs the ITEMS_WRITE permission.' : (e as Error).message }); }
+    }
+  }
+  forgetStockCache();
+  return { moved, failed };
+}
+
 /** Creates what swatchPlan lists (worked out again now). Each store and product is tried separately. */
 export async function applySwatches(input: SwatchInput) {
   const { plan, skipped, services } = await swatchPlan(input);

@@ -218,6 +218,8 @@ export interface SquareService {
   addVariations(variations: { itemId: string; name: string; sku: string; priceCents: number | null }[], idempotencyKey: string): Promise<{ sku: string; variationId: string }[]>;
   /** Adds one variation at the top of its item (e.g. "Sample Swatch" above 18"), keeping the item's other variations (ITEMS_WRITE). */
   addVariationFirst(v: { itemId: string; name: string; sku: string; priceCents: number | null }, idempotencyKey: string): Promise<{ sku: string; variationId: string } | null>;
+  /** Moves a variation to the top of its item (ITEMS_WRITE); false when it's already first. */
+  moveVariationFirst(itemId: string, variationId: string, idempotencyKey: string): Promise<boolean>;
   /** The permissions of the access token in use (null when Square doesn't list them). */
   tokenScopes(): Promise<{ scopes: string[] | null; expiresAt: string | null }>;
   /** Orders at these locations updated in [from, to], oldest first (POST /v2/orders/search; ORDERS_READ). */
