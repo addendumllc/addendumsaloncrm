@@ -234,7 +234,7 @@ export async function showitOverview() {
     `SELECT m.gmail_id, m.received_at, m.sender, m.subject, m.status, m.kind, m.contact, m.fields, m.page, m.reason, m.lead_id, l.name AS lead_name
        FROM showit_messages m LEFT JOIN leads l ON l.id = m.lead_id ORDER BY m.received_at DESC LIMIT 200`);
   return {
-    connection: { connected: row?.status === 'connected', email: row?.meta?.email ?? null, connectedAt: row?.meta?.connectedAt ?? null },
+    connection: { connected: row?.status === 'connected', needsReconnect: row?.status === 'needs_reconnect', lostAt: row?.meta?.lostAt ?? null, email: row?.meta?.email ?? null, connectedAt: row?.meta?.connectedAt ?? null },
     settings: await showitSettings(),
     lastRun: await getKV<{ at: string; ok: boolean; message: string }>('showit.lastRun'),
     history: history.map((h) => ({

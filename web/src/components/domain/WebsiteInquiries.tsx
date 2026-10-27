@@ -15,7 +15,7 @@ export function WebsiteInquiriesList() {
   const toast = useToast();
   const qc = useQueryClient();
   const canFile = useCanDo()('leads:write');
-  const { data, isLoading, error, refetch } = useQuery({ queryKey: ['website-inquiries'], queryFn: () => api.get<{ connected: boolean; lastRun: { at: string; ok: boolean; message: string } | null; history: Item[] }>('/leads/website-inquiries') });
+  const { data, isLoading, error, refetch } = useQuery({ queryKey: ['website-inquiries'], queryFn: () => api.get<{ connected: boolean; needsReconnect?: boolean; lastRun: { at: string; ok: boolean; message: string } | null; history: Item[] }>('/leads/website-inquiries') });
   const [open, setOpen] = useState<string | null>(null);
   if (isLoading) return <PageLoading />;
   if (error || !data) return <ErrorNote error={error} onRetry={refetch} />;
@@ -30,7 +30,7 @@ export function WebsiteInquiriesList() {
   const filed = data.history.filter((h) => !(h.status === 'review' || h.status === 'failed'));
   return (
     <div className="space-y-6">
-      {!data.connected && <p className="text-[13px] text-amber">The website inbox isn’t connected — new submissions aren’t coming in. An administrator can connect it in Settings → Website Inquiries.</p>}
+      {!data.connected && <p className="text-[13px] text-amber">{data.needsReconnect ? 'Google stopped accepting the website inbox connection — new submissions aren’t coming in. An administrator needs to connect it again in Settings → Website Inquiries.' : 'The website inbox isn’t connected — new submissions aren’t coming in. An administrator can connect it in Settings → Website Inquiries.'}</p>}
       {data.lastRun && <p className={data.lastRun.ok ? 'text-[12px] text-stone' : 'text-[12px] text-rose'}>Last checked {relative(data.lastRun.at)}: {data.lastRun.message}</p>}
       {review.length > 0 && (
         <section>

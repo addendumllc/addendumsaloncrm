@@ -14,7 +14,7 @@ export interface Item {
   contact: { name: string | null; email: string | null; phone: string | null; instagram: string | null }; fields: { label: string; value: string }[]; page: string | null; reason: string | null; leadId: string | null; leadName: string | null;
 }
 interface Overview {
-  connection: { connected: boolean; email: string | null; connectedAt: string | null }; settings: Settings; lastRun: { at: string; ok: boolean; message: string } | null;
+  connection: { connected: boolean; needsReconnect?: boolean; lostAt?: string | null; email: string | null; connectedAt: string | null }; settings: Settings; lastRun: { at: string; ok: boolean; message: string } | null;
   history: Item[]; staff: { id: string; name: string; role: string }[];
 }
 interface Candidate { id: string; from: string; sender: string; subject: string; date: string; fields: { label: string; value: string }[]; contact: Item['contact']; classification: { kind: string | null; reason: string | null } }
@@ -92,6 +92,11 @@ export function WebsiteInquiriesSettings() {
           </div>
         ) : (
           <div className="space-y-2 text-[14px]">
+            {data.connection.needsReconnect && (
+              <div className="rounded-lg border border-amber/40 bg-amber-tint px-3 py-2 text-[13px] text-ink-soft">
+                <b className="font-medium text-ink">Google stopped accepting the connection{data.connection.lostAt ? ` (${relative(data.connection.lostAt)})` : ''}.</b> The usual reason: the Google Cloud app is still in <b className="font-medium">Testing</b>, where connections expire after 7 days. In Google Cloud console → Google Auth Platform → <b className="font-medium">Audience</b>, press <b className="font-medium">Publish app</b> (In production), then connect again below. Google may show “Google hasn’t verified this app” — choose Advanced → Continue; it’s your own app.
+              </div>
+            )}
             <p className="text-ink-soft">Not connected. Connecting opens Google’s own sign-in for <b className="font-medium text-ink">{s.account}</b> — the CRM never asks for the password. Only that mailbox is accepted.</p>
             <Button variant="primary" icon={<Link2 className="h-4 w-4" />} onClick={connect}>Connect Gmail</Button>
             <p className="text-[12px] text-stone">First time: add the Google OAuth client under <Link className="text-plum underline" to="/settings?tab=api">API &amp; Integrations</Link>.</p>

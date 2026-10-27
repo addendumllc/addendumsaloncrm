@@ -88,7 +88,7 @@ leadsRouter.post('/', requirePermission('leads:write'), ah(async (req, res) => {
 // mailbox settings (Settings → Website Inquiries, administrators).
 leadsRouter.get('/website-inquiries', requirePermission('leads:read'), ah(async (_req, res) => {
   const o = await showitOverview();
-  res.json({ connected: o.connection.connected, lastRun: o.lastRun, history: o.history.filter((h) => h.status !== 'ignored' && h.status !== 'duplicate') });
+  res.json({ connected: o.connection.connected, needsReconnect: !!o.connection.needsReconnect, lastRun: o.lastRun, history: o.history.filter((h) => h.status !== 'ignored' && h.status !== 'duplicate') });
 }));
 leadsRouter.post('/website-inquiries/:id/resolve', requirePermission('leads:write'), ah(async (req, res) => {
   const b = parse(z.object({ action: z.enum(['extension', 'general', 'ignore']), name: z.string().trim().max(120).optional(), email: z.string().trim().max(200).optional(), phone: z.string().trim().max(40).optional() }), req.body);

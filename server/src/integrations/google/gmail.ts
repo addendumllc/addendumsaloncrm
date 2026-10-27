@@ -79,12 +79,34 @@ const b64 = (s: string) => Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 
 const strip = (html: string) => html.replace(/<(style|script)[\s\S]*?<\/\1>/gi, ' ').replace(/<br\s*\/?>|<\/(p|div|tr|li|h\d)>/gi, '\n').replace(/<[^>]+>/g, ' ')
   .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;|&#x27;/g, "'").replace(/&quot;/g, '"').replace(/[ \t]+/g, ' ').replace(/\n\s+/g, '\n');
 
+/** Marks the mailbox as needing to be connected again (once), and tells administrators why it probably happened. */
+async function markGmailLost(technical: string) {
+  const row = await getIntegration('gmail');
+  if (row?.status !== 'connected') return;
+  await upsertIntegration('gmail', { status: 'needs_reconnect', meta: { lostAt: new Date().toISOString(), lostReason: /expired|revoked/i.test(technical) ? technical.slice(0, 200) : 'invalid_grant' } });
+  const { db } = await import('../../db/index.js');
+  const { effectivePermissions } = await import('../../auth/permissions.js');
+  const staff = await db().query<{ id: string; role: any }>("SELECT id, role FROM staff WHERE active AND approval_status = 'approved'");
+  for (const s of staff) {
+    if (!(await effectivePermissions(s.id, s.role)).includes('integrations:manage')) continue;
+    await db().query("INSERT INTO notifications(staff_id, kind, title, body, link) VALUES ($1,'integration',$2,$3,'/settings?tab=inquiries')", [s.id, 'Website inquiries: Gmail needs reconnecting',
+      'Google stopped accepting the connection. If the Google Cloud app is in “Testing”, connections expire after 7 days — publish it (In production), then connect again.']);
+  }
+}
+
 /** The real Gmail API, with the access token refreshed from the stored refresh token as needed. */
 export class GmailApi implements GmailClient {
   constructor(private refresh: string, private cached: { token: string; until: number } | null = null) {}
   private async auth() {
     if (!this.cached || this.cached.until < Date.now()) {
-      const t = await token({ grant_type: 'refresh_token', refresh_token: this.refresh });
+      let t: Awaited<ReturnType<typeof token>>;
+      try { t = await token({ grant_type: 'refresh_token', refresh_token: this.refresh }); }
+      catch (e) {
+        // Google no longer accepts the connection (expired — e.g. a Google app still in "Testing" — or access removed):
+        // shown as needing to reconnect, with administrators told once.
+        if (e instanceof IntegrationError && /invalid_grant|unauthorized_client/.test(e.technical ?? '')) await markGmailLost(e.technical ?? '');
+        throw e;
+      }
       this.cached = { token: t.access_token, until: Date.now() + (t.expires_in - 60) * 1000 };
     }
     return this.cached.token;
