@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
-import { CONTENT_FORMATS, CONTENT_PLATFORMS, CONTENT_STATUSES, type ContentPostDTO } from '@addendum/shared';
+import { ChevronLeft, ChevronRight, GripVertical, Plus, Search } from 'lucide-react';
+import { CONTENT_FORMATS, CONTENT_PLATFORMS, CONTENT_STATUSES, type ContentAccountId, type ContentIdeaDTO, type ContentPostDTO } from '@addendum/shared';
+import { PlanningTab } from './Planning';
+import type { Prefill } from './PostEditor';
 import { api } from '../../api/client';
 import { Badge, Button, PageLoading, Segmented, cx, useToast } from '../../components/ui';
 import { AccountTag, STATUS_TONE, formatLabel, platformLabel, statusLabel, timeOf, ymd, type Basics } from './common';
@@ -14,7 +16,7 @@ const startOfWeek = (d: Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0)
  * The calendar: month, week or day, filtered by account, platform, pillar, format, status, campaign and person.
  * Drag a post to another day to move it (its time stays the same). Ideas without a date are listed below.
  */
-export function CalendarTab({ b, onOpen, onNew }: { b: Basics; onOpen: (p: ContentPostDTO) => void; onNew: (date?: string) => void }) {
+export function CalendarTab({ b, onOpen, onNew, onUse }: { b: Basics; onOpen: (p: ContentPostDTO) => void; onNew: (date?: string) => void; onUse: (p: Prefill) => void }) {
   const toast = useToast();
   const qc = useQueryClient();
   const [view, setViewState] = useState<View>(() => { try { return (localStorage.getItem('content-view') as View) || 'month'; } catch { return 'month'; } });
@@ -22,6 +24,15 @@ export function CalendarTab({ b, onOpen, onNew }: { b: Basics; onOpen: (p: Conte
   const [anchor, setAnchor] = useState(() => new Date());
   const [f, setF] = useState({ account: '', platform: '', pillar: '', format: '', status: '', campaign: '', person: '' });
   const [dragging, setDragging] = useState<string | null>(null);
+  // Ideas under the calendar: drag one onto a day to start a post for that day.
+  const [draggingIdea, setDraggingIdea] = useState<ContentIdeaDTO | null>(null);
+  const [ideaQ, setIdeaQ] = useState('');
+  const { data: library } = useQuery({ queryKey: ['content-ideas'], queryFn: () => api.get<{ ideas: ContentIdeaDTO[] }>('/content/ideas').then((r) => r.ideas) });
+  const ideaWords = ideaQ.toLowerCase().split(/\s+/).filter(Boolean);
+  const ideaList = (library ?? []).filter((i) => (!f.account || i.accounts.includes(f.account as ContentAccountId)) && ideaWords.every((w) => `${i.title} ${i.pillar}`.toLowerCase().includes(w)))
+    .sort((a, x) => Number(x.suggested) - Number(a.suggested) || Number(x.favorite) - Number(a.favorite)).slice(0, 40);
+  const ideaPrefill = (i: ContentIdeaDTO, date?: string): Prefill => ({ accounts: f.account ? [f.account as ContentAccountId] : i.accounts, title: i.title, platform: i.platform, type: i.format, headline: i.hook, caption: i.caption ?? '', cta: i.cta, hashtags: i.hashtags, pillar: i.pillar, ideaId: i.id, date,
+    notes: [i.visual && `Visual: ${i.visual}`, i.shotList && `Shot list:\n${i.shotList}`].filter(Boolean).join('\n\n') });
   const days = useMemo(() => {
     if (view === 'day') { const d = new Date(anchor); d.setHours(0, 0, 0, 0); return [d]; }
     const start = view === 'week' ? startOfWeek(anchor) : startOfWeek(new Date(anchor.getFullYear(), anchor.getMonth(), 1));
@@ -36,8 +47,12 @@ export function CalendarTab({ b, onOpen, onNew }: { b: Basics; onOpen: (p: Conte
   const on = (d: Date) => dated.filter((p) => ymd(new Date(p.scheduledAt!)) === ymd(d)).sort((a, x) => a.scheduledAt!.localeCompare(x.scheduledAt!));
   const pillars = [...new Set(b.mine.flatMap((a) => a.pillars))];
   const step = (n: number) => { const d = new Date(anchor); if (view === 'month') d.setMonth(d.getMonth() + n, 1); else d.setDate(d.getDate() + n * (view === 'week' ? 7 : 1)); setAnchor(d); };
-  const drop = async (day: Date) => {
-    const p = (data ?? []).find((x) => x.id === dragging);
+  // What's being dragged travels with the drag itself (an idea or a post), so a drop always knows what it got.
+  const drop = async (day: Date, e?: React.DragEvent) => {
+    const ideaId = e?.dataTransfer.getData('text/x-idea') || draggingIdea?.id;
+    if (ideaId) { const i = (library ?? []).find((x) => x.id === ideaId); setDraggingIdea(null); if (i) onUse(ideaPrefill(i, ymd(day))); return; }
+    const postId = e?.dataTransfer.getData('text/x-post') || dragging;
+    const p = (data ?? []).find((x) => x.id === postId);
     setDragging(null);
     if (!p) return;
     const when = p.scheduledAt ? new Date(p.scheduledAt) : new Date(new Date(day).setHours(10, 0, 0, 0));
@@ -49,7 +64,7 @@ export function CalendarTab({ b, onOpen, onNew }: { b: Basics; onOpen: (p: Conte
   const Entry = ({ p, full }: { p: ContentPostDTO; full?: boolean }) => {
     const a = b.accountOf(p.account);
     return (
-      <button type="button" draggable={!['published', 'publishing'].includes(p.status)} onDragStart={() => setDragging(p.id)} onDragEnd={() => setDragging(null)} onClick={() => onOpen(p)}
+      <button type="button" draggable={!['published', 'publishing'].includes(p.status)} onDragStart={(e) => { e.dataTransfer.setData('text/x-post', p.id); setDragging(p.id); }} onDragEnd={() => setDragging(null)} onClick={() => onOpen(p)}
         className={cx('block w-full rounded border-l-[3px] bg-white px-1.5 py-1 text-left shadow-sm hover:bg-mist/60', full ? 'text-[13px]' : 'text-[11px]')} style={{ borderLeftColor: a?.color }}
         title={`${p.title} · ${a?.name} · ${platformLabel(p.platform)} · ${statusLabel(p.status)}`}>
         <span className="flex items-center gap-1"><span className="num text-stone">{p.scheduledAt ? timeOf(p.scheduledAt) : ''}</span><span className="truncate font-medium text-ink">{p.title}</span></span>
@@ -84,7 +99,7 @@ export function CalendarTab({ b, onOpen, onNew }: { b: Basics; onOpen: (p: Conte
         {sel('status', 'All statuses', CONTENT_STATUSES.filter((s) => s.value !== 'publishing'))}{sel('campaign', 'All campaigns', b.campaigns.map((c) => ({ value: c.id, label: c.name })))}{sel('person', 'Everyone', b.staff.map((s) => ({ value: s.id, label: s.name })))}
       </div>
       {isLoading ? <PageLoading /> : view === 'day' ? (
-        <div className="panel min-h-[200px] p-3" onDragOver={(e) => e.preventDefault()} onDrop={() => drop(days[0])}>
+        <div className="panel min-h-[200px] p-3" onDragOver={(e) => e.preventDefault()} onDrop={(e) => drop(days[0], e)}>
           <div className="space-y-2">{on(days[0]).map((p) => <Entry key={p.id} p={p} full />)}</div>
           {!on(days[0]).length && <p className="text-[13px] text-stone">Nothing scheduled. <button type="button" className="text-plum hover:underline" onClick={() => onNew(ymd(days[0]))}>Add a post</button></p>}
         </div>
@@ -97,8 +112,8 @@ export function CalendarTab({ b, onOpen, onNew }: { b: Basics; onOpen: (p: Conte
               const out = view === 'month' && d.getMonth() !== anchor.getMonth();
               const today = ymd(d) === ymd(new Date());
               return (
-                <div key={ymd(d)} onDragOver={(e) => e.preventDefault()} onDrop={() => drop(d)}
-                  className={cx('group border-b border-r border-line p-1', view === 'week' ? 'min-h-[320px]' : 'min-h-[104px]', out && 'bg-mist/30', dragging && 'hover:bg-plum-tint/40')}>
+                <div key={ymd(d)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => drop(d, e)}
+                  className={cx('group border-b border-r border-line p-1', view === 'week' ? 'min-h-[320px]' : 'min-h-[104px]', out && 'bg-mist/30', (dragging || draggingIdea) && 'hover:bg-plum-tint/40')}>
                   <div className="mb-1 flex items-center justify-between">
                     <button type="button" onClick={() => { setAnchor(d); setView('day'); }} className={cx('inline-flex h-6 w-6 items-center justify-center rounded-full text-[12px]', today ? 'bg-plum text-white' : out ? 'text-stone-light' : 'text-ink-soft hover:bg-mist')}>{d.getDate()}</button>
                     <button type="button" className="rounded p-0.5 text-stone opacity-0 hover:bg-mist hover:text-ink group-hover:opacity-100" aria-label="New post this day" onClick={() => onNew(ymd(d))}><Plus className="h-3.5 w-3.5" /></button>
@@ -112,10 +127,30 @@ export function CalendarTab({ b, onOpen, onNew }: { b: Basics; onOpen: (p: Conte
         </div>
       )}
       <section className="mt-6">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <h2 className="text-[15px] font-medium text-ink">Ideas to drag in</h2>
+          <span className="text-[13px] text-stone">Drag one onto a day (or click it) to start a post{f.account ? ` for ${b.accountOf(f.account)?.name}` : ''}.</span>
+          <label className="relative ml-auto w-56"><Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-stone" /><input className="field h-8 pl-8 text-[13px]" placeholder="Search ideas" value={ideaQ} onChange={(e) => setIdeaQ(e.target.value)} /></label>
+        </div>
+        <div className="flex max-h-[220px] flex-wrap gap-2 overflow-auto rounded-xl border border-line bg-white p-2">
+          {ideaList.map((i) => (
+            <button key={i.id} type="button" draggable onDragStart={(e) => { e.dataTransfer.setData('text/x-idea', i.id); setDraggingIdea(i); }} onDragEnd={() => setDraggingIdea(null)} onClick={() => onUse(ideaPrefill(i))}
+              className="flex max-w-[260px] cursor-grab items-start gap-1.5 rounded-lg border border-line bg-paper px-2 py-1.5 text-left text-[12px] hover:border-plum/50 active:cursor-grabbing"
+              title={[i.hook, i.caption].filter(Boolean).join(' — ')}>
+              <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 text-stone" />
+              <span className="min-w-0"><span className="block truncate font-medium text-ink">{i.suggested && <span className="mr-1 text-plum">New</span>}{i.title}</span>
+                <span className="flex flex-wrap items-center gap-1 text-[11px] text-stone">{i.accounts.map((a) => <span key={a} className="h-2 w-2 rounded-full" style={{ background: b.accountOf(a)?.color }} />)}{formatLabel(i.format)}{i.alsoStory ? ' + Story' : ''}</span></span>
+            </button>
+          ))}
+          {!ideaList.length && <p className="p-2 text-[13px] text-stone">No ideas match — see the Ideas tab.</p>}
+        </div>
+      </section>
+      <section className="mt-6"><PlanningTab b={b} onUse={onUse} embedded /></section>
+      <section className="mt-6">
         <h2 className="mb-2 text-[15px] font-medium text-ink">Not scheduled yet <span className="num text-stone">{ideas.length}</span></h2>
         {!ideas.length ? <p className="text-[13px] text-stone">Posts without a date show here — drag one onto a day to schedule it.</p> : (
           <ul className="panel divide-y divide-line">{ideas.map((p) => (
-            <li key={p.id} draggable onDragStart={() => setDragging(p.id)} onDragEnd={() => setDragging(null)}>
+            <li key={p.id} draggable onDragStart={(e) => { e.dataTransfer.setData('text/x-post', p.id); setDragging(p.id); }} onDragEnd={() => setDragging(null)}>
               <button type="button" className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-left text-[13px] hover:bg-mist/40" onClick={() => onOpen(p)}>
                 <AccountTag a={b.accountOf(p.account)} /><span className="min-w-0 flex-1 truncate font-medium text-ink">{p.title}</span>
                 <span className="text-stone">{platformLabel(p.platform)} · {formatLabel(p.type)}</span>{p.assignedName && <span className="text-stone">{p.assignedName}</span>}

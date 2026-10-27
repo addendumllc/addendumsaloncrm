@@ -8,7 +8,6 @@ import { useContentBasics } from './content/common';
 import { CalendarTab } from './content/Calendar';
 import { IdeasTab } from './content/Ideas';
 import { AssetsTab } from './content/Assets';
-import { PlanningTab } from './content/Planning';
 import { AnalyticsTab } from './content/Analytics';
 import { SettingsTab } from './content/SettingsTab';
 import { PostEditor, type Prefill } from './content/PostEditor';
@@ -19,7 +18,8 @@ type Tab = 'calendar' | 'ideas' | 'assets' | 'planning' | 'analytics' | 'setting
 export function ContentPage() {
   const b = useContentBasics();
   const [params, setParams] = useSearchParams();
-  const tab = (params.get('tab') as Tab) || 'calendar';
+  // Planning now sits under the calendar (old ?tab=planning links open the calendar).
+  const tab = ((params.get('tab') === 'planning' ? 'calendar' : params.get('tab')) as Tab) || 'calendar';
   const setTab = (t: Tab) => { const p = new URLSearchParams(params); p.set('tab', t); setParams(p, { replace: true }); };
   const [editing, setEditing] = useState<{ post: ContentPostDTO | null; prefill?: Prefill } | null>(null);
   // Opened from a notification (?post=…).
@@ -37,13 +37,12 @@ export function ContentPage() {
       <PageHeader title="Content calendar" subtitle={b.mine.map((a) => a.name).join(' · ')}
         actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => create()}>New post</Button>} />
       <PageTabs value={tab} onChange={setTab} options={[
-        { value: 'calendar', label: 'Calendar' }, { value: 'ideas', label: 'Ideas' }, { value: 'assets', label: 'Assets' }, { value: 'planning', label: 'Planning' }, { value: 'analytics', label: 'Analytics' },
+        { value: 'calendar', label: 'Calendar' }, { value: 'ideas', label: 'Ideas library' }, { value: 'assets', label: 'Assets' }, { value: 'analytics', label: 'Analytics' },
         ...(b.isAdmin ? [{ value: 'settings' as const, label: 'Settings' }] : []),
       ]} />
-      {tab === 'calendar' && <CalendarTab b={b} onOpen={open} onNew={(date) => create({ date })} />}
+      {tab === 'calendar' && <CalendarTab b={b} onOpen={open} onNew={(date) => create({ date })} onUse={create} />}
       {tab === 'ideas' && <IdeasTab b={b} onUse={create} />}
       {tab === 'assets' && <AssetsTab b={b} />}
-      {tab === 'planning' && <PlanningTab b={b} onUse={create} />}
       {tab === 'analytics' && <AnalyticsTab b={b} onOpen={open} />}
       {tab === 'settings' && b.isAdmin && b.settings && <SettingsTab b={b} />}
       {editing && <PostEditor post={editing.post} prefill={editing.prefill} b={b} onClose={() => setEditing(null)} />}
