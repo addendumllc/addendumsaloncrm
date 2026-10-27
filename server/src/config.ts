@@ -111,6 +111,9 @@ const schema = z.object({
   // Instagram (Content calendar → auto-posting): each account's Instagram Business account ID and access token.
   META_APP_ID: z.string().optional(), META_APP_SECRET: z.string().optional(),
   FLODESK_API_KEY: z.string().optional(),
+  // Google Gemini (AI writing): used when set, ahead of Anthropic.
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL: z.string().default('gemini-2.5-flash'),
   INSTAGRAM_1_ACCOUNT_ID: z.string().optional(), INSTAGRAM_1_TOKEN: z.string().optional(),
   INSTAGRAM_2_ACCOUNT_ID: z.string().optional(), INSTAGRAM_2_TOKEN: z.string().optional(),
   INSTAGRAM_3_ACCOUNT_ID: z.string().optional(), INSTAGRAM_3_TOKEN: z.string().optional(),

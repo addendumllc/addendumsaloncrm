@@ -25,7 +25,7 @@ describe('Settings → API & Integrations', () => {
   it('lists every integration with its status and required fields', async () => {
     const r = await api.get('/api/admin/credentials');
     expect(r.status).toBe(200);
-    expect(r.body.integrations.map((i: any) => i.provider)).toEqual(['square', 'shopify', 'shopify2', 'highlevel', 'highlevel_hair', 'email', 'google', 'instagram', 'flodesk', 'ai']);
+    expect(r.body.integrations.map((i: any) => i.provider)).toEqual(['square', 'shopify', 'shopify2', 'highlevel', 'highlevel_hair', 'email', 'google', 'instagram', 'flodesk', 'gemini', 'ai']);
     const shopify = r.body.integrations.find((i: any) => i.provider === 'shopify');
     expect(shopify.status).toBe('not_configured');
     expect(shopify.missing.length).toBeGreaterThan(0);

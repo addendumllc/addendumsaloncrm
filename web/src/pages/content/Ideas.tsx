@@ -50,7 +50,7 @@ export function IdeasTab({ b, onUse }: { b: Basics; onUse: (p: Prefill) => void 
       const g = (await api.post<{ draft: { title: string; headline: string | null; caption: string; cta: string | null; hashtags: string | null; extra: string | null; ai: boolean; subjects?: string[]; previewText?: string | null } }>('/content/generate', {
         account, platform: i.platform, format: i.format, pillar: i.pillar, brief: [`Idea: ${i.title}`, i.hook && `Hook: ${i.hook}`, i.visual && `Visual: ${i.visual}`, i.caption && `Starting caption: ${i.caption}`, i.audience && `Audience: ${i.audience}`].filter(Boolean).join('\n'),
       })).draft;
-      if (!g.ai) toast('Built-in draft (add an Anthropic key for AI writing) — edit before saving.');
+      if (!g.ai) toast('Built-in draft (add a Gemini key for AI writing) — edit before saving.');
       toCalendar(i, { accounts: [account], headline: g.headline ?? i.hook, caption: g.caption, cta: g.cta ?? i.cta, hashtags: i.platform === 'email' ? null : g.hashtags ?? i.hashtags,
         notes: [g.extra, i.platform !== 'email' && i.shotList && `Shot list:\n${i.shotList}`, g.subjects && g.subjects.length > 1 && `Other subject lines:\n${g.subjects.slice(1).join('\n')}`].filter(Boolean).join('\n\n'),
         ...(i.platform === 'email' ? { email: { subject: g.subjects?.[0] ?? g.headline ?? i.subject, previewText: g.previewText ?? i.previewText } } : {}) });

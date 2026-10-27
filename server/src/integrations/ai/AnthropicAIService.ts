@@ -8,10 +8,10 @@ import { RuleBasedAIService, ruleBasedInsight } from './RuleBasedAIService.js';
  * Falls back to the built-in templates if the API is unavailable, so drafting never blocks staff.
  */
 export class AnthropicAIService implements AIService {
-  readonly provider = 'anthropic' as const;
-  private fallback = new RuleBasedAIService();
+  readonly provider: 'anthropic' | 'gemini' = 'anthropic';
+  protected fallback = new RuleBasedAIService();
 
-  private async complete(system: string, user: string, maxTokens = 400): Promise<string> {
+  protected async complete(system: string, user: string, maxTokens = 400): Promise<string> {
     const c = config();
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',

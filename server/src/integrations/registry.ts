@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import { db } from '../db/index.js';
 import { getIntegration } from '../repos/integrations.js';
 import { getSettings } from '../repos/settings.js';
+import { GeminiAIService } from './ai/GeminiAIService.js';
 import { AnthropicAIService } from './ai/AnthropicAIService.js';
 import type { AIService } from './ai/AIService.js';
 import { RuleBasedAIService } from './ai/RuleBasedAIService.js';
@@ -110,6 +111,7 @@ onCredentialsChanged.push(() => {
 
 export function aiService(): AIService {
   if (overrides.ai) return overrides.ai;
+  if (!isDemo() && config().GEMINI_API_KEY) return new GeminiAIService();
   if (!isDemo() && config().ANTHROPIC_API_KEY) return new AnthropicAIService();
   return new RuleBasedAIService();
 }

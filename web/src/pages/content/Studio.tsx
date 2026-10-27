@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Copy, Link2, RefreshCw, Save, Sparkles, Trash2 } from 'lucide-react';
+import { Check, ClipboardPaste, Copy, ExternalLink, Link2, RefreshCw, Save, Sparkles, Trash2 } from 'lucide-react';
 import type { TaskDTO } from '@addendum/shared';
 import { api } from '../../api/client';
 import { useTasks } from '../../api/hooks';
-import { Badge, Button, EmptyState, Field, Modal, cx, useToast } from '../../components/ui';
+import { Badge, Button, EmptyState, Field, Modal, Segmented, cx, useToast } from '../../components/ui';
 
 type Format = 'story' | 'reel' | 'carousel' | 'feed' | 'caption' | 'sms' | 'email' | 'google' | 'signage';
 type Goal = 'book' | 'educate' | 'promote' | 'reengage';
@@ -54,6 +54,11 @@ export function StudioTab() {
   const [regen, setRegen] = useState<number | 'caption' | null>(null);
   const [subject, setSubject] = useState(0);
   const [attaching, setAttaching] = useState<string | null>(null);
+  // AI in the CRM (Gemini), or copy & paste with Claude.ai (no key) — remembered on this device.
+  const [mode, setModeState] = useState<'ai' | 'claude'>(() => { try { return localStorage.getItem('studio-mode') === 'ai' ? 'ai' : 'claude'; } catch { return 'claude'; } });
+  const setMode = (m: 'ai' | 'claude') => { setModeState(m); try { localStorage.setItem('studio-mode', m); } catch { /* private */ } };
+  const [pasted, setPasted] = useState('');
+  const [prompted, setPrompted] = useState<Input | null>(null);
   const { data: saved } = useQuery({ queryKey: ['studio-saved'], queryFn: () => api.get<{ items: Saved[] }>('/content/studio/saved').then((r) => r.items) });
   const len = LENGTHS[input.format];
   const service = input.service === 'Custom' ? custom.trim() : input.service;
@@ -66,6 +71,26 @@ export function StudioTab() {
     try {
       const r = await api.post<{ result: Result; warnings: string[] }>('/content/studio/generate', body);
       setResult(r.result); setWarnings(r.warnings); setUsed(body); setSubject(0);
+    } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
+  };
+  const request = (): Input | null => {
+    if (!service) { toast('Describe the custom service.', 'error'); return null; }
+    return { ...input, service, length: len ? input.length ?? len.def : null };
+  };
+  const copyPrompt = async () => {
+    const body = request(); if (!body) return;
+    try {
+      const { prompt } = await api.post<{ prompt: string }>('/content/studio/prompt', body);
+      await copy(prompt); setPrompted(body); setPasted('');
+      toast('Prompt copied — paste it into Claude, then paste Claude’s answer here');
+    } catch (e) { toast((e as Error).message, 'error'); }
+  };
+  const importAnswer = async () => {
+    const body = prompted ?? request(); if (!body) return;
+    setBusy(true);
+    try {
+      const r = await api.post<{ result: Result; warnings: string[] }>('/content/studio/import', { input: body, text: pasted });
+      setResult(r.result); setWarnings(r.warnings); setUsed(body); setSubject(0); setPasted('');
     } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
   };
   const regenerate = async (index: number | 'caption') => {
@@ -87,7 +112,7 @@ export function StudioTab() {
   const BlockTools = ({ i, text }: { i: number | 'caption'; text: string }) => (
     <span className="flex gap-1">
       <button type="button" className="rounded p-1 text-stone hover:bg-mist hover:text-ink" onClick={() => copy(text)} aria-label="Copy"><Copy className="h-3.5 w-3.5" /></button>
-      <button type="button" className="rounded p-1 text-stone hover:bg-mist hover:text-ink disabled:opacity-40" disabled={regen !== null} onClick={() => regenerate(i)} aria-label="Regenerate"><RefreshCw className={cx('h-3.5 w-3.5', regen === i && 'animate-spin')} /></button>
+      {mode === 'ai' && <button type="button" className="rounded p-1 text-stone hover:bg-mist hover:text-ink disabled:opacity-40" disabled={regen !== null} onClick={() => regenerate(i)} aria-label="Regenerate"><RefreshCw className={cx('h-3.5 w-3.5', regen === i && 'animate-spin')} /></button>}
     </span>
   );
   const fmt = used?.format;
@@ -113,10 +138,22 @@ export function StudioTab() {
               <Field label="Anything else" className={input.format === 'sms' || input.format === 'email' ? '' : 'sm:col-span-2'}><input className="field" value={input.notes.other ?? ''} onChange={(e) => setN('other', e.target.value)} /></Field>
             </div>
           </details>
+          <Segmented size="sm" value={mode} onChange={setMode} options={[{ value: 'claude', label: 'Claude.ai (copy & paste)' }, { value: 'ai', label: 'AI in the CRM (Gemini)' }]} />
+          {mode === 'claude' ? (
+            <div className="space-y-2 rounded-lg border border-line bg-mist/30 p-3 text-[13px]">
+              <p className="text-ink-soft"><b className="font-medium text-ink">1.</b> Copy the prompt <b className="font-medium text-ink">2.</b> Paste it into Claude <b className="font-medium text-ink">3.</b> Copy Claude’s whole answer and paste it below.</p>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="primary" icon={<Copy className="h-4 w-4" />} onClick={copyPrompt}>Copy prompt for Claude</Button>
+                <a className="inline-flex items-center gap-1 px-2 text-plum hover:underline" href="https://claude.ai/new" target="_blank" rel="noreferrer">Open Claude.ai <ExternalLink className="h-3.5 w-3.5" /></a>
+              </div>
+              <textarea className="field min-h-[90px] font-mono text-[12px]" placeholder="Paste Claude’s answer here (it starts with { and ends with })" value={pasted} onChange={(e) => setPasted(e.target.value)} />
+              <Button icon={<ClipboardPaste className="h-4 w-4" />} loading={busy} disabled={!pasted.trim()} onClick={importAnswer}>Show it</Button>
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="primary" icon={<Sparkles className="h-4 w-4" />} loading={busy} onClick={generate}>Generate</Button>
+            {mode === 'ai' && <Button variant="primary" icon={<Sparkles className="h-4 w-4" />} loading={busy} onClick={generate}>Generate</Button>}
             {result && <><Button icon={<Copy className="h-4 w-4" />} onClick={() => copy(allText(result))}>Copy all</Button><Button icon={<Save className="h-4 w-4" />} onClick={save}>Save</Button></>}
-            <span className="text-[12px] text-stone">Written on the server in the salon’s voice. Nothing is posted or sent.</span>
+            <span className="text-[12px] text-stone">{mode === 'ai' ? 'Written on the server with Gemini (key in API & Integrations). Nothing is posted or sent.' : 'Uses your Claude.ai account — no key needed. Checked against the same format rules.'}</span>
           </div>
         </section>
 

@@ -140,6 +140,11 @@ async function run(p: CredentialProvider): Promise<TestResult> {
       }
       return { ok: true, message: `Signed in to ${c.SMTP_HOST} as ${c.SMTP_USER}. No email was sent.`, warnings };
     }
+    case 'gemini': {
+      const { GeminiAIService } = await import('./ai/GeminiAIService.js');
+      const out = await new GeminiAIService().write!('Reply with the single word: ready', 'Ready?', 20);
+      return { ok: true, message: `Connected to Gemini (${c.GEMINI_MODEL}) — ${out ? 'it answered' : 'no reply text'}.`, warnings };
+    }
     case 'ai': {
       let res: Response;
       try {

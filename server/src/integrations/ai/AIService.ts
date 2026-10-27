@@ -20,7 +20,7 @@ export interface DraftContext {
  * AI boundary. Drafts are ALWAYS returned to staff for review; this service never sends anything.
  */
 export interface AIService {
-  readonly provider: 'anthropic' | 'built_in';
+  readonly provider: 'anthropic' | 'gemini' | 'built_in';
   analyze(text: string): Promise<MessageInsight>;
   draft(ctx: DraftContext): Promise<string>;
   /** Free-form writing (e.g. content drafts); only with a real model — the built-in service has none. */

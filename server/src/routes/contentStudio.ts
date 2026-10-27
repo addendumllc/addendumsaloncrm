@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { can } from '../auth/permissions.js';
 import { db } from '../db/index.js';
-import { attachToTask, deleteStudio, generateStudio, listStudio, regenerateBlock, resultSchema, saveStudio, STUDIO_FORMATS, STUDIO_GOALS } from '../domain/contentStudio.js';
+import { attachToTask, deleteStudio, generateStudio, importStudio, studioPrompt, listStudio, regenerateBlock, resultSchema, saveStudio, STUDIO_FORMATS, STUDIO_GOALS } from '../domain/contentStudio.js';
 import { forbidden } from '../lib/errors.js';
 import { ah, logAction, parse } from './util.js';
 
@@ -18,6 +18,12 @@ contentStudioRouter.post('/generate', ah(async (req, res) => {
   const out = await generateStudio(b);
   await logAction(req, 'content.studio_generate', undefined, undefined, { format: b.format, service: b.service, warnings: out.warnings.length });
   res.json(out);
+}));
+// Copy & paste with Claude.ai: the prompt to paste there, and its answer pasted back (checked like a generated one).
+contentStudioRouter.post('/prompt', ah(async (req, res) => res.json({ prompt: studioPrompt(parse(input, req.body)) })));
+contentStudioRouter.post('/import', ah(async (req, res) => {
+  const b = parse(z.object({ input, text: z.string().min(2).max(60_000) }), req.body);
+  res.json(importStudio(b.input, b.text));
 }));
 contentStudioRouter.post('/regenerate', ah(async (req, res) => {
   const b = parse(z.object({ input, result: resultSchema, index: z.union([z.number().int().min(0).max(30), z.literal('caption')]) }), req.body);

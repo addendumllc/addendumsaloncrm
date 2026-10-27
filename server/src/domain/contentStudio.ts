@@ -198,7 +198,7 @@ const parseJson = (text: string) => JSON.parse(text.slice(text.indexOf('{'), tex
 
 /** A piece for one format: the AI's JSON, checked against the format's rules — asked once more if it isn't right. */
 export async function generateStudio(input: StudioInput, write = aiService().write?.bind(aiService())): Promise<{ result: StudioResult; warnings: string[] }> {
-  if (!write) throw badRequest('Content Studio needs AI writing — add the Anthropic API key in Settings → API & Integrations → AI.');
+  if (!write) throw badRequest('Content Studio needs AI writing — add the Gemini API key in Settings → API & Integrations → AI (Google Gemini).');
   const ask = async (extra?: string): Promise<{ r: StudioResult | null; err: string | null }> => {
     const text = await write(SYSTEM_PROMPT, extra ? `${userMessage(input)}\n\n${extra}` : userMessage(input), 3000);
     try { return { r: resultSchema.parse(parseJson(text)), err: null }; } catch (e) { return { r: null, err: `Return ONLY valid JSON in the schema (${(e as Error).message.slice(0, 200)}).` }; }
@@ -215,9 +215,24 @@ export async function generateStudio(input: StudioInput, write = aiService().wri
   return { result: a.r!, warnings: problems };
 }
 
+/**
+ * Copy & paste with Claude.ai (no API key): the full instructions to paste into Claude, and the answer pasted back —
+ * checked the same way as a generated one.
+ */
+export function studioPrompt(input: StudioInput) {
+  return `${SYSTEM_PROMPT}\n\n---\n\nWrite this piece and reply with ONLY the JSON object (no other text):\n${userMessage(input)}`;
+}
+export function importStudio(input: StudioInput, text: string): { result: StudioResult; warnings: string[] } {
+  let raw: unknown;
+  try { raw = parseJson(text.replace(/```(?:json)?/g, '')); } catch { throw badRequest('That isn’t the JSON answer — copy Claude’s whole reply (it starts with { and ends with }).'); }
+  const r = resultSchema.safeParse(raw);
+  if (!r.success) throw badRequest('Claude’s answer is missing parts of the format (it needs “blocks”). Ask Claude to “return only the JSON in the schema” and paste again.');
+  return { result: r.data, warnings: check(input, r.data) };
+}
+
 /** One block written again (the rest of the piece stays) — or the caption when `index` is "caption". */
 export async function regenerateBlock(input: StudioInput, result: StudioResult, index: number | 'caption', write = aiService().write?.bind(aiService())) {
-  if (!write) throw badRequest('Content Studio needs AI writing — add the Anthropic API key in Settings → API & Integrations → AI.');
+  if (!write) throw badRequest('Content Studio needs AI writing — add the Gemini API key in Settings → API & Integrations → AI (Google Gemini).');
   const target = index === 'caption' ? 'the caption and hashtags' : `block number ${result.blocks[index]?.number ?? index + 1} (role "${result.blocks[index]?.role}")`;
   const ask = `${userMessage(input)}\n\nHere is the current piece:\n${JSON.stringify(result)}\n\nRewrite only ${target} — a fresh take that still follows every rule and doesn't repeat phrases from the other blocks. Return the whole piece as JSON, with everything else unchanged.`;
   for (let attempt = 0; attempt < 2; attempt++) {

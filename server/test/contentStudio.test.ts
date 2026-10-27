@@ -20,7 +20,7 @@ describe('Content Studio', () => {
     setIntegrationOverride({ ai: undefined });
     const r = await api.post('/api/content/studio/generate', { format: 'sms', service: 'Hair Botox', goal: 'book', notes: { clientFirstName: 'Ava' } });
     expect(r.status).toBe(400);
-    expect(r.body.error.message).toMatch(/Anthropic/);
+    expect(r.body.error.message).toMatch(/Gemini/);
   });
 
   it('checks the format’s rules and asks once more when they’re broken', async () => {
@@ -51,5 +51,16 @@ describe('Content Studio', () => {
     const task = await db().one<any>(`INSERT INTO tasks(type, title, status, priority, due_at) VALUES ('follow_up','Call Ava','due','medium', now()) RETURNING id`);
     expect((await api.post(`/api/content/studio/saved/${saved.id}/attach`, { taskId: task.id })).status).toBe(200);
     expect((await db().one<any>('SELECT notes FROM tasks WHERE id = $1', [task.id])).notes).toMatch(/Suggested text[\s\S]*Hair Botox/);
+  });
+
+  it('copy & paste with Claude.ai: the full prompt to paste, and the answer pasted back is checked', async () => {
+    const input = { format: 'sms', service: 'Hair Botox', goal: 'promote', notes: { clientFirstName: 'Ava' } };
+    const p = (await api.post('/api/content/studio/prompt', input)).body.prompt;
+    expect(p).toMatch(/quiet luxury/);
+    expect(p).toMatch(/"client_first_name":"Ava"/);
+    const r = (await api.post('/api/content/studio/import', { input, text: '```json\n' + sms('Hi Ava, Hair Botox packages are here. {BOOKING_LINK}') + '\n```' })).body;
+    expect(r.result.blocks[0].role).toBe('sms');
+    expect(r.warnings).toContain('Add “Reply STOP to opt out”.');
+    expect((await api.post('/api/content/studio/import', { input, text: 'Sure! Here is your text…' })).status).toBe(400);
   });
 });

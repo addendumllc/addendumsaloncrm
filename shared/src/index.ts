@@ -729,7 +729,7 @@ export interface IntegrationStatusDTO {
     pendingRetries: number;
     simulateOutage?: boolean;
   };
-  ai: { enabled: boolean; provider: 'anthropic' | 'built_in' };
+  ai: { enabled: boolean; provider: 'anthropic' | 'gemini' | 'built_in' };
   email: { connected: boolean; provider: 'smtp' | 'demo' | 'none' };
   shopify: { connected: boolean; mode: 'live' | 'demo' | 'disconnected'; store: string | null };
 }

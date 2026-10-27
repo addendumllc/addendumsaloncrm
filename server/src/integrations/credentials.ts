@@ -12,7 +12,7 @@ import { setRedactedSecrets } from '../lib/redact.js';
  *   uses them with no other changes. A saved value wins over the environment.
  * - Secret fields are write-only from the admin screen: it can see whether one is set and where from, never the value.
  */
-export type CredentialProvider = 'square' | 'shopify' | 'shopify2' | 'highlevel' | 'highlevel_hair' | 'email' | 'ai' | 'google' | 'instagram' | 'flodesk';
+export type CredentialProvider = 'square' | 'shopify' | 'shopify2' | 'highlevel' | 'highlevel_hair' | 'email' | 'ai' | 'google' | 'instagram' | 'flodesk' | 'gemini';
 
 export interface CredentialField {
   key: string; // environment variable name
@@ -126,6 +126,14 @@ export const CREDENTIAL_SPECS: Record<CredentialProvider, { label: string; field
     requirement: 'A Flodesk API key. The CRM only reads segment names to map each content account to its audiences — it never reads subscribers or sends email.',
     fields: [
       { key: 'FLODESK_API_KEY', label: 'API key', secret: true, required: true, validate: noSpaces, help: 'Flodesk → your account → Integrations → API keys → Create API key.' },
+    ],
+  },
+  gemini: {
+    label: 'AI (Google Gemini)',
+    requirement: 'A Gemini API key from Google AI Studio (free tier available). Used for AI writing — Content Studio, drafts and ideas — instead of Anthropic when set.',
+    fields: [
+      { key: 'GEMINI_API_KEY', label: 'API key', secret: true, required: true, validate: noSpaces, placeholder: 'AIza…', help: 'aistudio.google.com → Get API key → Create API key. On the free tier Google may use requests to improve its products — keep client details out of notes.' },
+      { key: 'GEMINI_MODEL', label: 'Model', secret: false, placeholder: 'gemini-2.5-flash', help: 'Leave empty for gemini-2.5-flash.' },
     ],
   },
   ai: {

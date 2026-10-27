@@ -277,7 +277,7 @@ function AiPanel({ d, b, onUse }: { d: Draft; b: Basics; onUse: (g: Generated) =
       <div className="mt-2 flex items-center gap-2"><Button size="sm" variant="primary" icon={<Sparkles className="h-4 w-4" />} loading={busy} onClick={run}>Generate</Button><Button size="sm" variant="ghost" onClick={() => setOpen(false)}>Close</Button></div>
       {out && (
         <div className="mt-3 space-y-1.5 rounded-lg border border-line bg-white p-3">
-          {!out.ai && <p className="text-[12px] text-stone">Built-in template (add an Anthropic key in API & Integrations for AI writing).</p>}
+          {!out.ai && <p className="text-[12px] text-stone">Built-in template (add a Gemini key in API & Integrations for AI writing).</p>}
           {out.subjects?.length ? <div className="text-ink"><span className="text-[12px] text-stone">Subject lines:</span><ul className="list-disc pl-5">{out.subjects.map((x) => <li key={x}>{x}</li>)}</ul>{out.previewText && <p className="text-[12px] text-stone">Preview: {out.previewText}</p>}</div>
             : out.headline && <p className="font-medium text-ink">{out.headline}</p>}
           <p className="whitespace-pre-line text-ink">{out.caption}</p>
