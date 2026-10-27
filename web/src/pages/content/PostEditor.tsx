@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, Film, ImagePlus, Library, Link2, Repeat, Sparkles, Trash2, X } from 'lucide-react';
+import { CopyPlus, ExternalLink, Film, ImagePlus, Library, Link2, Repeat, Sparkles, Trash2, X } from 'lucide-react';
 import {
   CONTENT_FORMATS, CONTENT_PLATFORMS, type ContentAccountId, type ContentCommentDTO, type ContentMediaDTO, type ContentMetrics, type ContentPlatform, type ContentPostDTO, type ContentPostType, type ContentStatus,
 } from '@addendum/shared';
@@ -35,6 +35,10 @@ export function PostEditor({ post, prefill, b, onClose }: { post: ContentPostDTO
   const [uploading, setUploading] = useState(0);
   const [picking, setPicking] = useState(false);
   const [repurposing, setRepurposing] = useState(false);
+  const [crossing, setCrossing] = useState(false);
+  // Several accounts: each goes out on its own day (one day apart by default; change any of them).
+  const [perAccount, setPerAccount] = useState<Record<string, string>>({});
+  const dateFor = (a: ContentAccountId, i: number) => perAccount[a] ?? (d.when ? shiftDays(d.when, i) : '');
   const [linkQ, setLinkQ] = useState('');
   const [newLink, setNewLink] = useState('');
   const file = useRef<HTMLInputElement>(null);
@@ -55,7 +59,11 @@ export function PostEditor({ post, prefill, b, onClose }: { post: ContentPostDTO
     setBusy(true);
     try {
       if (post) { const r = await api.put<{ post: ContentPostDTO }>(`/content/posts/${post.id}`, body()); setCurrent(r.post); toast('Saved'); }
-      else { const r = await api.post<{ posts: ContentPostDTO[] }>('/content/posts', { ...body(), accounts: d.accounts, status: status ?? 'draft' }); toast(r.posts.length > 1 ? `${r.posts.length} posts added — one per account` : 'Added to the calendar'); onClose(); }
+      else {
+        const schedules = d.accounts.length > 1 ? Object.fromEntries(d.accounts.map((a, i) => [a, fromLocal(dateFor(a, i))])) : {};
+        const r = await api.post<{ posts: ContentPostDTO[] }>('/content/posts', { ...body(), accounts: d.accounts, status: status ?? 'draft', schedules });
+        toast(r.posts.length > 1 ? `${r.posts.length} posts added — one per account, on their own days` : 'Added to the calendar'); onClose();
+      }
       refresh();
     } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
   };
@@ -77,6 +85,7 @@ export function PostEditor({ post, prefill, b, onClose }: { post: ContentPostDTO
   return (
     <Modal open xl onClose={onClose} title={post ? d.title || 'Post' : 'New post'} footer={<>
       {post && <Button variant="ghost" icon={<Trash2 className="h-4 w-4" />} onClick={del}>Delete</Button>}
+      {post && <Button variant="ghost" icon={<CopyPlus className="h-4 w-4" />} onClick={() => setCrossing(true)}>Cross-post…</Button>}
       {post && <Button variant="ghost" icon={<Repeat className="h-4 w-4" />} className="mr-auto" onClick={() => setRepurposing(true)}>Repurpose…</Button>}
       {!post && <Button variant="ghost" className="mr-auto" loading={busy} onClick={() => save('idea')}>Save as idea</Button>}
       <Button variant="ghost" onClick={onClose}>{post ? 'Close' : 'Cancel'}</Button>
@@ -107,8 +116,17 @@ export function PostEditor({ post, prefill, b, onClose }: { post: ContentPostDTO
               <Field label="Format"><select className="field" value={d.type} onChange={(e) => set({ type: e.target.value as ContentPostType })}>{CONTENT_FORMATS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}</select></Field>
               <Field label="Content pillar"><select className="field" value={d.pillar} onChange={(e) => set({ pillar: e.target.value })}><option value="">—</option>{[...new Set([...pillars, d.pillar].filter(Boolean))].map((p) => <option key={p}>{p}</option>)}</select></Field>
             </div>
+            {!post && d.accounts.length > 1 && (
+              <div className="rounded-lg border border-line p-3">
+                <span className="label">Cross-post days</span>
+                <p className="mb-2 text-[12px] text-stone">Each account on its own day — one day apart unless you change them.</p>
+                <div className="grid gap-2 sm:grid-cols-3">{d.accounts.map((a, i) => (
+                  <Field key={a} label={b.accountOf(a)?.name ?? a}><input type="datetime-local" className="field" value={dateFor(a, i)} onChange={(e) => setPerAccount({ ...perAccount, [a]: e.target.value })} /></Field>
+                ))}</div>
+              </div>
+            )}
             <div className="grid gap-3 sm:grid-cols-3">
-              <Field label="Scheduled" hint="Empty = not scheduled yet."><input type="datetime-local" className="field" value={d.when} onChange={(e) => set({ when: e.target.value })} /></Field>
+              <Field label={!post && d.accounts.length > 1 ? 'First post' : 'Scheduled'} hint="Empty = not scheduled yet."><input type="datetime-local" className="field" value={d.when} onChange={(e) => { set({ when: e.target.value }); setPerAccount({}); }} /></Field>
               <Field label="Due for review"><input type="date" className="field" value={d.due} onChange={(e) => set({ due: e.target.value })} /></Field>
               <Field label="Campaign"><select className="field" value={d.campaignId} onChange={(e) => set({ campaignId: e.target.value })}><option value="">None</option>{b.campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field>
             </div>
@@ -178,6 +196,7 @@ export function PostEditor({ post, prefill, b, onClose }: { post: ContentPostDTO
       {tab === 'workflow' && current && <Workflow post={current} b={b} onChanged={(p) => { setCurrent(p); refresh(); }} />}
       {tab === 'performance' && current && <Performance post={current} onChanged={(p) => { setCurrent(p); refresh(); }} />}
       {picking && <AssetPicker account={d.accounts[0]} onPick={(m) => { set({ media: [...d.media, ...m.filter((x) => !d.media.some((y) => y.id === x.id))] }); setPicking(false); }} onClose={() => setPicking(false)} />}
+      {crossing && current && <CrossPost post={current} b={b} onClose={() => setCrossing(false)} onDone={() => { setCrossing(false); refresh(); }} />}
       {repurposing && current && <Repurpose post={current} b={b} onClose={() => setRepurposing(false)} onDone={() => { setRepurposing(false); refresh(); }} />}
     </Modal>
   );
@@ -301,6 +320,39 @@ function Performance({ post, onChanged }: { post: ContentPostDTO; onChanged: (p:
       <div className="grid gap-3 sm:grid-cols-4">{METRICS.map(([k, label]) => <Field key={k} label={label}><input className="field num" inputMode="decimal" value={m[k]} onChange={(e) => setM({ ...m, [k]: e.target.value })} /></Field>)}</div>
       <div className="flex gap-2"><Button variant="primary" loading={busy} onClick={save}>Save numbers</Button>{post.platform === 'instagram' && post.permalink && <Button loading={busy} onClick={importNow}>Import from Instagram</Button>}</div>
     </div>
+  );
+}
+
+/** datetime-local value plus n days. */
+const shiftDays = (v: string, n: number) => { const x = new Date(v); x.setDate(x.getDate() + n); return toLocal(x.toISOString()); };
+
+/** The same post for other accounts, each on its own day (linked entries, edited and approved on their own). */
+function CrossPost({ post, b, onClose, onDone }: { post: ContentPostDTO; b: Basics; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const others = b.mine.filter((a) => a.id !== post.account);
+  const start = post.scheduledAt ? toLocal(post.scheduledAt) : '';
+  const [rows, setRows] = useState(() => others.map((a, i) => ({ account: a.id, on: false, when: start ? shiftDays(start, i + 1) : '' })));
+  const [busy, setBusy] = useState(false);
+  const picked = rows.filter((r) => r.on);
+  const go = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post<{ posts: ContentPostDTO[] }>(`/content/posts/${post.id}/crosspost`, { targets: picked.map((x) => ({ account: x.account, scheduledAt: fromLocal(x.when) })) });
+      toast(`Cross-posted to ${r.posts.length} account${r.posts.length === 1 ? '' : 's'} — each a draft on its own day`); onDone();
+    } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
+  };
+  return (
+    <Modal open wide onClose={onClose} title="Cross-post" footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={!picked.length} onClick={go}>Cross-post to {picked.length || ''}</Button></>}>
+      <div className="space-y-3 text-[14px]">
+        <p className="text-[13px] text-ink-soft">Copies this post to other accounts as drafts, each on its own day, with that account’s call to action — then edit, approve and schedule each one separately. To rewrite it for a different audience, use Repurpose instead.</p>
+        {rows.map((r, i) => (
+          <div key={r.account} className="grid items-end gap-2 sm:grid-cols-[1fr_1fr]">
+            <label className="flex items-center gap-2 pb-2"><input type="checkbox" className="h-4 w-4 accent-plum" checked={r.on} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, on: e.target.checked } : x)))} /><AccountTag a={b.accountOf(r.account)} /></label>
+            <Field label="Post on"><input type="datetime-local" className="field" disabled={!r.on} value={r.when} onChange={(e) => setRows(rows.map((x, j) => (j === i ? { ...x, when: e.target.value } : x)))} /></Field>
+          </div>
+        ))}
+      </div>
+    </Modal>
   );
 }
 

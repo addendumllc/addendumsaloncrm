@@ -8,7 +8,7 @@ import { maybeAutoSyncCommission } from './commission.js';
 import { maybeAutoSync } from './inventorySync.js';
 import { runRules } from './rulesEngine.js';
 import { maybePurgeOldInternalTasks } from './tasks.js';
-import { importRecentMetrics, publishDueContent, remindContent } from './content.js';
+import { importRecentMetrics, maybeSuggestWeekly, publishDueContent, remindContent } from './content.js';
 import { checkPreorders, checkRecounts, checkStockAlerts } from './preorderAlerts.js';
 import { maybeProcessShowit } from './showit.js';
 import { syncSquareInventory } from './squareInventory.js';
@@ -40,6 +40,7 @@ export function startScheduler() {
       await guard('stock-alerts', () => checkStockAlerts()); // selling products out of stock or at risk → bell
       await guard('recount-alerts', () => checkRecounts()); // extensions dropped to the recount level → bell
       await guard('content-reminders', () => remindContent()); // the person on a post: the day before and on the day
+      await guard('content-ideas', () => maybeSuggestWeekly()); // weekly: fresh ideas per account (kept only when saved)
       if (tick % 60 === 0) await guard('content-metrics', () => importRecentMetrics()); // Instagram numbers for recent posts (hourly check, each post daily)
     }
     if (tick % Math.max(1, config().SQUARE_SYNC_INTERVAL_MINUTES) === 0) {

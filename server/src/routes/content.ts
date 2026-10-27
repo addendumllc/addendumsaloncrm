@@ -2,8 +2,8 @@ import express, { Router } from 'express';
 import { z } from 'zod';
 import { CONTENT_PLATFORMS, CONTENT_FORMATS } from '@addendum/shared';
 import {
-  accountsFor, addComment, analytics, comments, contentAccounts, contentSettings, createPosts, deleteAsset, deleteCampaign, deleteIdea, deletePost, favoriteIdea, generate,
-  getPost, importMetrics, linkOptions, listAssets, listCampaigns, listIdeas, listPosts, MEDIA_LIMITS, planning, readMedia, repurpose, reschedule, saveCampaign,
+  accountsFor, addComment, analytics, crossPost, comments, contentAccounts, contentSettings, createPosts, deleteAsset, deleteCampaign, deleteIdea, deletePost, favoriteIdea, generate,
+  getPost, importMetrics, keepIdea, suggestIdeas, linkOptions, listAssets, listCampaigns, listIdeas, listPosts, MEDIA_LIMITS, planning, readMedia, repurpose, reschedule, saveCampaign,
   saveContentAccounts, saveContentSettings, saveIdea, saveMedia, setMetrics, transition, updateAsset, updatePost,
 } from '../domain/content.js';
 import { can } from '../auth/permissions.js';
@@ -52,9 +52,9 @@ contentRouter.get('/posts', ah(async (req, res) => {
 contentRouter.get('/posts/:id', ah(async (req, res) => res.json({ post: await getPost(who(req), req.params.id), comments: await comments(who(req), req.params.id) })));
 // One post per chosen account (each its own entry, linked by a group).
 contentRouter.post('/posts', ah(async (req, res) => {
-  const b = parse(fields.extend({ accounts: z.array(account).min(1).max(3), status: z.enum(['idea', 'draft']).default('draft') }), req.body);
-  const { accounts, status: st, ...f } = b;
-  const posts = await createPosts(who(req), accounts as any, f as any, st);
+  const b = parse(fields.extend({ accounts: z.array(account).min(1).max(3), status: z.enum(['idea', 'draft']).default('draft'), schedules: z.record(account, when).default({}) }), req.body);
+  const { accounts, status: st, schedules, ...f } = b;
+  const posts = await createPosts(who(req), accounts as any, f as any, st, null, schedules as any);
   await logAction(req, 'content.create', 'content_post', posts[0].id, { accounts });
   res.status(201).json({ posts });
 }));
@@ -69,6 +69,10 @@ contentRouter.post('/posts/:id/reschedule', ah(async (req, res) => res.json({ po
 contentRouter.post('/posts/:id/comments', ah(async (req, res) => {
   await addComment(who(req), req.params.id, parse(z.object({ body: z.string().trim().min(1).max(2000) }), req.body).body);
   res.json({ comments: await comments(who(req), req.params.id) });
+}));
+contentRouter.post('/posts/:id/crosspost', ah(async (req, res) => {
+  const b = parse(z.object({ targets: z.array(z.object({ account, scheduledAt: when })).min(1).max(2) }), req.body);
+  res.status(201).json({ posts: await crossPost(who(req), req.params.id, b.targets as any) });
 }));
 contentRouter.post('/posts/:id/repurpose', ah(async (req, res) => {
   const b = parse(z.object({ targets: z.array(z.object({ account, platform, type: format })).min(1).max(6) }), req.body);
@@ -101,9 +105,16 @@ contentRouter.delete('/campaigns/:id', ah(async (req, res) => res.json({ campaig
 
 contentRouter.get('/ideas', ah(async (req, res) => res.json({ ideas: await listIdeas(who(req)) })));
 const idea = z.object({ id: z.string().uuid().optional(), accounts: z.array(account).min(1).max(3), title: z.string().trim().min(1).max(200), pillar: z.string().trim().min(1).max(120), audience: text(300),
-  platform, format, hook: text(500), visual: text(1000), shotList: text(2000), caption: text(4000), cta: text(300), hashtags: text(1000), season: text(40), effort: z.enum(['low', 'medium', 'high']).default('medium') });
+  platform, format, hook: text(500), visual: text(1000), shotList: text(2000), caption: text(4000), cta: text(300), hashtags: text(1000), season: text(40), effort: z.enum(['low', 'medium', 'high']).default('medium'), alsoStory: z.boolean().default(false) });
 contentRouter.post('/ideas', ah(async (req, res) => res.json({ ideas: await saveIdea(who(req), parse(idea, req.body) as any) })));
 contentRouter.delete('/ideas/:id', ah(async (req, res) => res.json({ ideas: await deleteIdea(who(req), req.params.id) })));
+contentRouter.put('/ideas/:id/keep', ah(async (req, res) => res.json({ ideas: await keepIdea(who(req), req.params.id) })));
+contentRouter.post('/ideas/suggest', ah(async (req, res) => {
+  const b = parse(z.object({ accounts: z.array(account).max(3).optional(), count: z.number().int().min(1).max(8).default(4) }), req.body ?? {});
+  const mine = await accountsFor(who(req));
+  const added = await suggestIdeas((b.accounts?.length ? b.accounts : mine).filter((a) => mine.includes(a as any)) as any, b.count);
+  res.json({ added, ideas: await listIdeas(who(req)) });
+}));
 contentRouter.put('/ideas/:id/favorite', ah(async (req, res) => { await favoriteIdea(who(req), req.params.id, parse(z.object({ on: z.boolean() }), req.body).on); res.json({ ok: true }); }));
 
 contentRouter.get('/planning', ah(async (req, res) => res.json(await planning(who(req)))));

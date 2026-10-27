@@ -2505,6 +2505,10 @@ export interface ContentIdeaDTO {
   id: string; accounts: ContentAccountId[]; title: string; pillar: string; audience: string | null; platform: ContentPlatform; format: ContentPostType;
   hook: string | null; visual: string | null; shotList: string | null; caption: string | null; cta: string | null; hashtags: string | null; season: string | null;
   effort: 'low' | 'medium' | 'high'; builtin: boolean; favorite: boolean;
+  /** A Reel that also works as a Story. */
+  alsoStory: boolean;
+  /** Drafted this week and not saved yet (replaced next week unless saved). */
+  suggested: boolean; suggestedOn: string | null;
 }
 /** Content settings (administrators). */
 export interface ContentSettings {

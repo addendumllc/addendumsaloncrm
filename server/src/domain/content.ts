@@ -190,18 +190,19 @@ async function notify(staffId: string | null | undefined, title: string, body: s
  * New posts: one per chosen account (linked by a group, each edited, approved and tracked on its own). A new post starts
  * as an Idea or a Draft; it moves on through the workflow.
  */
-export async function createPosts(u: Who, accounts: ContentAccountId[], f: PostFields, status: 'idea' | 'draft', sourcePostId: string | null = null) {
+export async function createPosts(u: Who, accounts: ContentAccountId[], f: PostFields, status: 'idea' | 'draft', sourcePostId: string | null = null, schedules: Partial<Record<ContentAccountId, string | null>> = {}, groupId: string | null = null) {
   if (!accounts.length) throw badRequest('Choose at least one account.');
   for (const a of accounts) await assertAccount(u, a);
   checkFields(f);
-  const group = accounts.length > 1 ? crypto.randomUUID() : null;
+  const group = groupId ?? (accounts.length > 1 ? crypto.randomUUID() : null);
   const out: ContentPostDTO[] = [];
   for (const account of accounts) {
     const r = (await db().one<{ id: string }>(
       `INSERT INTO content_posts(account, platform, post_type, title, scheduled_at, due_at, headline, caption, cta, hashtags, pillar, auto_post, media_ids, external_links,
          link_kind, link_ref, link_label, campaign_id, assigned_staff_id, reviewer_staff_id, publisher_staff_id, notes, status, group_id, source_post_id, idea_id, created_by_staff_id)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::boolean,$13::uuid[],$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27) RETURNING id`,
-      [account, ...VALUES({ ...f, autoPost: false }), status, group, sourcePostId, f.ideaId ?? null, u.id]))!;
+      // Cross-posted accounts can go out on different days (their own date and time).
+      [account, ...VALUES({ ...f, autoPost: false, scheduledAt: account in schedules ? schedules[account] ?? null : f.scheduledAt }), status, group, sourcePostId, f.ideaId ?? null, u.id]))!;
     await log(r.id, u.id, 'status', null, null, status);
     out.push(await getPost(u, r.id));
   }
@@ -298,6 +299,32 @@ export async function addComment(u: Who, id: string, body: string) {
 }
 
 /**
+ * Cross-post: the same post for other accounts, each on its own day (its own entry — edited, approved and scheduled on
+ * its own, linked to this one). The content is copied; the call to action becomes the target account's when the post
+ * used its own account's (or none). For a version rewritten for another audience, use Repurpose.
+ */
+export async function crossPost(u: Who, id: string, targets: { account: ContentAccountId; scheduledAt: string | null }[]) {
+  const src = await getPost(u, id);
+  const accounts = await contentAccounts();
+  const srcCta = accounts.find((a) => a.id === src.account)?.cta;
+  let group = src.groupId;
+  if (!group) { group = crypto.randomUUID(); await db().query('UPDATE content_posts SET group_id = $2 WHERE id = $1', [id, group]); }
+  const out: ContentPostDTO[] = [];
+  for (const t of targets) {
+    if (t.account === src.account) continue;
+    const acc = accounts.find((a) => a.id === t.account)!;
+    const [p] = await createPosts(u, [t.account], {
+      platform: src.platform, type: src.type, title: src.title, scheduledAt: t.scheduledAt, dueAt: src.dueAt, headline: src.headline, caption: src.caption,
+      cta: !src.cta || src.cta === srcCta ? acc.cta : src.cta, hashtags: src.hashtags, pillar: acc.pillars.includes(src.pillar ?? '') ? src.pillar : null, autoPost: false,
+      mediaIds: src.media.map((m) => m.id), externalLinks: src.externalLinks, link: src.link, campaignId: src.campaignId, assignedStaffId: src.assignedStaffId,
+      reviewerStaffId: src.reviewerStaffId, publisherStaffId: src.publisherStaffId, notes: src.notes, ideaId: src.ideaId,
+    }, 'draft', src.id, {}, group);
+    out.push(p);
+  }
+  return out;
+}
+
+/**
  * Repurpose: new drafts for other accounts or platforms from a post — the original isn't changed. Each new draft is
  * rewritten for its account's audience and CTA (with AI when available, else the account's CTA and the same copy).
  */
@@ -374,14 +401,15 @@ export async function seedContentIdeas() {
   for (const i of BUILTIN_IDEAS) {
     if (have.has(i.key) || removed.has(i.key)) continue;
     await db().query(
-      `INSERT INTO content_ideas(key, accounts, title, pillar, audience, platform, format, hook, visual, shot_list, caption, cta, hashtags, season, effort, builtin)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,true) ON CONFLICT (key) DO NOTHING`,
-      [i.key, i.accounts, i.title, i.pillar, i.audience, i.platform, i.format, i.hook, i.visual, i.shots, i.caption, i.cta, i.hashtags, i.season, i.effort]);
+      `INSERT INTO content_ideas(key, accounts, title, pillar, audience, platform, format, hook, visual, shot_list, caption, cta, hashtags, season, effort, builtin, also_story)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,true,$16) ON CONFLICT (key) DO NOTHING`,
+      [i.key, i.accounts, i.title, i.pillar, i.audience, i.platform, i.format, i.hook, i.visual, i.shots, i.caption, i.cta, i.hashtags, i.season, i.effort, !!i.alsoStory]);
   }
 }
 const ideaDTO = (r: any, favs: Set<string>): ContentIdeaDTO => ({
   id: r.id, accounts: r.accounts ?? [], title: r.title, pillar: r.pillar, audience: r.audience, platform: r.platform, format: r.format, hook: r.hook, visual: r.visual,
   shotList: r.shot_list, caption: r.caption, cta: r.cta, hashtags: r.hashtags, season: r.season, effort: r.effort, builtin: r.builtin, favorite: favs.has(r.id),
+  alsoStory: !!r.also_story, suggested: r.status === 'suggested', suggestedOn: r.suggested_on ? String(iso(r.suggested_on)).slice(0, 10) : null,
 });
 export async function listIdeas(u: Who) {
   await seedContentIdeas();
@@ -390,9 +418,10 @@ export async function listIdeas(u: Who) {
   return (await db().query<any>(`SELECT * FROM content_ideas WHERE accounts && $1::text[] OR accounts = '{}' ORDER BY builtin, created_at DESC`, [mine])).map((r) => ideaDTO(r, favs));
 }
 export async function saveIdea(u: Who, i: Omit<ContentIdeaDTO, 'id' | 'builtin' | 'favorite'> & { id?: string }) {
-  const vals = [i.accounts, i.title, i.pillar, i.audience, i.platform, i.format, i.hook, i.visual, i.shotList, i.caption, i.cta, i.hashtags, i.season, i.effort];
-  if (i.id) await db().query('UPDATE content_ideas SET accounts=$2, title=$3, pillar=$4, audience=$5, platform=$6, format=$7, hook=$8, visual=$9, shot_list=$10, caption=$11, cta=$12, hashtags=$13, season=$14, effort=$15 WHERE id=$1', [i.id, ...vals]);
-  else await db().query('INSERT INTO content_ideas(accounts, title, pillar, audience, platform, format, hook, visual, shot_list, caption, cta, hashtags, season, effort, created_by_staff_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)', [...vals, u.id]);
+  const vals = [i.accounts, i.title, i.pillar, i.audience, i.platform, i.format, i.hook, i.visual, i.shotList, i.caption, i.cta, i.hashtags, i.season, i.effort, !!i.alsoStory];
+  // Editing a suggestion saves it to the library.
+  if (i.id) await db().query("UPDATE content_ideas SET accounts=$2, title=$3, pillar=$4, audience=$5, platform=$6, format=$7, hook=$8, visual=$9, shot_list=$10, caption=$11, cta=$12, hashtags=$13, season=$14, effort=$15, also_story=$16, status='library' WHERE id=$1", [i.id, ...vals]);
+  else await db().query('INSERT INTO content_ideas(accounts, title, pillar, audience, platform, format, hook, visual, shot_list, caption, cta, hashtags, season, effort, also_story, created_by_staff_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)', [...vals, u.id]);
   return listIdeas(u);
 }
 export async function deleteIdea(u: Who, id: string) {
@@ -400,6 +429,74 @@ export async function deleteIdea(u: Who, id: string) {
   if (r?.key) await setKV(REMOVED_IDEAS_KEY, [...new Set([...((await getKV<string[]>(REMOVED_IDEAS_KEY)) ?? []), r.key])]);
   return listIdeas(u);
 }
+/** Keeps a suggested idea (moves it into the library, so it isn't replaced next week). */
+export async function keepIdea(u: Who, id: string) {
+  await db().query("UPDATE content_ideas SET status = 'library', created_by_staff_id = COALESCE(created_by_staff_id, $2) WHERE id = $1", [id, u.id]);
+  return listIdeas(u);
+}
+
+// ---- New ideas each week (and on demand)
+const ANGLES = [
+  ['Quick tip', 'One thing to do differently this week.', 'reel', true], ['Myth vs fact', 'You’ve probably heard this — it isn’t true.', 'carousel', false],
+  ['Behind the scenes', 'What you don’t usually see.', 'reel', true], ['FAQ', 'The question we get asked most this month.', 'reel', true],
+  ['Before & after', 'The difference one appointment makes.', 'reel', true], ['Step by step', 'How it’s done, in five steps.', 'carousel', false],
+  ['This or that', 'Which would you choose?', 'story', false], ['Customer story', 'In their words.', 'feed', false],
+  ['Save this', 'A checklist worth keeping.', 'carousel', false], ['60-second demo', 'Watch it in action.', 'reel', true],
+] as const;
+/**
+ * Drafts fresh ideas per account — with Claude when it's set up (in the account's voice, pillars and season, avoiding
+ * ideas already in the library), else from varied angles on the account's pillars. They're suggestions until saved.
+ */
+export async function suggestIdeas(accounts: ContentAccountId[] = ACCOUNT_IDS, perAccount = 4, now = new Date()) {
+  const all = await contentAccounts();
+  const today = now.toISOString().slice(0, 10);
+  const season = (SEASONS[now.getMonth()] ?? []).join(', ') || 'any';
+  const taken = new Set((await db().query<{ t: string }>('SELECT lower(title) AS t FROM content_ideas')).map((r) => r.t));
+  let added = 0;
+  for (const id of accounts) {
+    const acc = all.find((a) => a.id === id)!;
+    let ideas: { title: string; pillar: string; format: string; hook?: string; visual?: string; shotList?: string; caption?: string; cta?: string; hashtags?: string; alsoStory?: boolean }[] = [];
+    const ai = aiService();
+    if (ai.write) {
+      try {
+        const text = await ai.write(
+          `You plan Instagram content for ${acc.name}. Voice: ${acc.voice} Primary CTA: ${acc.cta}. Pillars: ${acc.pillars.join('; ')}. Reply with ONLY a JSON array.`,
+          `Suggest ${perAccount} fresh post ideas for this week (season: ${season}). Mix formats (reel, carousel, story, feed); at least one Reel that also works as a Story (alsoStory: true). Don't repeat these existing titles: ${[...taken].slice(0, 80).join(' | ')}.
+Each: {"title","pillar" (one of the pillars),"format" (reel|carousel|story|feed),"hook","visual","shotList","caption","cta","hashtags","alsoStory"}.`, 2500);
+        ideas = JSON.parse(text.slice(text.indexOf('['), text.lastIndexOf(']') + 1));
+      } catch (e) { console.warn('[content] idea suggestions:', (e as Error).message); }
+    }
+    if (!ideas.length) {
+      // Built-in: rotate pillars and angles by week so each week brings different ones.
+      const week = Math.floor(now.getTime() / (7 * 86400_000));
+      ideas = Array.from({ length: perAccount }, (_, k) => {
+        const pillar = acc.pillars[(week * perAccount + k) % acc.pillars.length];
+        const [angle, hook, format, story] = ANGLES[(week + k * 3 + id.charCodeAt(1)) % ANGLES.length];
+        return { title: `${angle}: ${pillar}`, pillar, format, hook, visual: 'Vertical, natural light, captions on screen', shotList: '1. Hook (2s)\n2. The point, shown\n3. Proof or result\n4. Call to action', caption: `${hook} ${pillar} — our take.`, cta: acc.cta, hashtags: '', alsoStory: story };
+      });
+    }
+    for (const i of ideas.slice(0, perAccount)) {
+      if (!i?.title || taken.has(i.title.toLowerCase())) continue;
+      taken.add(i.title.toLowerCase());
+      const format = ['reel', 'carousel', 'story', 'feed'].includes(i.format) ? i.format : 'reel';
+      await db().query(`INSERT INTO content_ideas(accounts, title, pillar, platform, format, hook, visual, shot_list, caption, cta, hashtags, season, effort, also_story, status, suggested_on)
+        VALUES ($1,$2,$3,'instagram',$4,$5,$6,$7,$8,$9,$10,$11,'medium',$12,'suggested',$13)`,
+        [[id], String(i.title).slice(0, 200), String(i.pillar || acc.pillars[0]).slice(0, 120), format, i.hook ?? null, i.visual ?? null, i.shotList ?? null, i.caption ?? null, i.cta ?? acc.cta, i.hashtags || null, season, format === 'reel' && i.alsoStory !== false, today]);
+      added++;
+    }
+  }
+  return added;
+}
+/** Scheduler: once a week (from Monday), unsaved suggestions from earlier weeks go and new ones are drafted. */
+export async function maybeSuggestWeekly(now = new Date()) {
+  const monday = new Date(now); monday.setHours(0, 0, 0, 0); monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  const week = monday.toISOString().slice(0, 10);
+  if ((await getKV<string>('content.ideas.week')) === week) return 0;
+  await setKV('content.ideas.week', week);
+  await db().query("DELETE FROM content_ideas WHERE status = 'suggested' AND suggested_on < $1 AND id NOT IN (SELECT idea_id FROM content_idea_favorites)", [week]);
+  return suggestIdeas(ACCOUNT_IDS, 4, now);
+}
+
 export async function favoriteIdea(u: Who, id: string, on: boolean) {
   if (on) await db().query('INSERT INTO content_idea_favorites(staff_id, idea_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [u.id, id]);
   else await db().query('DELETE FROM content_idea_favorites WHERE staff_id = $1 AND idea_id = $2', [u.id, id]);

@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useReauth } from '../../components/domain/Reauth';
 import { CONTENT_PLATFORMS, type ContentAccount, type ContentPlatform, type ContentSettings } from '@addendum/shared';
 import { api } from '../../api/client';
 import { Badge, Button, Field, Toggle, useToast } from '../../components/ui';
@@ -13,6 +14,25 @@ export function SettingsTab({ b }: { b: Basics }) {
   const [accounts, setAccounts] = useState(b.accounts.map((a) => ({ ...a, pillarsText: a.pillars.join('\n') })));
   const [s, setS] = useState<ContentSettings>(b.settings ?? { requireApproval: true, goals: {}, access: {} });
   const [busy, setBusy] = useState(false);
+  const reauth = useReauth();
+  const [params, setParams] = useSearchParams();
+  // Back from Facebook's sign-in.
+  useEffect(() => {
+    const r = params.get('instagram');
+    if (!r) return;
+    if (r === 'connected') {
+      const linked = params.get('linked'); const others = params.get('others');
+      toast(linked ? `Connected ${linked}${others ? ` · also found ${others} (handle doesn’t match an account here)` : ''}` : `Signed in, but no account matched the handles here${others ? ` — found ${others}` : ''}. Check each account’s Handle below, then connect again.`, linked ? 'success' : 'error');
+    } else toast(r === 'denied' ? 'Instagram wasn’t connected (access wasn’t allowed).' : params.get('reason') ?? 'The connection didn’t complete.', 'error');
+    const n = new URLSearchParams(params); for (const k of ['instagram', 'linked', 'others', 'reason']) n.delete(k); setParams(n, { replace: true });
+    void qc.invalidateQueries({ queryKey: ['content-accounts'] });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const connect = async () => {
+    try {
+      const { url } = await api.get<{ url: string }>('/integrations/instagram/connect');
+      if (window.self !== window.top) window.open(url, '_blank', 'noopener'); else window.location.href = url;
+    } catch (e) { if (reauth.handle(e, connect)) return; toast((e as Error).message, 'error'); }
+  };
   const save = async () => {
     setBusy(true);
     try {
@@ -53,9 +73,22 @@ export function SettingsTab({ b }: { b: Basics }) {
           </Field>
         </section>
       ))}
-      <section className="panel p-4 text-[13px] text-ink-soft">
-        <h2 className="mb-1 text-[15px] font-medium text-ink">Connections</h2>
-        <p>Instagram auto-posting and metric import: <Link className="text-plum hover:underline" to="/settings?tab=api">Settings → API & Integrations → Instagram</Link> (accounts 1, 2 and 3 are the accounts above, in order). Facebook, TikTok, Pinterest and email are planned and confirmed by hand, with numbers entered on each post — their direct publishing isn’t connected.</p>
+      <section className="panel space-y-2 p-4 text-[13px] text-ink-soft">
+        {reauth.modal}
+        <div className="flex flex-wrap items-center gap-2"><h2 className="text-[15px] font-medium text-ink">Instagram</h2>
+          {b.accounts.map((a) => <Badge key={a.id} tone={a.connected ? 'sage' : 'neutral'}>{a.name}: {a.connected ? 'connected' : 'not connected'}</Badge>)}
+          <Button variant="primary" size="sm" className="ml-auto" onClick={connect}>Connect Instagram</Button></div>
+        <p>Signs in with Facebook once and links every account whose handle matches one above — for auto-posting and importing numbers. The accounts must be Instagram Business or Creator accounts linked to a Facebook Page you manage.</p>
+        <details><summary className="cursor-pointer text-plum">First time: set up the Meta app (once)</summary>
+          <ol className="mt-1 list-decimal space-y-0.5 pl-5">
+            <li>Go to developers.facebook.com → My Apps → Create app → Business.</li>
+            <li>Add the Instagram product (API setup with Facebook login) and Facebook Login.</li>
+            <li>In Facebook Login → Settings, add the redirect: <code className="text-[12px]">{window.location.origin}/api/integrations/instagram/callback</code></li>
+            <li>Copy App ID and App secret (App settings → Basic) into <Link className="text-plum hover:underline" to="/settings?tab=api">Settings → API & Integrations → Instagram</Link>.</li>
+            <li>Come back here and press Connect Instagram. While the app is in development mode it works for accounts you manage as the app’s admin.</li>
+          </ol>
+        </details>
+        <p>Facebook, TikTok, Pinterest and email are planned and confirmed by hand, with numbers entered on each post.</p>
       </section>
       <div className="flex justify-end"><Button variant="primary" loading={busy} onClick={save}>Save settings</Button></div>
     </div>

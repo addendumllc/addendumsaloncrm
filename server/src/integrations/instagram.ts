@@ -1,4 +1,7 @@
+import { config } from '../config.js';
+import { randomToken } from '../lib/crypto.js';
 import { IntegrationError } from '../lib/errors.js';
+import { getKV, setKV } from '../repos/settings.js';
 
 /**
  * Instagram Graph API (content publishing) for one Instagram Business/Creator account:
@@ -76,4 +79,35 @@ export class InstagramApi {
     const info = await this.call<{ permalink?: string }>('GET', `/${id}`, { fields: 'permalink' }).catch(() => ({ permalink: undefined }));
     return { mediaId: id, permalink: info.permalink ?? null };
   }
+}
+
+// ---------------- Connect Instagram (Facebook login) ----------------
+/**
+ * One sign-in with Facebook finds the Instagram Business accounts behind the person's Pages. Their Page tokens (made
+ * from a long-lived user token, so they don't expire) are what posting uses. Needs the Meta app ID and secret once.
+ */
+const SCOPES = ['instagram_basic', 'instagram_content_publish', 'instagram_manage_insights', 'pages_show_list', 'pages_read_engagement', 'business_management'];
+export const metaRedirectUri = () => `${config().APP_URL.replace(/\/$/, '')}/api/integrations/instagram/callback`;
+export async function metaAuthorizeUrl() {
+  const c = config();
+  if (!c.META_APP_ID || !c.META_APP_SECRET) throw new IntegrationError('instagram', 'Add your Meta app ID and secret first (Settings → API & Integrations → Instagram).', false);
+  const state = randomToken(24);
+  await setKV('instagram.oauthState', { state, createdAt: Date.now() });
+  return `https://www.facebook.com/v21.0/dialog/oauth?${new URLSearchParams({ client_id: c.META_APP_ID, redirect_uri: metaRedirectUri(), state, scope: SCOPES.join(','), response_type: 'code' })}`;
+}
+async function graphGet<T>(path: string, params: Record<string, string>) {
+  const res = await fetch(`${GRAPH}${path}?${new URLSearchParams(params)}`);
+  const j = await res.json().catch(() => ({})) as any;
+  if (!res.ok || j.error) throw new IntegrationError('instagram', `Facebook: ${j.error?.message ?? `error ${res.status}`}`, false, true, JSON.stringify(j.error ?? {}).slice(0, 500));
+  return j as T;
+}
+/** The Instagram accounts the sign-in can post to: { username, accountId, token }. */
+export async function metaCallback(code: string, state: string) {
+  const c = config();
+  const saved = await getKV<{ state: string; createdAt: number }>('instagram.oauthState');
+  if (!saved || saved.state !== state || Date.now() - saved.createdAt > 15 * 60_000) throw new IntegrationError('instagram', 'The connection link expired. Try Connect Instagram again.', false);
+  const short = await graphGet<{ access_token: string }>('/oauth/access_token', { client_id: c.META_APP_ID!, client_secret: c.META_APP_SECRET!, redirect_uri: metaRedirectUri(), code });
+  const long = await graphGet<{ access_token: string }>('/oauth/access_token', { grant_type: 'fb_exchange_token', client_id: c.META_APP_ID!, client_secret: c.META_APP_SECRET!, fb_exchange_token: short.access_token });
+  const pages = await graphGet<{ data?: { name: string; access_token: string; instagram_business_account?: { id: string; username?: string } }[] }>('/me/accounts', { fields: 'name,access_token,instagram_business_account{id,username}', limit: '100', access_token: long.access_token });
+  return (pages.data ?? []).filter((p) => p.instagram_business_account).map((p) => ({ username: p.instagram_business_account!.username ?? p.name, accountId: p.instagram_business_account!.id, token: p.access_token, page: p.name }));
 }

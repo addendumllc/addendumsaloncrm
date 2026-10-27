@@ -109,6 +109,7 @@ const schema = z.object({
   // Website inquiries from Gmail (Settings → Website Inquiries): a Google Cloud OAuth client (web application).
   GOOGLE_CLIENT_ID: z.string().optional(),
   // Instagram (Content calendar → auto-posting): each account's Instagram Business account ID and access token.
+  META_APP_ID: z.string().optional(), META_APP_SECRET: z.string().optional(),
   INSTAGRAM_1_ACCOUNT_ID: z.string().optional(), INSTAGRAM_1_TOKEN: z.string().optional(),
   INSTAGRAM_2_ACCOUNT_ID: z.string().optional(), INSTAGRAM_2_TOKEN: z.string().optional(),
   INSTAGRAM_3_ACCOUNT_ID: z.string().optional(), INSTAGRAM_3_TOKEN: z.string().optional(),

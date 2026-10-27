@@ -102,4 +102,38 @@ describe('Content calendar', () => {
     expect(a.manual).toBeGreaterThanOrEqual(1);
     await remindContent();
   });
+
+  it('cross-posts to other accounts on different days, linked to the original, with each account’s CTA', async () => {
+    const day = (n: number) => new Date(Date.now() + n * 86400_000).toISOString();
+    const src = (await api.post('/api/content/posts', base({ accounts: ['a2'], title: 'Bond Applicator demo', scheduledAt: day(1), cta: 'Shop the collection' }))).body.posts[0];
+    const copies = (await api.post(`/api/content/posts/${src.id}/crosspost`, { targets: [{ account: 'a3', scheduledAt: day(3) }, { account: 'a1', scheduledAt: day(5) }] })).body.posts;
+    expect(copies.map((p: any) => p.account)).toEqual(['a3', 'a1']);
+    expect(new Set([src.scheduledAt, ...copies.map((p: any) => p.scheduledAt)]).size).toBe(3); // three different days
+    const orig = (await api.get(`/api/content/posts/${src.id}`)).body.post;
+    expect(copies.every((p: any) => p.groupId === orig.groupId && p.sourcePostId === src.id && p.status === 'draft')).toBe(true);
+    expect(copies[0].cta).toMatch(/Learn more|professional/i);
+    // A new post for several accounts can give each its own day too.
+    const multi = (await api.post('/api/content/posts', base({ accounts: ['a1', 'a2'], schedules: { a1: day(2), a2: day(4) } }))).body.posts;
+    expect(multi[0].scheduledAt).not.toBe(multi[1].scheduledAt);
+  });
+
+  it('drafts new ideas each week as suggestions (kept only when saved); Reel ideas can work as Stories', async () => {
+    const { maybeSuggestWeekly } = await import('../src/domain/content.js');
+    const n = await maybeSuggestWeekly(new Date());
+    expect(n).toBeGreaterThan(0);
+    expect(await maybeSuggestWeekly(new Date())).toBe(0); // once a week
+    let ideas = (await api.get('/api/content/ideas')).body.ideas;
+    const fresh = ideas.filter((i: any) => i.suggested);
+    expect(fresh.length).toBeGreaterThan(0);
+    for (const a of ['a1', 'a2', 'a3']) expect(fresh.some((i: any) => i.accounts.includes(a))).toBe(true);
+    ideas = (await api.put(`/api/content/ideas/${fresh[0].id}/keep`)).body.ideas;
+    expect(ideas.find((i: any) => i.id === fresh[0].id).suggested).toBe(false);
+    // Next week the unsaved ones are replaced; the saved one stays.
+    await maybeSuggestWeekly(new Date(Date.now() + 8 * 86400_000));
+    ideas = (await api.get('/api/content/ideas')).body.ideas;
+    expect(ideas.some((i: any) => i.id === fresh[0].id)).toBe(true);
+    expect(ideas.some((i: any) => i.id === fresh[1]?.id)).toBe(false);
+    expect(ideas.filter((i: any) => i.alsoStory && i.format === 'reel').length).toBeGreaterThan(5);
+    expect(ideas.filter((i: any) => !i.suggested && i.accounts.includes('a2')).length).toBeGreaterThan(20);
+  });
 });

@@ -58,6 +58,43 @@ integrationsRouter.get('/square/callback', requirePermission('integrations:manag
   }
 }));
 
+// ---------------- Instagram (Content Calendar) ----------------
+// Connect Instagram: one Facebook sign-in finds the accounts; each is matched to @addendum.salon, @addendumhair or
+// @addendumhairpro by its username and saved (encrypted) for posting. Owners re-enter their password first.
+integrationsRouter.get('/instagram/connect', requireOwnerReauth('integrations:manage'), ah(async (_req, res) => {
+  const { metaAuthorizeUrl } = await import('../integrations/instagram.js');
+  res.json({ url: await metaAuthorizeUrl() });
+}));
+integrationsRouter.get('/instagram/callback', requirePermission('integrations:manage'), ah(async (req, res) => {
+  const { code, state, error } = req.query as Record<string, string>;
+  const back = (q: string) => res.redirect(`/content?tab=settings&${q}`);
+  if (error || !code) return back('instagram=denied');
+  try {
+    const { metaCallback } = await import('../integrations/instagram.js');
+    const { contentAccounts } = await import('../domain/content.js');
+    const { saveCredentials } = await import('../integrations/credentials.js');
+    const found = await metaCallback(code, state);
+    const norm = (h: string) => h.toLowerCase().replace(/^@/, '').replace(/[^a-z0-9._]/g, '');
+    const values: Record<string, string> = {};
+    const linked: string[] = [];
+    for (const a of await contentAccounts()) {
+      const hit = found.find((f) => norm(f.username) === norm(a.handle));
+      if (!hit) continue;
+      const n = a.id.slice(1);
+      values[`INSTAGRAM_${n}_ACCOUNT_ID`] = hit.accountId;
+      values[`INSTAGRAM_${n}_TOKEN`] = hit.token;
+      linked.push(`@${hit.username}`);
+    }
+    if (linked.length) await saveCredentials('instagram', values, req.user!.id);
+    const others = found.filter((f) => !linked.includes(`@${f.username}`)).map((f) => `@${f.username}`);
+    await logAction(req, 'integration.instagram_connected', undefined, undefined, { linked, others });
+    back(`instagram=connected&linked=${encodeURIComponent(linked.join(', '))}&others=${encodeURIComponent(others.join(', '))}`);
+  } catch (e) {
+    console.error('[instagram] oauth callback failed', e instanceof IntegrationError ? e.technical ?? e.userMessage : e);
+    back(`instagram=failed&reason=${encodeURIComponent(e instanceof IntegrationError ? e.userMessage : 'The connection didn’t complete.')}`);
+  }
+}));
+
 // ---------------- Website Inquiries (Showit → Gmail) ----------------
 // Connecting the mailbox: Google's own sign-in (never a password or token typed into the CRM); owners re-enter theirs first.
 integrationsRouter.get('/gmail/connect', requireOwnerReauth('integrations:manage'), ah(async (_req, res) => {

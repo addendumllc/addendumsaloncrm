@@ -112,11 +112,14 @@ export const CREDENTIAL_SPECS: Record<CredentialProvider, { label: string; field
   },
   instagram: {
     label: 'Instagram (Content calendar auto-posting)',
-    requirement: 'For each account: an Instagram Business or Creator account linked to a Facebook Page, and a Meta app with instagram_content_publish. Only the accounts you fill in can auto-post; planning works without any.',
-    fields: [1, 2, 3].flatMap((n) => [
+    requirement: 'Easiest: enter your Meta app’s ID and secret here once, then use Connect Instagram in Content Calendar → Settings — it finds all three accounts. Or fill in each account’s ID and token by hand. Each account must be an Instagram Business or Creator account linked to a Facebook Page.',
+    fields: [
+      { key: 'META_APP_ID', label: 'Meta app ID', secret: false, validate: noSpaces, help: 'developers.facebook.com → My Apps → Create app (Business) → add “Instagram” (API setup with Facebook login). App settings → Basic → App ID. Valid OAuth redirect URI: https://<your CRM address>/api/integrations/instagram/callback' },
+      { key: 'META_APP_SECRET', label: 'Meta app secret', secret: true, validate: noSpaces, help: 'App settings → Basic → App secret.' },
+      ...[1, 2, 3].flatMap((n) => [
       { key: `INSTAGRAM_${n}_ACCOUNT_ID`, label: `Account ${n}: Instagram account ID`, secret: false, validate: noSpaces, placeholder: '17841…', help: n === 1 ? 'The Instagram Business account ID (Meta Graph API Explorer → me/accounts → the Page → instagram_business_account). The account names are set in Content calendar → Accounts.' : undefined },
-      { key: `INSTAGRAM_${n}_TOKEN`, label: `Account ${n}: access token`, secret: true, validate: noSpaces, help: n === 1 ? 'A long-lived Page access token with instagram_basic and instagram_content_publish (Page tokens made from a long-lived user token don’t expire).' : undefined },
-    ]),
+      { key: `INSTAGRAM_${n}_TOKEN`, label: `Account ${n}: access token`, secret: true, validate: noSpaces, help: n === 1 ? 'Filled in for you by Connect Instagram. By hand: a long-lived Page access token with instagram_basic and instagram_content_publish.' : undefined },
+    ])],
   },
   ai: {
     label: 'AI (Anthropic)',
