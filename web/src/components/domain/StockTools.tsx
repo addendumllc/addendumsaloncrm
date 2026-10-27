@@ -1058,7 +1058,10 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
   // no sales history is its own list — never counted as healthy.
   const matches = (i: StockForecastDTO, f: Filter) => (f === 'all' ? true : f === 'skipped' ? !!i.skippedUntil : i.skippedUntil ? false
     : f === 'alerts' ? isOut(i) || i.stockoutRisk : f === 'reorder' ? ['out', 'order_now', 'soon'].includes(i.status) : i.status === f);
-  const items = inStoreAll.filter((i) => matches(i, filter));
+  // Always by length (18", 22", 24"…, no length last), then alphabetical by name (the length left out of the name).
+  const lenOf = (i: StockForecastDTO) => { const l = hairLengthOf(i.label, i.sku); return l ? Number.parseInt(l, 10) : 999; };
+  const nameOf = (i: StockForecastDTO) => i.label.replace(/\b\d{2}\s*(?:"|”|''|inch(?:es)?\b|in\b)/gi, '').replace(/^[\s\-–·]+/, '').trim();
+  const items = inStoreAll.filter((i) => matches(i, filter)).sort((a, b) => lenOf(a) - lenOf(b) || nameOf(a).localeCompare(nameOf(b), undefined, { numeric: true, sensitivity: 'base' }));
   const FILTERS: { value: Filter; label: string }[] = [
     { value: 'reorder', label: 'Needs ordering' }, { value: 'out', label: 'Out of stock' }, { value: 'order_now', label: 'Order now' }, { value: 'soon', label: 'Reorder soon' },
     { value: 'watch', label: 'Watchlist' }, { value: 'healthy', label: 'Healthy' }, { value: 'no_sales', label: 'No sales history' }, { value: 'alerts', label: 'Stock alerts' },

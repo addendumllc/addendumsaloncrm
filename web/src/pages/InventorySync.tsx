@@ -111,7 +111,7 @@ export function InventorySyncPage() {
   return (
     <div>
       <PageHeader
-        title="Inventory & Replenishment"
+        title="Inventory"
         subtitle={<>{ABOUT[view === 'products' ? 'items' : view]}{' '}<span className="text-stone-light">· {data.lastSuccessfulSyncAt ? `Synced ${relative(data.lastSuccessfulSyncAt)}` : 'Never synced'}{data.running ? ' · syncing now' : ''}</span></>}
         actions={<>
           {view === 'items' || view === 'products'

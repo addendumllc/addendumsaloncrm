@@ -46,7 +46,7 @@ export function AnalyticsPage() {
   const N = useStoreNames();
   const [params, setParams] = useSearchParams();
   const nav = useNavigate();
-  // Sub-tabs: Addendum Salon · Addendum Hair · Both, then What to order, Inventory & Replenishment and Purchases.
+  // Sub-tabs: Addendum Salon · Addendum Hair · Both, then What to order, Inventory and Purchases.
   const page = (['order', 'inventory', 'purchases'] as const).find((p) => p === params.get('scope')) ?? null;
   const scope = params.get('scope') === 'salon' ? 'salon' : params.get('scope') === 'online' ? 'online' : 'all';
   const online = [N.shopify, N.shopify2].filter(Boolean).join(' + ');
@@ -79,7 +79,7 @@ export function AnalyticsPage() {
     const pick = (v: string) => setParams((p) => { const n = new URLSearchParams(p); if (v === 'all') n.delete('for'); else n.set('for', v); return n; });
     return (
       <div className="animate-rise">
-        <PageHeader title={page === 'order' ? 'What to order' : 'Inventory & Replenishment'}
+        <PageHeader title={page === 'order' ? 'What to order' : 'Inventory'}
           subtitle={page === 'order' ? 'By urgency, collection or supplier — from sales, lead times and what’s on order.' : 'Stock in the salon (Square) and online (Shopify), kept separate. Open a product for its sales, pricing and reorder details.'}
           actions={page === 'inventory' && <Segmented size="sm" value={store} onChange={pick} options={[{ value: 'all', label: 'All stores' }, { value: 'salon', label: 'Addendum Salon' }, { value: 'hair', label: 'Addendum Hair' }]} />} />
         <SectionPicker path="/analytics" names={N} can={canDo} className="mb-4" />

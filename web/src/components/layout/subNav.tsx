@@ -97,7 +97,7 @@ export const SUB_NAV: Record<string, SubNav> = {
       { to: '/analytics', label: 'Both' },
       // Inventory reports live here too: what to order, the inventory overview, and every store's purchases.
       { to: '/analytics?scope=order', label: 'What to order', anyOf: ['analytics:read'] },
-      { to: '/analytics?scope=inventory', label: 'Inventory & Replenishment', anyOf: ['inventory:sync'] },
+      { to: '/analytics?scope=inventory', label: 'Inventory', anyOf: ['inventory:sync'] },
       { to: '/analytics?scope=purchases', label: 'Purchases', anyOf: ['analytics:read', 'inventory:sync', 'hair:manage'] },
     ],
   },

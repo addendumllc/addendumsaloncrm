@@ -38,7 +38,7 @@ export const NAV: { to: string; label: string; icon: typeof Home; end?: boolean;
   { to: '/inventory-sync', label: 'Inventory', icon: ArrowLeftRight, anyOf: ['inventory:sync'] },
   { to: '/my-commission', label: 'Earnings & Goals', icon: Wallet, anyOf: ['commission:own'] },
   { to: '/commission', label: 'Team Payroll', icon: CircleDollarSign, anyOf: ['commission:team', 'commission:approve'] },
-  // Analytics: the stores' reports, plus What to order, Inventory & Replenishment and Purchases (its sub-tabs).
+  // Analytics: the stores' reports, plus What to order, Inventory and Purchases (its sub-tabs).
   { to: '/analytics', label: 'Analytics', icon: BarChart3, anyOf: ['analytics:read', 'revenue:projections', 'inventory:sync', 'hair:manage'] },
   // Everyone ('' = no permission needed): their own profile, display and password, plus the salon settings they're allowed.
   { to: '/settings', label: 'Settings', icon: Settings, anyOf: [''] },
