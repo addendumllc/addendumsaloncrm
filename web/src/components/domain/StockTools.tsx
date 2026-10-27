@@ -149,7 +149,8 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
   const [sheet, setSheet] = useState(false);
   const [replacing, setReplacing] = useState(false);
   // Reorder fields (supplier, cost, lead time…) are hidden until asked for, so the everyday view is just SKU and stock.
-  const [details, setDetails] = useState(() => { if (setup) return true; try { return localStorage.getItem('stock-products-details') === '1'; } catch { return false; } });
+  // Two views of the table, so neither is cramped: stock & SKU, or the ordering details (remembered on this device).
+  const [details, setDetails] = useState(() => { try { const v = localStorage.getItem('stock-products-details'); return v == null ? !!setup : v === '1'; } catch { return !!setup; } });
   const showDetails = (v: boolean) => { setDetails(v); try { localStorage.setItem('stock-products-details', v ? '1' : '0'); } catch { /* private window */ } };
   // What didn't save last time (stays until dismissed; those cells keep their edits).
   const [problems, setProblems] = useState<StockApplyResultDTO['results']>([]);
@@ -299,9 +300,8 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
         <Button size="sm" variant="ghost" icon={<Replace className="h-4 w-4" />} onClick={() => setReplacing(true)}>Find &amp; replace in SKUs</Button>
         <Button size="sm" variant="ghost" icon={<Download className="h-4 w-4" />} onClick={download}>Download spreadsheet</Button>
         <Button size="sm" variant="ghost" icon={<FileUp className="h-4 w-4" />} onClick={() => setSheet(true)}>Upload spreadsheet</Button>
-        <label className="ml-auto flex cursor-pointer items-center gap-2 text-ink-soft">
-          <input type="checkbox" checked={details} onChange={(e) => showDetails(e.target.checked)} />Show reorder details
-        </label>
+        <Segmented size="sm" className="ml-auto hidden sm:inline-flex" value={details ? 'ordering' : 'stock'} onChange={(v) => showDetails(v === 'ordering')}
+          options={[{ value: 'stock', label: 'Stock & SKU' }, { value: 'ordering', label: 'Ordering details' }]} />
       </div>
       {dirty > 0 && (
         <div className="sticky top-0 z-10 mb-3 flex flex-wrap items-center gap-2 rounded-xl2 border border-amber/40 bg-amber-tint px-4 py-2 text-[13px]">
@@ -363,13 +363,19 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
         {shown.length > 200 && <li className="px-1 text-[12px] text-stone">Showing the first 200 — search to narrow it down.</li>}
       </ul>
       <div className="hidden overflow-x-auto rounded-xl2 border border-line bg-white sm:block">
-        <table className={cx('w-full text-left text-[14px]', details ? 'min-w-[1100px]' : 'min-w-[800px]')}>
+        <table className={cx('w-full text-left text-[14px]', details ? 'min-w-[960px]' : 'min-w-[760px]')}>
           <thead className="border-b border-line bg-mist/50 text-[11px] uppercase tracking-wide text-stone">
             <tr>
               <th className="w-8 pl-4"><span className="sr-only">Select</span></th>
-              <th className="px-4 py-2.5 font-medium">Product</th><th className="px-2 py-2.5 font-medium">SKU</th><th className="px-2 py-2.5 font-medium">In stock</th><th className="px-2 py-2.5 font-medium">New count</th>
-              {details && <><th className="px-2 py-2.5 font-medium">Supplier</th><th className="px-2 py-2.5 font-medium">Cost $</th><th className="px-2 py-2.5 font-medium" title="Production days (blank = the supplier's)">Lead days</th><th className="px-2 py-2.5 font-medium" title="Transit days (blank = the supplier's)">Ship days</th><th className="px-2 py-2.5 font-medium" title="Extra days of stock to keep">Safety days</th><th className="px-2 py-2.5 font-medium" title="Minimum order quantity">Min order</th><th className="px-2 py-2.5 font-medium">Case size</th></>}
-              <th className="px-2 py-2.5 font-medium" title="Discontinued or Not tracked: left out of syncing and lists">Status</th>
+              <th className="px-4 py-2.5 font-medium">Product</th>
+              {!details && <><th className="px-2 py-2.5 font-medium">SKU</th><th className="px-2 py-2.5 font-medium">In stock</th><th className="px-2 py-2.5 font-medium">New count</th>
+              <th className="px-2 py-2.5 font-medium" title="Discontinued or Not tracked: left out of syncing and lists">Status</th></>}
+              {details && <><th className="px-2 py-2.5 font-medium">Supplier</th><th className="px-2 py-2.5 font-medium">Cost each</th>
+                <th className="px-2 py-2.5 text-center font-medium" title="Production days (blank = the supplier's)">Lead<span className="block normal-case tracking-normal text-stone-light">days</span></th>
+                <th className="px-2 py-2.5 text-center font-medium" title="Transit days (blank = the supplier's)">Ship<span className="block normal-case tracking-normal text-stone-light">days</span></th>
+                <th className="px-2 py-2.5 text-center font-medium" title="Extra days of stock to keep">Safety<span className="block normal-case tracking-normal text-stone-light">days</span></th>
+                <th className="px-2 py-2.5 text-center font-medium" title="Minimum order quantity">Min<span className="block normal-case tracking-normal text-stone-light">order</span></th>
+                <th className="px-2 py-2.5 text-center font-medium">Case<span className="block normal-case tracking-normal text-stone-light">size</span></th></>}
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -378,17 +384,19 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
               return (
               <tr key={p.key} className={cx(rowChanged && 'bg-amber-tint/40')}>
                 <td className="pl-4"><input type="checkbox" className="h-4 w-4 accent-plum" checked={picked.has(p.key)} onChange={() => setPicked((x) => { const n = new Set(x); if (n.has(p.key)) n.delete(p.key); else n.add(p.key); return n; })} aria-label={`Select ${p.label}`} /></td>
-                <td className="max-w-[340px] px-4 py-2.5">
+                <td className="px-4 py-2.5">
                   <span className="flex items-start gap-3">
                     <ProductThumb src={p.imageUrl} alt={p.label} />
                     <span className="min-w-0">
-                      <span className="block truncate text-ink" title={p.label}>{p.label}</span>
+                      <span className="block text-ink" title={p.label}>{p.label}</span>
+                      {/* Ordering details: the SKU under the name (it's edited in Stock & SKU). */}
+                      {details && <span className="block font-mono text-[12px] text-stone">{p.sku ?? 'No SKU'}</span>}
                       <Collections p={p} />
                       {badgeFor(p)}
                     </span>
                   </span>
                 </td>
-                <td className="w-44 px-2 py-2"><input className={cx(inp, 'font-mono', changed(p, 'sku', p.sku ?? '') && yellow)} placeholder="No SKU" value={val(p, 'sku', p.sku ?? '')} onChange={(e) => set(p.key, { sku: e.target.value })} aria-label={`SKU for ${p.label}`} /></td>
+                {!details && <><td className="w-44 px-2 py-2"><input className={cx(inp, 'font-mono', changed(p, 'sku', p.sku ?? '') && yellow)} placeholder="No SKU" value={val(p, 'sku', p.sku ?? '')} onChange={(e) => set(p.key, { sku: e.target.value })} aria-label={`SKU for ${p.label}`} /></td>
                 <td className="px-2 py-2"><StockCell p={p} store2={data.store2} /></td>
                 <td className={cx('px-2 py-2', p.kind === 'separate' ? 'w-36' : 'w-28')}>
                   {p.kind === 'separate' ? (
@@ -399,24 +407,31 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
                       {p.shopifyQty != null && <label className="flex items-center gap-1.5"><span className="w-11 shrink-0 text-[11px] text-stone" title={data.store2 ? `${N.shopify} and ${data.store2}` : N.shopify}>Online</span>
                         <input inputMode="numeric" className={cx(inp, 'num', changed(p, 'online', '') && yellow)} placeholder={String(p.shopifyQty)} value={val(p, 'online', '')} onChange={(e) => set(p.key, { online: e.target.value })} aria-label={`New online count for ${p.label}`} /></label>}
                     </div>
-                  ) : <input inputMode="numeric" className={cx(inp, 'num', changed(p, 'count', '') && yellow)} placeholder="Set…" value={val(p, 'count', '')} onChange={(e) => set(p.key, { count: e.target.value })} aria-label={`New count for ${p.label}`} />}
+                  ) : <input inputMode="numeric" className={cx(inp, 'num', changed(p, 'count', '') && yellow)} placeholder="New" value={val(p, 'count', '')} onChange={(e) => set(p.key, { count: e.target.value })} aria-label={`New count for ${p.label}`} />}
                 </td>
+                <td className="w-44 px-2 py-2">
+                  <select className={cx(inp, edits[p.key]?.status && edits[p.key]!.status !== p.status && yellow)} value={edits[p.key]?.status ?? p.status} onChange={(e) => set(p.key, { status: e.target.value as StockProductStatus })} aria-label={`Status of ${p.label}`}>
+                    {Object.entries(STATUS_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </td></>}
                 {details && <>
-                  <td className="w-36 px-2 py-2"><input className={cx(inp, changed(p, 'supplier', p.supplier ?? '') && yellow)} placeholder={fallbackSupplier ?? ''} value={val(p, 'supplier', p.supplier ?? '')} onChange={(e) => set(p.key, { supplier: e.target.value })} /></td>
-                  <td className="w-24 px-2 py-2"><input inputMode="decimal" className={cx(inp, 'num', changed(p, 'cost', usd(p.costCents)) && yellow)} value={val(p, 'cost', usd(p.costCents))} onChange={(e) => set(p.key, { cost: e.target.value })} /></td>
+                  <td className="w-52 px-2 py-2">
+                    <select className={cx(inp, changed(p, 'supplier', p.supplier ?? '') && yellow)} value={val(p, 'supplier', p.supplier ?? '')} onChange={(e) => set(p.key, { supplier: e.target.value })} aria-label={`Supplier of ${p.label}`}>
+                      <option value="">{fallbackSupplier ? `${fallbackSupplier} (default)` : 'None'}</option>
+                      {(supplierList ?? []).map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}
+                      {p.supplier && !(supplierList ?? []).some((x) => x.name === p.supplier) && <option value={p.supplier}>{p.supplier}</option>}
+                    </select>
+                  </td>
+                  <td className="w-28 px-2 py-2"><span className="relative block"><span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-stone">$</span>
+                    <input inputMode="decimal" className={cx(inp, 'num pl-6', changed(p, 'cost', usd(p.costCents)) && yellow)} placeholder="—" value={val(p, 'cost', usd(p.costCents))} onChange={(e) => set(p.key, { cost: e.target.value })} aria-label={`Cost of ${p.label}`} /></span></td>
                   {(['lead', 'ship', 'safety', 'moq', 'caseSize'] as const).map((k) => {
                     const base = String({ lead: p.leadTimeDays, ship: p.shippingDays, safety: p.safetyDays, moq: p.moq, caseSize: p.caseSize }[k] ?? '');
                     // Blank uses the supplier's default (shown faintly), so a supplier change carries through.
                     const sup = supplierOf(p);
                     const def = k === 'lead' ? sup?.leadTimeDays : k === 'ship' ? sup?.shippingDays : k === 'moq' ? sup?.defaultMoq : null;
-                    return <td key={k} className="w-20 px-2 py-2"><input inputMode="numeric" className={cx(inp, 'num', changed(p, k, base) && yellow)} placeholder={def != null ? String(def) : ''} title={def != null ? `Blank = ${sup!.name}’s default (${def})` : undefined} value={val(p, k, base)} onChange={(e) => set(p.key, { [k]: e.target.value })} /></td>;
+                    return <td key={k} className="w-[4.5rem] px-1.5 py-2"><input inputMode="numeric" className={cx(inp, 'num text-center', changed(p, k, base) && yellow)} placeholder={def != null ? String(def) : ''} title={def != null ? `Blank = ${sup!.name}’s default (${def})` : undefined} value={val(p, k, base)} onChange={(e) => set(p.key, { [k]: e.target.value })} /></td>;
                   })}
                 </>}
-                <td className="w-36 px-2 py-2">
-                  <select className={cx(inp, edits[p.key]?.status && edits[p.key]!.status !== p.status && yellow)} value={edits[p.key]?.status ?? p.status} onChange={(e) => set(p.key, { status: e.target.value as StockProductStatus })} aria-label={`Status of ${p.label}`}>
-                    {Object.entries(STATUS_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                  </select>
-                </td>
               </tr>
               );
             })}
