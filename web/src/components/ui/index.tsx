@@ -219,7 +219,7 @@ export function Modal({ open, onClose, title, children, footer, wide, xl, side }
           </button>
         </div>
         <div className="app-content flex-1 overflow-y-auto px-5 py-4">{children}</div>
-        {/* modal-footer: its buttons keep one compact size whatever the button size setting (index.css). */}
+        {/* modal-footer: its buttons are sized like every other button (the button size setting). */}
         {footer && <div className="modal-footer flex flex-wrap items-center justify-end gap-2 border-t border-line px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">{footer}</div>}
       </div>
     </div>,
