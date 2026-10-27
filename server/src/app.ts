@@ -30,6 +30,7 @@ import { tasksRouter } from './routes/tasks.js';
 import { accessRouter } from './routes/access.js';
 import { announcementsRouter } from './routes/announcements.js';
 import { projectionsRouter } from './routes/projections.js';
+import { contentRouter } from './routes/content.js';
 import { networkGate } from './auth/access.js';
 import { webhooksRouter } from './routes/webhooks.js';
 
@@ -91,6 +92,16 @@ export function createApp() {
   app.get('/brand/font/:slot', (req, res, next) => serveFont(req, res).catch(next));
   app.get('/brand/fontfile/:id', (req, res, next) => serveFontFile(req, res).catch(next));
   app.get('/brand/login-image', (req, res, next) => serveLoginImage(req, res).catch(next));
+  // Content calendar media for Instagram to download when posting: public, but only with the signed link.
+  app.get('/content-media/:id/:sig', (req, res, next) => (async () => {
+    const { checkMediaSignature, readMedia } = await import('./domain/content.js');
+    if (!/^[0-9a-f-]{36}$/.test(req.params.id) || !(await checkMediaSignature(req.params.id, req.params.sig))) return res.status(404).end();
+    const m = await readMedia(req.params.id);
+    if (!m) return res.status(404).end();
+    res.setHeader('Content-Type', m.mime);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(m.bytes);
+  })().catch(next));
   // Stylists' booking pages (public): addendumsalon.info/book and /book/<first name>.
   app.get('/book', (_req, res, next) => stylistIndexPage().then((h) => res.type('html').setHeader('Cache-Control', 'no-cache').send(h)).catch(next));
   app.get('/book/:slug', (req, res, next) => stylistPage(String(req.params.slug)).then((h) => (h ? res.type('html').setHeader('Cache-Control', 'no-cache').send(h) : res.redirect(302, '/book'))).catch(next));
@@ -113,6 +124,7 @@ export function createApp() {
   app.use('/api/access', accessRouter);
   app.use('/api/announcements', announcementsRouter);
   app.use('/api/projections', projectionsRouter);
+  app.use('/api/content', contentRouter);
   app.use('/api', miscRouter);
   app.use('/api', settingsRouter);
   app.use('/api/clients', clientsRouter);

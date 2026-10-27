@@ -12,7 +12,7 @@ import { setRedactedSecrets } from '../lib/redact.js';
  *   uses them with no other changes. A saved value wins over the environment.
  * - Secret fields are write-only from the admin screen: it can see whether one is set and where from, never the value.
  */
-export type CredentialProvider = 'square' | 'shopify' | 'shopify2' | 'highlevel' | 'highlevel_hair' | 'email' | 'ai' | 'google';
+export type CredentialProvider = 'square' | 'shopify' | 'shopify2' | 'highlevel' | 'highlevel_hair' | 'email' | 'ai' | 'google' | 'instagram';
 
 export interface CredentialField {
   key: string; // environment variable name
@@ -109,6 +109,14 @@ export const CREDENTIAL_SPECS: Record<CredentialProvider, { label: string; field
       { key: 'GOOGLE_CLIENT_ID', label: 'OAuth client ID', secret: false, required: true, validate: noSpaces, placeholder: '…apps.googleusercontent.com', help: 'Google Cloud console → APIs & Services → Credentials → Create OAuth client ID (Web application). Enable the Gmail API. Authorized redirect URI: https://<your CRM address>/api/integrations/gmail/callback' },
       { key: 'GOOGLE_CLIENT_SECRET', label: 'OAuth client secret', secret: true, required: true, validate: noSpaces },
     ],
+  },
+  instagram: {
+    label: 'Instagram (Content calendar auto-posting)',
+    requirement: 'For each account: an Instagram Business or Creator account linked to a Facebook Page, and a Meta app with instagram_content_publish. Only the accounts you fill in can auto-post; planning works without any.',
+    fields: [1, 2, 3].flatMap((n) => [
+      { key: `INSTAGRAM_${n}_ACCOUNT_ID`, label: `Account ${n}: Instagram account ID`, secret: false, validate: noSpaces, placeholder: '17841…', help: n === 1 ? 'The Instagram Business account ID (Meta Graph API Explorer → me/accounts → the Page → instagram_business_account). The account names are set in Content calendar → Accounts.' : undefined },
+      { key: `INSTAGRAM_${n}_TOKEN`, label: `Account ${n}: access token`, secret: true, validate: noSpaces, help: n === 1 ? 'A long-lived Page access token with instagram_basic and instagram_content_publish (Page tokens made from a long-lived user token don’t expire).' : undefined },
+    ]),
   },
   ai: {
     label: 'AI (Anthropic)',

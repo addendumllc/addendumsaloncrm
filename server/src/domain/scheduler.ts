@@ -8,6 +8,7 @@ import { maybeAutoSyncCommission } from './commission.js';
 import { maybeAutoSync } from './inventorySync.js';
 import { runRules } from './rulesEngine.js';
 import { maybePurgeOldInternalTasks } from './tasks.js';
+import { publishDueContent, remindContent } from './content.js';
 import { checkPreorders, checkRecounts, checkStockAlerts } from './preorderAlerts.js';
 import { maybeProcessShowit } from './showit.js';
 import { syncSquareInventory } from './squareInventory.js';
@@ -29,6 +30,7 @@ export function startScheduler() {
     await guard('inventory-email', () => retryInventoryEmails());
     await guard('inventory-sync', () => maybeAutoSync()); // only when automatic Square ↔ Shopify sync is on and due
     await guard('commission-sync', () => maybeAutoSyncCommission()); // only when commission is on and the interval has passed
+    await guard('content-posting', () => publishDueContent()); // Instagram posts due now (auto-posting accounts)
     if (tick % 5 === 0) {
       await guard('rules', () => runRules());
       await guard('hair-highlevel', () => maybeAutoPullHairClients()); // hourly, only when turned on
@@ -37,6 +39,7 @@ export function startScheduler() {
       await guard('preorders', () => checkPreorders()); // new online pre-orders → bell for inventory managers
       await guard('stock-alerts', () => checkStockAlerts()); // selling products out of stock or at risk → bell
       await guard('recount-alerts', () => checkRecounts()); // extensions dropped to the recount level → bell
+      await guard('content-reminders', () => remindContent()); // the person on a post: the day before and on the day
     }
     if (tick % Math.max(1, config().SQUARE_SYNC_INTERVAL_MINUTES) === 0) {
       await guard('square-sync', async () => {

@@ -48,6 +48,16 @@ export const api = {
   patch: <T>(url: string, body: Json = {}) => request<T>('PATCH', url, body),
   put: <T>(url: string, body: Json = {}) => request<T>('PUT', url, body),
   del: <T>(url: string) => request<T>('DELETE', url),
+  /** Uploads one file as the request body (e.g. Content calendar photos and videos). */
+  upload: async <T>(url: string, file: File): Promise<T> => {
+    const res = await fetch(`/api${url}`, {
+      method: 'POST', credentials: 'same-origin', body: file,
+      headers: { Accept: 'application/json', 'Content-Type': file.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name), 'X-Requested-With': 'addendum-crm', ...(touchFirst ? { 'X-Addendum-Device': 'touch' } : {}) },
+    }).catch(() => { throw new ApiError(0, "Can't reach the salon server. Check your internet connection."); });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new ApiError(res.status, data?.error?.message ?? (res.status === 413 ? 'That file is too big.' : 'The upload didn’t go through.'), data?.error?.code);
+    return data as T;
+  },
 };
 
 export const qs = (params: Record<string, string | number | boolean | undefined | null>) => {

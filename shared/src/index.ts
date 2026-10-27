@@ -66,6 +66,7 @@ export const PERMISSION_CATEGORIES = [
   'Audit logs',
   'Location and access',
   'Time clock',
+  'Marketing',
 ] as const;
 
 export const PERMISSIONS_CATALOG: PermissionDef[] = [
@@ -134,6 +135,7 @@ export const PERMISSIONS_CATALOG: PermissionDef[] = [
   // Which businesses (workspaces) a person can switch to. What they see inside still follows their other permissions.
   { key: 'workspace:salon', category: 'Businesses', action: 'view', label: 'Addendum Salon workspace', description: 'Can switch to the Addendum Salon workspace (its look, menu and defaults).' },
   { key: 'workspace:hair', category: 'Businesses', action: 'view', label: 'Addendum Hair workspace', description: 'Can switch to the Addendum Hair workspace. Data in it (Hair clients, Shopify inventory…) still needs its own permission.' },
+  { key: 'content:manage', category: 'Marketing', action: 'edit', label: 'Content calendar', description: 'Plan Instagram posts for the salon’s accounts, upload their photos and videos, and schedule auto-posting.' },
   { key: 'hair:manage', category: 'Addendum Hair', action: 'edit', label: 'Manage Addendum Hair clients and tasks', description: 'Addendum Hair’s own client list, tasks and follow-ups (separate from salon clients).' },
   { key: 'suppliers:details', category: 'Square and Shopify sync', action: 'view', label: 'See supplier company names and contacts', description: 'Each supplier’s real company name, email, phone, website and notes. Without it, people with inventory access see only the name a supplier is shown as (e.g. Addendum Hair).', sensitive: true },
 
@@ -2446,4 +2448,22 @@ export function suggestHairTask(email: { subject?: string; body?: string }, toda
   const title = (subject || firstLine || 'Email from a client').replace(/^(re|fwd?):\s*/i, '').slice(0, 120);
   const dueOn = type === 'reply' ? plus(1) : type === 'order' ? plus(2) : type === 'check_in' ? plus(7) : plus(3);
   return { type, title, dueOn, excerpt: body.slice(0, 600) };
+}
+
+// ---------------- Content calendar (Instagram) ----------------
+/** One of the salon's Instagram accounts (names in Settings; its connection in API & Integrations). */
+export interface ContentAccount { id: 'a1' | 'a2' | 'a3'; name: string; handle: string; color: string; connected: boolean }
+export type ContentPostType = 'feed' | 'reel' | 'story' | 'carousel';
+export type ContentStatus = 'idea' | 'draft' | 'ready' | 'scheduled' | 'publishing' | 'posted' | 'failed';
+export interface ContentMediaDTO { id: string; mime: string; name: string | null; size: number; url: string }
+export interface ContentPostDTO {
+  id: string; account: ContentAccount['id']; type: ContentPostType; scheduledAt: string | null; caption: string; status: ContentStatus;
+  /** Posted by the CRM at the scheduled time (the account must be connected). */
+  autoPost: boolean;
+  media: ContentMediaDTO[];
+  /** What it promotes: a product (by product key) or a service. */
+  link: { kind: 'product' | 'service'; ref: string; label: string } | null;
+  assignedStaffId: string | null; assignedName: string | null; notes: string | null;
+  permalink: string | null; postedAt: string | null; error: string | null;
+  createdAt: string; updatedAt: string;
 }

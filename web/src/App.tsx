@@ -16,6 +16,7 @@ import { LoginPage } from './pages/Login';
 const OnboardingPage = lazy(() => import('./pages/Onboarding').then((m) => ({ default: m.OnboardingPage })));
 import { DashboardPage } from './pages/Dashboard';
 import { FollowUpsPage } from './pages/FollowUps';
+import { ContentPage } from './pages/Content';
 import { TasksPage } from './pages/Tasks';
 import { AnnouncementsPage } from './components/domain/Announcements';
 import { AppointmentsPage } from './pages/Appointments';
@@ -140,6 +141,7 @@ function SignedIn() {
     <>{awayNote}{can('timeclock:use') && <FirstOpenOfDay userId={me!.id} />}<Routes>
       <Route path="/" element={canAny('dashboard:view') ? <DashboardPage /> : <Navigate to={home} replace />} />
       <Route path="/follow-ups" element={guard(['tasks:read_all', 'tasks:read_own'], <FollowUpsPage />)} />
+      <Route path="/content" element={guard(['content:manage'], <ContentPage />)} />
       <Route path="/tasks" element={guard(['tasks:read_all', 'tasks:read_own', 'hair:manage'], <TasksPage />)} />
       {/* For people without the dashboard (stylists by default); everyone else sees announcements on the dashboard. */}
       <Route path="/announcements" element={guard(['announcements:read', 'announcements:publish', 'announcements:manage'], <AnnouncementsPage />)} />

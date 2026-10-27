@@ -106,6 +106,14 @@ async function run(p: CredentialProvider): Promise<TestResult> {
       const r = await hl.testConnection();
       return { ok: true, message: `Connected to HighLevel${r.locationName ? ` · ${r.locationName}` : ''}.`, warnings };
     }
+    case 'instagram': {
+      const { instagramAccounts, InstagramApi } = await import('./instagram.js');
+      const found = instagramAccounts(c);
+      if (!found.length) return { ok: true, message: 'Saved. No account has both an ID and a token yet.', warnings };
+      const names: string[] = [];
+      for (const a of found) names.push(`${a.slot}: @${await new InstagramApi(a.accountId, a.token).username()}`);
+      return { ok: true, message: `Connected — ${names.join(', ')}.`, warnings };
+    }
     case 'google':
       // Nothing to call yet: the client is used when an administrator connects the mailbox (Google’s sign-in).
       return { ok: true, message: 'Saved. Now connect the mailbox under Settings → Website Inquiries (Google’s sign-in).', warnings };
