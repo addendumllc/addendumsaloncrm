@@ -101,6 +101,8 @@ export interface ShopifyService {
   productVariants(productIds: string[]): Promise<ShopifyProductVariants[]>;
   /** Adds variants to one product, stocked at the location with 0 (needs write_products). */
   addVariants(productId: string, variants: ShopifyNewVariant[], locationId: string): Promise<{ sku: string; inventoryItemId: string }[]>;
+  /** Puts one value of an option first (e.g. "Sample Swatch" above "18 inch - 120g"), so it shows first (write_products). */
+  moveOptionValueFirst(productId: string, optionName: string, value: string): Promise<void>;
 }
 
 /** Demo prices and costs per listing (by inventory item), shared by both demo stores. */
@@ -220,6 +222,9 @@ export class MockShopifyService implements ShopifyService {
   async orderWho(orderIds: string[]) { return demoWho(orderIds); }
   async productVariants(productIds: string[]) { return demoProductVariants(MockShopifyService.view(), '1', productIds); }
   async addVariants(productId: string, variants: ShopifyNewVariant[]) { return demoAddVariants(MockShopifyService.catalog, MockShopifyService.stock, '1', productId, variants); }
+  /** Demo: remembered, so tests can see what was moved first. */
+  static firstValues: { productId: string; option: string; value: string }[] = [];
+  async moveOptionValueFirst(productId: string, option: string, value: string) { MockShopifyService.firstValues.push({ productId, option, value }); }
 
   /** Demo sales: a few units of each tracked product most days, the same every time. */
   async listOrderLines(updatedSince: Date) {
@@ -298,6 +303,7 @@ export class MockShopifyStore2 implements ShopifyService {
   async orderWho(orderIds: string[]) { return demoWho(orderIds); }
   async productVariants(productIds: string[]) { return demoProductVariants(MockShopifyStore2.view(), '2', productIds); }
   async addVariants(productId: string, variants: ShopifyNewVariant[]) { return demoAddVariants(MockShopifyStore2.catalog, MockShopifyStore2.stock, '2', productId, variants); }
+  async moveOptionValueFirst(productId: string, option: string, value: string) { MockShopifyService.firstValues.push({ productId, option, value }); }
   async setAvailable(_loc: string, quantities: ShopifySetQuantity[], key: string) {
     if (MockShopifyStore2.applied.has(key)) return;
     for (const q of quantities) if (q.changeFromQuantity != null && (MockShopifyStore2.stock.get(q.inventoryItemId) ?? 0) !== q.changeFromQuantity) throw new ShopifyStaleQuantityError();

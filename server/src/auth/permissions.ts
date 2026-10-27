@@ -77,6 +77,7 @@ const ANY_SIGNED_IN: string[] = [];
 export const API_RULES: { method: string; path: RegExp; anyOf: string[] }[] = [
   // Always available once signed in: limited settings (salon name, time zone, colours, Order Hair defaults).
   { method: 'GET', path: /^\/settings$/, anyOf: ANY_SIGNED_IN },
+  { method: 'GET', path: /^\/settings\/booking-links$/, anyOf: ANY_SIGNED_IN },
   // Location & Access: everyone can see whether they're on the salon network; changing it is Owner/Admin only (checked in the route).
   { method: 'GET', path: /^\/access\/status$/, anyOf: ANY_SIGNED_IN },
   // Each person's own sidebar order and hidden items (Customize menu).

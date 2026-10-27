@@ -143,10 +143,10 @@ async function syncReferenceData(svc: SquareService) {
   }
   for (const s of services) {
     await db().query(
-      `INSERT INTO services(square_variation_id, square_item_id, name, duration_minutes, price_cents) VALUES ($1,$2,$3,$4,$5)
+      `INSERT INTO services(square_variation_id, square_item_id, name, duration_minutes, price_cents, team_member_ids, available_for_booking) VALUES ($1,$2,$3,$4,$5,$6,$7)
        ON CONFLICT (square_variation_id) DO UPDATE SET name = EXCLUDED.name, duration_minutes = EXCLUDED.duration_minutes,
-         price_cents = EXCLUDED.price_cents, updated_at = now()`,
-      [s.variationId, s.itemId, s.name, s.durationMinutes, s.priceCents],
+         price_cents = EXCLUDED.price_cents, team_member_ids = EXCLUDED.team_member_ids, available_for_booking = EXCLUDED.available_for_booking, updated_at = now()`,
+      [s.variationId, s.itemId, s.name, s.durationMinutes, s.priceCents, s.teamMemberIds ?? [], s.availableForBooking !== false],
     );
   }
   await applySuggestedRebookingDefaults();

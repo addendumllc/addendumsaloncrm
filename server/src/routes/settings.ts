@@ -64,7 +64,7 @@ const business = z.object({ name: z.string().trim().min(1, 'enter a name').max(4
 const settingsPatch = z.object({
   business: z.object({
     name: z.string().max(100), address: z.string().max(300), phone: z.string().max(40), website: z.string().max(300),
-    bookingUrl: z.string().max(300), reviewUrl: z.string().max(300), timezone: z.string().max(60), hours: z.string().max(300),
+    bookingUrl: z.string().max(300), squareBookingBase: z.string().max(300).optional(), reviewUrl: z.string().max(300), timezone: z.string().max(60), hours: z.string().max(300),
   }).partial().optional(),
   rules: z.object({
     newLeadHours: num(0, 168), leadNoResponseHours: num(1, 720), leadSecondNoResponseHours: num(1, 1440),
@@ -277,6 +277,12 @@ settingsRouter.delete('/settings/logo', requirePermission('settings:write'), ah(
 }));
 
 /** Public (the sign-in screen and browser tab use it). Versioned URLs are cached for good. */
+// Stylists' booking page links (Settings → Salon details): one per bookable stylist.
+settingsRouter.get('/settings/booking-links', ah(async (_req, res) => {
+  const { stylistLinks } = await import('../domain/bookingPages.js');
+  res.json({ links: await stylistLinks() });
+}));
+
 export async function serveLogo(req: Request, res: Response) {
   const logo = await getKV<{ mime: string; data: string }>(LOGO_KEY);
   if (!logo) return res.status(404).end();

@@ -1163,6 +1163,8 @@ export interface AppSettings {
     phone: string;
     website: string;
     bookingUrl: string;
+    /** Square's own booking site for the salon's location (book.squareup.com/appointments/…/location/…): stylists' booking pages link each service there. */
+    squareBookingBase?: string;
     reviewUrl: string;
     timezone: string;
     hours: string;

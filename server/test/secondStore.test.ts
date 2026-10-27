@@ -336,6 +336,10 @@ describe('Add a sample swatch', () => {
       const added = MockShopifyService.catalog.find((c) => c.sku === 'SWATCH-BMCI')!;
       expect(MockShopifyService.stock.get(added.inventoryItemId)).toBe(0);
       expect(DEMO_PRODUCTS.find((p) => p.sku === 'SWATCH-BMCI')).toMatchObject({ itemId: 'item-clips', variationName: 'Sample Swatch', priceCents: null });
+      // Shown first: above 18" in Square, and moved to the top of its option in both Shopify stores.
+      const item = DEMO_PRODUCTS.filter((p) => p.itemId === 'item-clips').map((p) => p.variationName);
+      expect(item[0]).toBe('Sample Swatch');
+      expect(MockShopifyService.firstValues.filter((x) => x.value === 'Sample Swatch').length).toBe(2);
       // Already there: nothing more to create.
       expect((await api.post('/api/inventory-sync/stock/swatches/preview', body)).body.plan).toEqual([]);
     } finally {

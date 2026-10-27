@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     phone: '',
     website: 'https://addendumsalon.square.site',
     bookingUrl: 'https://addendumsalon.square.site/s/appointments',
+    squareBookingBase: 'https://book.squareup.com/appointments/oerwtgecartjiw/location/LE47CFZ0ED4X1',
     // Google: opens the "write a review" box for Addendum Salon.
     reviewUrl: 'https://www.google.com/search?q=Addendum+Salon+12853+El+Camino+Real+San+Diego+CA#lrd=0x80dc0ecd7fb6aaab:0x3e215c50708febbd,3,,,,',
     timezone: 'America/Los_Angeles',

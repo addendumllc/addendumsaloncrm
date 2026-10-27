@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { Plus, X, Bell } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '../../api/client';
+import { Copy, Plus, X, Bell } from 'lucide-react';
 import { Button, Field, Toggle, useToast } from '../../components/ui';
 import { Card, NumberField, SaveBar, useCan, useSection } from './shared';
 import { Tc } from '../../lib/titleCase';
@@ -24,6 +26,7 @@ export function BusinessSettings({ onSaved }: { onSaved?: () => void }) {
         <Field label="Address" className="sm:col-span-2"><input className="field" value={d.address} disabled={locked} onChange={(e) => b.set('address', e.target.value)} /></Field>
         <Field label="Website"><input className="field" value={d.website} disabled={locked} onChange={(e) => b.set('website', e.target.value)} placeholder="https://" /></Field>
         <Field label="Online booking link" hint="Your Square booking page — added to rebooking texts."><input className="field" value={d.bookingUrl} disabled={locked} onChange={(e) => b.set('bookingUrl', e.target.value)} placeholder="https://" /></Field>
+        <Field label="Square booking site" hint="Stylists’ booking pages open each service here: book.squareup.com/appointments/…/location/…" className="sm:col-span-2"><input className="field font-mono text-[13px]" value={d.squareBookingBase ?? ''} disabled={locked} onChange={(e) => b.set('squareBookingBase', e.target.value)} placeholder="https://book.squareup.com/appointments/…" /></Field>
         <Field label="Review link" hint="Google or Yelp review page."><input className="field" value={d.reviewUrl} disabled={locked} onChange={(e) => b.set('reviewUrl', e.target.value)} placeholder="https://g.page/r/…" /></Field>
         <Field label="Time zone">
           <select className="field" value={d.timezone} disabled={locked} onChange={(e) => b.set('timezone', e.target.value)}>
@@ -33,7 +36,33 @@ export function BusinessSettings({ onSaved }: { onSaved?: () => void }) {
         <Field label="Hours" className="sm:col-span-2"><textarea className="field min-h-[64px]" value={d.hours} disabled={locked} onChange={(e) => b.set('hours', e.target.value)} placeholder="Tue–Fri 10–7, Sat 9–5, closed Sun & Mon" /></Field>
       </div>
       {locked && <p className="mt-3 text-[13px] text-stone">Only administrators (with “Edit business settings”) can change salon details.</p>}
+      <StylistBookingLinks />
     </Card>
+  );
+}
+
+/** Each bookable stylist's booking page (their services, each opening Square's booking) — copy and share. */
+function StylistBookingLinks() {
+  const toast = useToast();
+  const { data } = useQuery({ queryKey: ['booking-links'], queryFn: () => api.get<{ links: { staffId: string; firstName: string; slug: string; services: number }[] }>('/settings/booking-links') });
+  if (!data?.links.length) return null;
+  const url = (slug: string) => `${window.location.origin}/book/${slug}`;
+  const copy = async (u: string) => { try { await navigator.clipboard.writeText(u); toast('Link copied'); } catch { window.prompt('Copy the link', u); } };
+  return (
+    <div className="mt-6 border-t border-line pt-4">
+      <p className="text-[14px] font-medium text-ink">Stylists’ booking links</p>
+      <p className="mb-2 text-[13px] text-stone">Each shows that stylist’s services (from Square); clients pick a service, then the stylist, in Square. All stylists: <a className="text-plum hover:underline" href="/book" target="_blank" rel="noreferrer">{window.location.host}/book</a></p>
+      <ul className="divide-y divide-line border border-line text-[14px]">
+        {data.links.map((l) => (
+          <li key={l.staffId} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2">
+            <span className="w-28 font-medium text-ink">{l.firstName}</span>
+            <a className="min-w-0 flex-1 truncate font-mono text-[13px] text-plum hover:underline" href={url(l.slug)} target="_blank" rel="noreferrer">{url(l.slug).replace(/^https?:\/\//, '')}</a>
+            <span className="text-[12px] text-stone">{l.services ? `${l.services} service${l.services === 1 ? '' : 's'}` : 'No online services'}</span>
+            <Button size="sm" variant="ghost" icon={<Copy className="h-4 w-4" />} onClick={() => copy(url(l.slug))}>Copy</Button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

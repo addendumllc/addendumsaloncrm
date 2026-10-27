@@ -59,6 +59,10 @@ export interface SquareServiceVariation {
   name: string;
   durationMinutes: number | null;
   priceCents: number | null;
+  /** Team members who perform it (Square's team_member_ids). */
+  teamMemberIds?: string[];
+  /** Bookable online. */
+  availableForBooking?: boolean;
 }
 
 /** A sellable product variation from the Square catalog (retail items, not appointment services). */
@@ -212,6 +216,8 @@ export interface SquareService {
   createItems(items: NewSquareItem[], idempotencyKey: string): Promise<{ sku: string; variationId: string }[]>;
   /** Adds variations to existing items (stock tracked, at every location). Needs ITEMS_WRITE. */
   addVariations(variations: { itemId: string; name: string; sku: string; priceCents: number | null }[], idempotencyKey: string): Promise<{ sku: string; variationId: string }[]>;
+  /** Adds one variation at the top of its item (e.g. "Sample Swatch" above 18"), keeping the item's other variations (ITEMS_WRITE). */
+  addVariationFirst(v: { itemId: string; name: string; sku: string; priceCents: number | null }, idempotencyKey: string): Promise<{ sku: string; variationId: string } | null>;
   /** The permissions of the access token in use (null when Square doesn't list them). */
   tokenScopes(): Promise<{ scopes: string[] | null; expiresAt: string | null }>;
   /** Orders at these locations updated in [from, to], oldest first (POST /v2/orders/search; ORDERS_READ). */

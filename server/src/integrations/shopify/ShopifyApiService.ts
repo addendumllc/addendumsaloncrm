@@ -280,6 +280,17 @@ export class ShopifyApiService implements ShopifyService {
     return out;
   }
 
+  async moveOptionValueFirst(productId: string, optionName: string, value: string) {
+    const d = await this.gql<any>(`query($id: ID!) { product(id: $id) { options { name optionValues { name } } } }`, { id: productId });
+    const options: { name: string; optionValues: { name: string }[] }[] = d.product?.options ?? [];
+    if (!options.some((o) => o.name === optionName && o.optionValues.some((v) => v.name === value))) return;
+    // Every option in its order; this one's value moved to the top (Shopify reorders the variants to match).
+    const input = options.map((o) => ({ name: o.name, values: (o.name === optionName ? [{ name: value }, ...o.optionValues.filter((v) => v.name !== value)] : o.optionValues).map((v) => ({ name: v.name })) }));
+    const r = await this.gql<any>(`mutation($pid: ID!, $o: [OptionReorderInput!]!) { productOptionsReorder(productId: $pid, options: $o) { userErrors { field message } } }`, { pid: productId, o: input });
+    const errs = r.productOptionsReorder?.userErrors ?? [];
+    if (errs.length) throw new IntegrationError('shopify', `Shopify didn't reorder the options: ${errs.map((x: any) => x.message).join('; ')}`, false, false, JSON.stringify(errs));
+  }
+
   async addVariants(productId: string, variants: ShopifyNewVariant[], locationId: string) {
     let d: any;
     try {

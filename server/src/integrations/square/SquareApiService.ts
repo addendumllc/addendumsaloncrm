@@ -156,6 +156,7 @@ export class SquareApiService implements SquareService {
             name: varName && !/^regular$/i.test(varName) ? `${item.name} — ${varName}` : item.name,
             durationMinutes: vd.service_duration ? Math.round(Number(vd.service_duration) / 60000) : null,
             priceCents: vd.price_money?.amount != null ? Number(vd.price_money.amount) : null,
+            teamMemberIds: Array.isArray(vd.team_member_ids) ? vd.team_member_ids : [], availableForBooking: vd.available_for_booking !== false,
           });
         }
       }
@@ -312,6 +313,23 @@ export class SquareApiService implements SquareService {
     });
     const res = await this.call<{ id_mappings?: { client_object_id: string; object_id: string }[] }>('POST', '/v2/catalog/batch-upsert', { idempotency_key: idempotencyKey.slice(0, 128), batches: [{ objects }] });
     return (res?.id_mappings ?? []).filter((m) => ids.has(m.client_object_id)).map((m) => ({ sku: ids.get(m.client_object_id)!, variationId: m.object_id }));
+  }
+
+  async addVariationFirst(v: { itemId: string; name: string; sku: string; priceCents: number | null }, idempotencyKey: string) {
+    // A variation's place is its position in the item's list, so the item is saved with the new one first (the rest
+    // unchanged, with their versions, so nothing newer is overwritten).
+    const got = await this.call<{ object?: any }>('GET', `/v2/catalog/object/${encodeURIComponent(v.itemId)}`);
+    const item = got?.object;
+    if (!item?.item_data) throw new IntegrationError('square', 'Square didn’t return the item to add the variation to.', false, false, v.itemId);
+    const added = { type: 'ITEM_VARIATION', id: '#var-new', present_at_all_locations: true, item_variation_data: {
+      item_id: v.itemId, name: v.name, sku: v.sku, track_inventory: true,
+      ...(v.priceCents == null ? { pricing_type: 'VARIABLE_PRICING' } : { pricing_type: 'FIXED_PRICING', price_money: { amount: v.priceCents, currency: 'USD' } }),
+    } };
+    const res = await this.call<{ id_mappings?: { client_object_id: string; object_id: string }[] }>('POST', '/v2/catalog/batch-upsert', {
+      idempotency_key: idempotencyKey.slice(0, 128), batches: [{ objects: [{ ...item, item_data: { ...item.item_data, variations: [added, ...(item.item_data.variations ?? [])] } }] }],
+    });
+    const id = res?.id_mappings?.find((m) => m.client_object_id === '#var-new')?.object_id;
+    return id ? { sku: v.sku, variationId: id } : null;
   }
 
   async setInventoryCounts(counts: SquareSetCount[], idempotencyKey: string) {

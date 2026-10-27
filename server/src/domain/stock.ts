@@ -2096,19 +2096,24 @@ export async function applySwatches(input: SwatchInput) {
     const loc = await svc.locationId();
     for (const p of mine) {
       try { created += (await svc.addVariants(p.productId, [{ options: p.options, sku: p.sku, priceCents: p.priceCents }], loc)).length; }
-      catch (e) { failed.push({ label: p.label, store: which, message: (e as Error).message }); }
+      catch (e) { failed.push({ label: p.label, store: which, message: (e as Error).message }); continue; }
+      // Shown first: "Sample Swatch" above 18 inch - 120g.
+      for (const o of p.options.filter((x) => x.value === SWATCH_OPTION)) {
+        try { await svc.moveOptionValueFirst(p.productId, o.name, SWATCH_OPTION); }
+        catch (e) { failed.push({ label: p.label, store: which, message: `Added, but not moved to the top: ${(e as Error).message}` }); }
+      }
     }
   }
+  // Square: each swatch at the top of its item (above 18"), one item at a time.
   const sqPlan = plan.filter((p) => p.store === 'square');
-  if (services.sq && sqPlan.length) {
-    try {
-      const made = await services.sq.addVariations(sqPlan.map((p) => ({ itemId: p.productId, name: p.option, sku: p.sku, priceCents: p.priceCents < 0 ? null : p.priceCents })), `swatch-${Date.now().toString(36)}`);
-      created += made.length;
-      const ok = new Set(made.map((m) => norm(m.sku)));
-      for (const p of sqPlan) if (!ok.has(norm(p.sku))) failed.push({ label: p.label, store: 'square', message: 'Square didn’t confirm it' });
-    } catch (e) {
-      const msg = e instanceof IntegrationError && e.authProblem ? 'Square needs the ITEMS_WRITE permission to add variations.' : (e as Error).message;
-      for (const p of sqPlan) failed.push({ label: p.label, store: 'square', message: msg });
+  if (services.sq) {
+    for (const p of sqPlan) {
+      try {
+        const made = await services.sq.addVariationFirst({ itemId: p.productId, name: p.option, sku: p.sku, priceCents: p.priceCents < 0 ? null : p.priceCents }, `swatch-${p.productId}-${Date.now().toString(36)}`);
+        if (made) created++; else failed.push({ label: p.label, store: 'square', message: 'Square didn’t confirm it' });
+      } catch (e) {
+        failed.push({ label: p.label, store: 'square', message: e instanceof IntegrationError && e.authProblem ? 'Square needs the ITEMS_WRITE permission to add variations.' : (e as Error).message });
+      }
     }
   }
   forgetStockCache();

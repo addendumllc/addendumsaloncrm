@@ -177,7 +177,7 @@ function buildSquareState(now: Date): DemoSquareState {
     merchantName: 'Addendum Salon (Demo Square account)',
     locations: [{ id: 'demo-loc-1', name: 'Addendum Salon', timezone: TZ, address: 'San Diego, CA' }],
     team: STAFF.filter((s) => s.square).map((s, i) => ({ id: s.square!, given_name: s.name.split(' ')[0], family_name: s.name.split(' ')[1] ?? '', email_address: s.email ?? undefined, phone_number: `+1619555${String(200 + i).padStart(4, '0')}`, status: 'ACTIVE', is_owner: s.role === 'admin' })),
-    services: SERVICES.map((s) => ({ variationId: svcVar(s.id), itemId: `demo-item-${s.id}`, name: s.name, durationMinutes: s.min, priceCents: s.price })),
+    services: SERVICES.map((s) => ({ variationId: svcVar(s.id), itemId: `demo-item-${s.id}`, name: s.name, durationMinutes: s.min, priceCents: s.price, teamMemberIds: STAFF.filter((x) => x.square).map((x) => x.square!), availableForBooking: true })),
     customers,
     bookings,
   };

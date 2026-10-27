@@ -1,3 +1,4 @@
+import { stylistIndexPage, stylistPage } from './domain/bookingPages.js';
 import cookieParser from 'cookie-parser';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import rateLimit from 'express-rate-limit';
@@ -90,6 +91,9 @@ export function createApp() {
   app.get('/brand/font/:slot', (req, res, next) => serveFont(req, res).catch(next));
   app.get('/brand/fontfile/:id', (req, res, next) => serveFontFile(req, res).catch(next));
   app.get('/brand/login-image', (req, res, next) => serveLoginImage(req, res).catch(next));
+  // Stylists' booking pages (public): addendumsalon.info/book and /book/<first name>.
+  app.get('/book', (_req, res, next) => stylistIndexPage().then((h) => res.type('html').setHeader('Cache-Control', 'no-cache').send(h)).catch(next));
+  app.get('/book/:slug', (req, res, next) => stylistPage(String(req.params.slug)).then((h) => (h ? res.type('html').setHeader('Cache-Control', 'no-cache').send(h) : res.redirect(302, '/book'))).catch(next));
 
   // CSRF defence: state-changing API calls must carry a custom header, which other sites can't send
   // cross-origin without a CORS preflight (and no CORS is enabled).
