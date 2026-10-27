@@ -78,6 +78,7 @@ integrationsRouter.get('/instagram/callback', requirePermission('integrations:ma
     const values: Record<string, string> = {};
     const linked: string[] = [];
     for (const a of await contentAccounts()) {
+      if (a.privateAccount) continue; // private (e.g. stylists only): apps can't post to it
       const hit = found.find((f) => norm(f.username) === norm(a.handle));
       if (!hit) continue;
       const n = a.id.slice(1);

@@ -8,7 +8,7 @@ import { maybeAutoSyncCommission } from './commission.js';
 import { maybeAutoSync } from './inventorySync.js';
 import { runRules } from './rulesEngine.js';
 import { maybePurgeOldInternalTasks } from './tasks.js';
-import { importRecentMetrics, maybeSuggestWeekly, publishDueContent, remindContent } from './content.js';
+import { importRecentMetrics, maybeSuggestWeekly, publishDueContent, remindContent, remindTimeToPost } from './content.js';
 import { checkPreorders, checkRecounts, checkStockAlerts } from './preorderAlerts.js';
 import { maybeProcessShowit } from './showit.js';
 import { syncSquareInventory } from './squareInventory.js';
@@ -31,6 +31,7 @@ export function startScheduler() {
     await guard('inventory-sync', () => maybeAutoSync()); // only when automatic Square ↔ Shopify sync is on and due
     await guard('commission-sync', () => maybeAutoSyncCommission()); // only when commission is on and the interval has passed
     await guard('content-posting', () => publishDueContent()); // Instagram posts due now (auto-posting accounts)
+    await guard('content-time-to-post', () => remindTimeToPost()); // posted by hand (e.g. private accounts): remind at the time
     if (tick % 5 === 0) {
       await guard('rules', () => runRules());
       await guard('hair-highlevel', () => maybeAutoPullHairClients()); // hourly, only when turned on

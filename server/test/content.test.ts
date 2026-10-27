@@ -136,4 +136,20 @@ describe('Content calendar', () => {
     expect(ideas.filter((i: any) => i.alsoStory && i.format === 'reel').length).toBeGreaterThan(5);
     expect(ideas.filter((i: any) => !i.suggested && i.accounts.includes('a2')).length).toBeGreaterThan(20);
   });
+
+  it('@addendumhairpro is private: no auto-posting, but ideas, cross-posting and a “Time to post” reminder', async () => {
+    const acc = (await api.get('/api/content/accounts')).body.accounts;
+    expect(acc.find((a: any) => a.id === 'a3')).toMatchObject({ privateAccount: true, connected: false });
+    expect((await api.get('/api/content/ideas')).body.ideas.some((i: any) => i.accounts.includes('a3'))).toBe(true);
+    const staff = (await db().one<any>('SELECT id FROM staff WHERE active LIMIT 1')).id;
+    const src = (await api.post('/api/content/posts', base({ accounts: ['a2'], title: 'Pro install tip', publisherStaffId: staff }))).body.posts[0];
+    const [pro] = (await api.post(`/api/content/posts/${src.id}/crosspost`, { targets: [{ account: 'a3', scheduledAt: new Date(Date.now() - 60_000).toISOString() }] })).body.posts;
+    expect(pro.account).toBe('a3');
+    expect((await api.put(`/api/content/posts/${pro.id}`, { ...pro, autoPost: true, mediaIds: [] })).status).toBe(400); // can't auto-post a private account
+    for (const st of ['in_review', 'approved', 'scheduled']) await api.post(`/api/content/posts/${pro.id}/status`, { status: st });
+    const { remindTimeToPost } = await import('../src/domain/content.js');
+    expect(await remindTimeToPost()).toBeGreaterThanOrEqual(1);
+    expect((await db().query<any>("SELECT 1 FROM notifications WHERE staff_id = $1 AND title LIKE 'Time to post%' AND link LIKE $2", [staff, `%${pro.id}`])).length).toBe(1);
+    expect(await remindTimeToPost()).toBe(0); // once
+  });
 });

@@ -2463,7 +2463,9 @@ export function suggestHairTask(email: { subject?: string; body?: string }, toda
  * (professional education). Names, handles and colours are editable; each has its own pillars, audience and CTA.
  */
 export type ContentAccountId = 'a1' | 'a2' | 'a3';
-export interface ContentAccount { id: ContentAccountId; name: string; handle: string; color: string; brand: 'salon' | 'hair'; cta: string; voice: string; pillars: string[]; connected: boolean }
+export interface ContentAccount { id: ContentAccountId; name: string; handle: string; color: string; brand: 'salon' | 'hair'; cta: string; voice: string; pillars: string[]; connected: boolean;
+  /** A private account (e.g. @addendumhairpro, stylists only): Instagram doesn't let apps post to it — posted by hand, with a reminder. */
+  privateAccount: boolean }
 export type ContentPlatform = 'instagram' | 'facebook' | 'tiktok' | 'pinterest' | 'email';
 export const CONTENT_PLATFORMS: { value: ContentPlatform; label: string }[] = [
   { value: 'instagram', label: 'Instagram' }, { value: 'facebook', label: 'Facebook' }, { value: 'tiktok', label: 'TikTok' }, { value: 'pinterest', label: 'Pinterest' }, { value: 'email', label: 'Email' },

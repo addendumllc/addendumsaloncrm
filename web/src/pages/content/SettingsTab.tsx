@@ -36,7 +36,7 @@ export function SettingsTab({ b }: { b: Basics }) {
   const save = async () => {
     setBusy(true);
     try {
-      await api.put('/content/accounts', { accounts: accounts.map((a) => ({ id: a.id, name: a.name, handle: a.handle, color: a.color, cta: a.cta, voice: a.voice, pillars: a.pillarsText.split('\n').map((x) => x.trim()).filter(Boolean) })) });
+      await api.put('/content/accounts', { accounts: accounts.map((a) => ({ id: a.id, name: a.name, handle: a.handle, color: a.color, cta: a.cta, voice: a.voice, privateAccount: a.privateAccount, pillars: a.pillarsText.split('\n').map((x) => x.trim()).filter(Boolean) })) });
       await api.put('/content/settings', s);
       for (const k of ['content-accounts', 'content-settings', 'content-planning']) void qc.invalidateQueries({ queryKey: [k] });
       toast('Saved');
@@ -53,7 +53,8 @@ export function SettingsTab({ b }: { b: Basics }) {
       {accounts.map((a, i) => (
         <section key={a.id} className="panel space-y-3 p-4">
           <div className="flex flex-wrap items-center gap-2"><input type="color" className="color-circle h-8 w-8 cursor-pointer overflow-hidden rounded-full border border-line-strong p-0" value={a.color} onChange={(e) => upd(i, { color: e.target.value })} aria-label="Colour" />
-            <h2 className="text-[15px] font-medium text-ink">{a.name}</h2>{a.connected ? <Badge tone="sage">Instagram connected</Badge> : <Badge>Instagram not connected — manual publishing</Badge>}</div>
+            <h2 className="text-[15px] font-medium text-ink">{a.name}</h2>{a.privateAccount ? <Badge>Private — posted by hand</Badge> : a.connected ? <Badge tone="sage">Instagram connected</Badge> : <Badge>Instagram not connected — manual publishing</Badge>}</div>
+          <label className="flex items-center gap-2 text-[13px] text-ink-soft"><input type="checkbox" className="h-4 w-4 accent-plum" checked={a.privateAccount} onChange={(e) => upd(i, { privateAccount: e.target.checked })} />Private account (followers approved, e.g. stylists only) — Instagram doesn’t allow automatic posting; you get a “Time to post” reminder instead. Ideas, cross-posting and planning work the same.</label>
           <div className="grid gap-3 sm:grid-cols-3">
             <Field label="Name"><input className="field" value={a.name} onChange={(e) => upd(i, { name: e.target.value })} /></Field>
             <Field label="Handle"><input className="field" value={a.handle} onChange={(e) => upd(i, { handle: e.target.value })} /></Field>
@@ -76,9 +77,9 @@ export function SettingsTab({ b }: { b: Basics }) {
       <section className="panel space-y-2 p-4 text-[13px] text-ink-soft">
         {reauth.modal}
         <div className="flex flex-wrap items-center gap-2"><h2 className="text-[15px] font-medium text-ink">Instagram</h2>
-          {b.accounts.map((a) => <Badge key={a.id} tone={a.connected ? 'sage' : 'neutral'}>{a.name}: {a.connected ? 'connected' : 'not connected'}</Badge>)}
+          {b.accounts.map((a) => <Badge key={a.id} tone={a.connected ? 'sage' : 'neutral'}>{a.name}: {a.privateAccount ? 'private — by hand' : a.connected ? 'connected' : 'not connected'}</Badge>)}
           <Button variant="primary" size="sm" className="ml-auto" onClick={connect}>Connect Instagram</Button></div>
-        <p>Signs in with Facebook once and links every account whose handle matches one above — for auto-posting and importing numbers. The accounts must be Instagram Business or Creator accounts linked to a Facebook Page you manage.</p>
+        <p>Signs in with Facebook once and links every public account whose handle matches one above — for auto-posting and importing numbers (private accounts are skipped and posted by hand). The accounts must be Instagram Business or Creator accounts linked to a Facebook Page you manage.</p>
         <details><summary className="cursor-pointer text-plum">First time: set up the Meta app (once)</summary>
           <ol className="mt-1 list-decimal space-y-0.5 pl-5">
             <li>Go to developers.facebook.com → My Apps → Create app → Business.</li>

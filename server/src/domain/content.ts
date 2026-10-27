@@ -24,7 +24,7 @@ const ACCOUNT_IDS: ContentAccountId[] = ['a1', 'a2', 'a3'];
 
 // ---------------- Accounts ----------------
 const ACCOUNTS_KEY = 'content.accounts';
-const DEFAULT_ACCOUNTS: Omit<ContentAccount, 'connected'>[] = [
+const DEFAULT_ACCOUNTS: Omit<ContentAccount, 'connected' | 'privateAccount'>[] = [
   { id: 'a1', name: '@addendum.salon', handle: 'addendum.salon', color: '#6b5242', brand: 'salon', cta: 'Book an appointment',
     voice: 'Luxury editorial: warm, confident, elevated and client-facing — the salon experience, never salesy.',
     pillars: ['Transformations', 'Color, cuts, styling & treatments', 'Hair extensions & maintenance', 'Hair trends', 'Professional advice', 'Stylist spotlights & salon culture', 'Retail: Milbon & Oribe', 'The Insider & salon experience', 'Client testimonials', 'Appointments & booking promotions'] },
@@ -36,6 +36,8 @@ const DEFAULT_ACCOUNTS: Omit<ContentAccount, 'connected'>[] = [
     pillars: ['Installation education', 'Methods: weft, K-Tip, tape, hybrid', 'Professional tips & best practices', 'Demonstrations & tutorials', 'Stylist education & FAQs', 'Transformations & case studies', 'Stylist spotlights & UGC', 'Maintenance & troubleshooting', 'Professional product recommendations'] },
 ];
 const connectedSlots = () => new Set(instagramAccounts(config()).map((a) => a.slot));
+/** Accounts the CRM can post to: connected, and not private. */
+async function postableSlots() { return new Set((await contentAccounts()).filter((a) => a.connected).map((a) => a.id)); }
 export async function contentAccounts(): Promise<ContentAccount[]> {
   const saved = (await getKV<Partial<ContentAccount>[]>(ACCOUNTS_KEY)) ?? [];
   const on = connectedSlots();
@@ -43,14 +45,16 @@ export async function contentAccounts(): Promise<ContentAccount[]> {
     const s = saved.find((x) => x.id === d.id) ?? {};
     // Saved before the accounts had their own names: the generic "Account 1…" names give way to the handles.
     const name = s.name && !/^Account \d$/.test(s.name) ? s.name : d.name;
-    return { ...d, ...s, name, handle: s.handle || d.handle, pillars: s.pillars?.length ? s.pillars : d.pillars, id: d.id, brand: d.brand, connected: on.has(d.id) } as ContentAccount;
+    // @addendumhairpro is private (stylists only) unless changed in Settings.
+    const priv = s.privateAccount ?? d.id === 'a3';
+    return { ...d, ...s, name, handle: s.handle || d.handle, pillars: s.pillars?.length ? s.pillars : d.pillars, id: d.id, brand: d.brand, privateAccount: priv, connected: on.has(d.id) && !priv } as ContentAccount;
   });
 }
-export async function saveContentAccounts(list: { id: ContentAccountId; name: string; handle: string; color: string; cta?: string; voice?: string; pillars?: string[] }[]) {
+export async function saveContentAccounts(list: { id: ContentAccountId; name: string; handle: string; color: string; cta?: string; voice?: string; pillars?: string[]; privateAccount?: boolean }[]) {
   const current = await contentAccounts();
   await setKV(ACCOUNTS_KEY, current.map((c) => {
     const x = list.find((l) => l.id === c.id);
-    return { id: c.id, name: x?.name ?? c.name, handle: (x?.handle ?? c.handle).replace(/^@/, ''), color: x?.color ?? c.color, cta: x?.cta ?? c.cta, voice: x?.voice ?? c.voice, pillars: x?.pillars ?? c.pillars };
+    return { id: c.id, name: x?.name ?? c.name, handle: (x?.handle ?? c.handle).replace(/^@/, ''), color: x?.color ?? c.color, cta: x?.cta ?? c.cta, voice: x?.voice ?? c.voice, pillars: x?.pillars ?? c.pillars, privateAccount: x?.privateAccount ?? c.privateAccount };
   }));
   return contentAccounts();
 }
@@ -215,6 +219,7 @@ export async function updatePost(u: Who, id: string, f: PostFields) {
   if (['publishing', 'published'].includes(before.status)) throw badRequest(before.status === 'published' ? 'It’s published — repurpose it to make a new version.' : 'It’s being posted right now — try again in a minute.');
   checkFields(f);
   if (f.autoPost && !has(u, 'content:publish')) throw forbidden('Only people who publish content can turn on auto-posting.');
+  if (f.autoPost && (await contentAccounts()).find((a) => a.id === before.account)?.privateAccount) throw badRequest('This account is private — Instagram doesn’t let apps post to it. It’s posted by hand, with a “Time to post” reminder.');
   const changedCopy = before.caption !== f.caption || before.headline !== f.headline || before.cta !== f.cta || before.hashtags !== f.hashtags;
   if (changedCopy) await log(id, u.id, 'revision', JSON.stringify({ revision: before.revision, headline: before.headline, caption: before.caption, cta: before.cta, hashtags: before.hashtags }));
   // Approved copy that changes goes back for review (when approval is required).
@@ -225,7 +230,7 @@ export async function updatePost(u: Who, id: string, f: PostFields) {
     `UPDATE content_posts SET platform=$2, post_type=$3, title=$4, scheduled_at=$5, due_at=$6, headline=$7, caption=$8, cta=$9, hashtags=$10, pillar=$11, auto_post=$12,
        media_ids=$13::uuid[], external_links=$14, link_kind=$15, link_ref=$16, link_label=$17, campaign_id=$18, assigned_staff_id=$19, reviewer_staff_id=$20, publisher_staff_id=$21, notes=$22,
        revision = revision + $23::int, status = CASE WHEN $24 THEN 'in_review' ELSE status END,
-       reminded_day_before = reminded_day_before AND NOT $25, reminded_today = reminded_today AND NOT $25, updated_at = now() WHERE id = $1`,
+       reminded_day_before = reminded_day_before AND NOT $25, reminded_today = reminded_today AND NOT $25, reminded_due = reminded_due AND NOT $25, updated_at = now() WHERE id = $1`,
     [id, ...VALUES(f), changedCopy ? 1 : 0, backToReview, moved]);
   if (backToReview) {
     await log(id, u.id, 'status', 'Copy changed after approval', before.status, 'in_review');
@@ -238,7 +243,7 @@ export async function updatePost(u: Who, id: string, f: PostFields) {
 export async function reschedule(u: Who, id: string, scheduledAt: string | null) {
   const p = await getPost(u, id);
   if (['publishing', 'published'].includes(p.status)) throw badRequest('Published posts stay where they are.');
-  await db().query('UPDATE content_posts SET scheduled_at = $2, reminded_day_before = false, reminded_today = false, updated_at = now() WHERE id = $1', [id, scheduledAt]);
+  await db().query('UPDATE content_posts SET scheduled_at = $2, reminded_day_before = false, reminded_today = false, reminded_due = false, updated_at = now() WHERE id = $1', [id, scheduledAt]);
   return getPost(u, id);
 }
 
@@ -267,7 +272,11 @@ export async function transition(u: Who, id: string, to: ContentStatus, comment:
   }
   if (to === 'scheduled') {
     if (!p.scheduledAt) throw badRequest('Pick a date and time first.');
-    if (p.autoPost) { const problem = autoPostProblem(p, connectedSlots().has(p.account)); if (problem) throw badRequest(problem); }
+    if (p.autoPost) {
+      const acc = (await contentAccounts()).find((a) => a.id === p.account);
+      if (acc?.privateAccount) throw badRequest(`${acc.name} is private — Instagram doesn’t let apps post to it. Turn off auto-posting; you’ll get a “Time to post” reminder instead.`);
+      const problem = autoPostProblem(p, (await postableSlots()).has(p.account)); if (problem) throw badRequest(problem);
+    }
   }
   if (to === 'changes_requested' && !comment?.trim()) throw badRequest('Say what needs changing.');
   // Published by hand: confirmed by someone allowed to publish (auto-posting sets it itself).
@@ -613,6 +622,22 @@ export async function remindContent(now = new Date()) {
   return sent;
 }
 
+/**
+ * "Time to post": at the scheduled time, posts that aren't auto-posted (private accounts, other platforms, or auto-post
+ * off) remind the publishing owner — or the creator — to post it by hand and confirm it. Once per post.
+ */
+export async function remindTimeToPost(now = new Date()) {
+  const rows = await db().query<any>(`SELECT id, title, account, platform, publisher_staff_id, assigned_staff_id FROM content_posts
+     WHERE status IN ('approved','scheduled') AND NOT auto_post AND NOT reminded_due AND scheduled_at <= $1 AND scheduled_at > $1::timestamptz - interval '1 day'`, [now]);
+  const names = new Map((await contentAccounts()).map((a) => [a.id, a.name]));
+  for (const r of rows) {
+    const who = r.publisher_staff_id ?? r.assigned_staff_id;
+    if (who) await notify(who, `Time to post: ${r.title}`, `Post it on ${names.get(r.account) ?? r.platform} now, then open it and press Confirm published.`, r.id);
+    await db().query('UPDATE content_posts SET reminded_due = true WHERE id = $1', [r.id]);
+  }
+  return rows.length;
+}
+
 const PARENT = 'P:';
 /**
  * Instagram auto-posting: scheduled, auto-post posts that are due get their containers made (videos are processed
@@ -629,7 +654,8 @@ export async function publishDueContent(now = new Date(), api = (slot: IgSlot) =
       await log(r.id, null, 'status', msg.slice(0, 500), r.status, 'failed');
       for (const s of new Set([r.assigned_staff_id, r.publisher_staff_id])) await notify(s, 'Post didn’t go out', `“${r.title}”: ${msg}`, r.id);
     };
-    if (!ig) { await fail('This account isn’t connected for auto-posting (Settings → API & Integrations → Instagram).'); continue; }
+    const priv = (await contentAccounts()).find((a) => a.id === r.account)?.privateAccount;
+    if (!ig || priv) { await fail(priv ? 'This account is private — Instagram doesn’t let apps post to it. Post it by hand and confirm it as published.' : 'This account isn’t connected for auto-posting — post it by hand and confirm it as published.'); continue; }
     try {
       const media = await db().query<{ id: string; mime: string }>('SELECT id, mime FROM content_media WHERE id = ANY($1::uuid[])', [r.media_ids]);
       const ordered = (r.media_ids as string[]).map((id) => media.find((m) => m.id === id)).filter((m): m is { id: string; mime: string } => !!m);

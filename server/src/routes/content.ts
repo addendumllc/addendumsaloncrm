@@ -26,7 +26,7 @@ contentRouter.get('/accounts', ah(async (req, res) => res.json({ accounts: await
 contentRouter.put('/accounts', ah(async (req, res) => {
   admin(req);
   const b = parse(z.object({ accounts: z.array(z.object({ id: account, name: z.string().trim().min(1).max(60), handle: z.string().trim().max(60), color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-    cta: z.string().trim().max(200).optional(), voice: z.string().trim().max(500).optional(), pillars: z.array(z.string().trim().min(1).max(80)).max(20).optional() })).max(3) }), req.body);
+    cta: z.string().trim().max(200).optional(), voice: z.string().trim().max(500).optional(), pillars: z.array(z.string().trim().min(1).max(80)).max(20).optional(), privateAccount: z.boolean().optional() })).max(3) }), req.body);
   res.json({ accounts: await saveContentAccounts(b.accounts as any) });
 }));
 contentRouter.get('/settings', ah(async (_req, res) => res.json({ settings: await contentSettings() })));

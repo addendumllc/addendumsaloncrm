@@ -185,8 +185,12 @@ export function PostEditor({ post, prefill, b, onClose }: { post: ContentPostDTO
             </div>
             {d.platform === 'instagram' && (
               <div className="rounded-xl border border-line p-3">
+                {d.accounts.some((a) => b.accountOf(a)?.privateAccount) ? (
+                  <p className="text-[13px] text-ink-soft"><b className="font-medium text-ink">Posted by hand.</b> {d.accounts.filter((a) => b.accountOf(a)?.privateAccount).map((a) => b.accountOf(a)?.name).join(', ')} is private, so Instagram doesn’t let apps post to it. At the scheduled time the publishing owner gets a “Time to post” reminder; post it from Instagram, then press Confirm published.</p>
+                ) : (
                 <Toggle checked={d.autoPost} disabled={!b.canPublish} onChange={(v) => set({ autoPost: v })} label="Post to Instagram automatically"
-                  description={!b.canPublish ? 'Only people who publish content can turn this on.' : d.accounts.every((a) => b.accountOf(a)?.connected) ? 'Posted at the scheduled time once the post is Scheduled.' : 'This account isn’t connected yet (Settings → API & Integrations → Instagram) — schedule it and confirm it as published by hand.'} />
+                  description={!b.canPublish ? 'Only people who publish content can turn this on.' : d.accounts.every((a) => b.accountOf(a)?.connected) ? 'Posted at the scheduled time once the post is Scheduled.' : 'This account isn’t connected yet (Content Calendar → Settings → Connect Instagram) — schedule it and you’ll get a “Time to post” reminder.'} />
+                )}
                 {current?.error && <p className="mt-2 text-[13px] text-rose">{current.error}</p>}
               </div>
             )}
