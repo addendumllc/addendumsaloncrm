@@ -40,7 +40,7 @@ export function Button({
       className={buttonClass(variant, size, className)}
     >
       {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : icon}
-      {tc(children)}
+      {children != null && children !== false && <span className="btn-label">{tc(children)}</span>}
     </button>
   );
 }

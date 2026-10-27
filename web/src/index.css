@@ -99,7 +99,7 @@
 /* Link-style (text-only) buttons: the same font and size as every other button. */
 .btn-link { font-family: var(--font-button, inherit); }
 /* Buttons at the bottom of a popup: one compact size at every button size setting. */
-.modal-footer .btn-md, [data-buttons] .modal-footer .btn-md, [data-btn-height] .modal-footer .btn-md { height: 2.25rem; padding-left: 0.75rem; padding-right: 0.75rem; font-size: 12px; }
+.modal-footer .btn-md, [data-buttons] .modal-footer .btn-md, [data-btn-height] .modal-footer .btn-md { height: 2.25rem; padding-left: 0.75rem; padding-right: 0.75rem; font-size: 13px; }
 .modal-footer .btn-sm, [data-buttons] .modal-footer .btn-sm, [data-btn-height] .modal-footer .btn-sm { height: 2rem; padding-left: 0.625rem; padding-right: 0.625rem; font-size: 12px; }
 /* …and the button text size setting doesn't enlarge them, nor wide letter spacing. */
 .modal-footer :is(.btn-sm, .btn-md), [data-caps-button] .modal-footer .font-button { zoom: 1; letter-spacing: 0.04em; }
@@ -153,3 +153,12 @@ body { font-weight: var(--w-body, var(--body-weight, 400)); }
 input[type="color"].color-circle::-webkit-color-swatch-wrapper { padding: 0; }
 input[type="color"].color-circle::-webkit-color-swatch { border: 0; border-radius: 9999px; }
 input[type="color"].color-circle::-moz-color-swatch { border: 0; border-radius: 9999px; }
+
+/*
+ * Button text sits in the middle whatever the font: the line box is trimmed to the letters themselves (capitals, or
+ * capitals to the baseline), so fonts with tall or uneven built-in spacing (e.g. Sackers Gothic) don't sit high or low.
+ */
+:is(.btn-sm, .btn-md) { line-height: 1; }
+@supports (text-box: trim-both cap alphabetic) {
+  .btn-label { display: inline-block; text-box: trim-both cap alphabetic; }
+}
