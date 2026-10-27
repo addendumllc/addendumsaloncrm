@@ -105,7 +105,7 @@ export async function syncSingleBooking(bookingId: string) {
 }
 
 async function syncReferenceData(svc: SquareService) {
-  const [locations, team, services] = await Promise.all([svc.listLocations(), svc.listTeamMembers(), svc.listServices()]);
+  const [locations, team, services, bookable] = await Promise.all([svc.listLocations(), svc.listTeamMembers(), svc.listServices(), svc.bookableTeamMemberIds()]);
   for (const l of locations) {
     await db().query(
       `INSERT INTO locations(square_location_id, name, address, timezone) VALUES ($1,$2,$3,$4)
@@ -136,6 +136,10 @@ async function syncReferenceData(svc: SquareService) {
         name, m.email_address ?? null, DEFAULT_ROLE, m.id, STAFF_COLORS[i++ % STAFF_COLORS.length], phone,
       ]);
     }
+  }
+  // Stylists are the team members bookable online in Square (unknown → left as it was).
+  if (bookable) {
+    await db().query('UPDATE staff SET square_bookable = (square_team_member_id = ANY($1::text[])) WHERE square_team_member_id IS NOT NULL AND square_bookable IS DISTINCT FROM (square_team_member_id = ANY($1::text[]))', [[...bookable]]);
   }
   for (const s of services) {
     await db().query(

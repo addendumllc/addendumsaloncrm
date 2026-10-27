@@ -193,6 +193,8 @@ export interface SquareService {
   retrieveBooking(id: string): Promise<SquareBooking | null>;
   bulkRetrieveCustomers(ids: string[]): Promise<SquareCustomer[]>;
   listTeamMembers(): Promise<SquareTeamMember[]>;
+  /** Team members bookable online (their booking profiles); null when Square won't say (e.g. a missing permission). */
+  bookableTeamMemberIds(): Promise<Set<string> | null>;
   listServices(): Promise<SquareServiceVariation[]>;
   listLocations(): Promise<SquareLocation[]>;
   merchantName(): Promise<string | null>;

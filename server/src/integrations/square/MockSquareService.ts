@@ -51,6 +51,11 @@ export class MockSquareService implements SquareService {
   async listTeamMembers() {
     return (await loadDemoSquare()).team;
   }
+  /** Demo: everyone is bookable online unless a test says otherwise. */
+  static notBookable = new Set<string>();
+  async bookableTeamMemberIds() {
+    return new Set((await loadDemoSquare()).team.map((m) => m.id).filter((id) => !MockSquareService.notBookable.has(id)));
+  }
   async listServices() {
     return (await loadDemoSquare()).services;
   }

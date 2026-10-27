@@ -71,4 +71,30 @@ describe('Preferred stylist from visits', () => {
     await updatePreferredStylists({ clientId: c });
     expect((await pref(c)).staff).toBe(a);
   });
+
+  it('only stylists (bookable online in Square) count: the sync marks who is, and others are never a preferred stylist', async () => {
+    const { MockSquareService } = await import('../src/integrations/square/MockSquareService.js');
+    const { runSquareSync } = await import('../src/domain/squareSync.js');
+    await runSquareSync({ full: false });
+    const linked = await db().query<any>('SELECT id, square_team_member_id FROM staff WHERE active AND square_team_member_id IS NOT NULL ORDER BY name LIMIT 2');
+    expect(linked.length).toBe(2);
+    const [front, stylist] = linked.map((r) => r.id as string);
+    const tm = linked[0].square_team_member_id as string;
+    MockSquareService.notBookable.add(tm);
+    try {
+      await runSquareSync({ full: false });
+      expect((await db().one<any>('SELECT square_bookable FROM staff WHERE id = $1', [front])).square_bookable).toBe(false);
+      const list = (await api.get('/api/staff')).body.staff;
+      expect(list.find((s: any) => s.id === front).stylist).toBe(false);
+      expect(list.find((s: any) => s.id === stylist).stylist).toBe(true);
+      // Seen last by someone who isn't a stylist: no preferred stylist (not them).
+      const c = await client();
+      await visit(c, front, 'Cut', 3);
+      await updatePreferredStylists({ clientId: c });
+      expect((await pref(c)).staff).toBeNull();
+    } finally {
+      MockSquareService.notBookable.delete(tm);
+      await runSquareSync({ full: false });
+    }
+  });
 });

@@ -30,8 +30,9 @@ export async function updatePreferredStylists(opts: { clientId?: string } = {}, 
      last AS (
        SELECT DISTINCT ON (client_id) client_id, staff_id FROM visits ORDER BY client_id, start_at DESC
      )
-     SELECT c.id, c.preferred_staff_id AS current, c.preferred_staff_source AS source, cs.active AS current_active,
-            r.staff_id AS regular, rs.active AS regular_active, l.staff_id AS last, ls.active AS last_active
+     -- Only stylists (bookable online in Square) can be someone's preferred stylist; others count as gone.
+    SELECT c.id, c.preferred_staff_id AS current, c.preferred_staff_source AS source, (cs.active AND cs.square_bookable IS NOT FALSE) AS current_active,
+            r.staff_id AS regular, (rs.active AND rs.square_bookable IS NOT FALSE) AS regular_active, l.staff_id AS last, (ls.active AND ls.square_bookable IS NOT FALSE) AS last_active
        FROM clients c
        JOIN last l ON l.client_id = c.id
        LEFT JOIN regular r ON r.client_id = c.id

@@ -117,6 +117,25 @@ export class SquareApiService implements SquareService {
     return out;
   }
 
+  async bookableTeamMemberIds(): Promise<Set<string> | null> {
+    const out = new Set<string>();
+    let cursor: string | undefined;
+    try {
+      do {
+        const qs = new URLSearchParams({ bookable_only: 'true', limit: '100' });
+        if (cursor) qs.set('cursor', cursor);
+        const res = await this.call<{ team_member_booking_profiles?: { team_member_id: string; is_bookable?: boolean }[]; cursor?: string }>('GET', `/v2/bookings/team-member-booking-profiles?${qs}`);
+        for (const p of res?.team_member_booking_profiles ?? []) if (p.is_bookable !== false) out.add(p.team_member_id);
+        cursor = res?.cursor || undefined;
+      } while (cursor);
+    } catch (e) {
+      // Without APPOINTMENTS_BUSINESS_SETTINGS_READ Square won't list them: leave who's a stylist as it was.
+      console.warn('[square] booking profiles:', (e as Error).message);
+      return null;
+    }
+    return out;
+  }
+
   async listServices(): Promise<SquareServiceVariation[]> {
     const out: SquareServiceVariation[] = [];
     let cursor: string | undefined;

@@ -476,6 +476,8 @@ export interface StaffDTO {
   canLogin: boolean;
   color: string;
   squareTeamMemberId: string | null;
+  /** A stylist: bookable online in Square (stylist pickers and filters list only them). */
+  stylist: boolean;
   /** Their own mobile (E.164), for texting them internal tasks. */
   mobilePhone: string | null;
   highlevelUserId: string | null;

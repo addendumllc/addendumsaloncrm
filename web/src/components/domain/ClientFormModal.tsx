@@ -54,7 +54,7 @@ export function ClientFormModal({ onClose, clientId, initial }: { onClose: () =>
         <Field label="Preferred stylist">
           <select className="field" value={f.preferredStaffId} onChange={set('preferredStaffId')}>
             <option value="">No preference</option>
-            {staff?.filter((s) => s.active).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {staff?.filter((s) => s.active && (s.stylist || s.id === f.preferredStaffId)).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </Field>
         <Field label="How they found us" className="sm:col-span-2"><input className="field" value={f.leadSource} onChange={set('leadSource')} placeholder="Instagram, referral…" /></Field>

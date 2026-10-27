@@ -363,7 +363,7 @@ function ClientDetails({ c, services, assignments, showHighLevel, canEditAll, ca
                 <select className="field" value={f.preferredStaffId} onChange={(e) => setF({ ...f, preferredStaffId: e.target.value })}>
                   <option value="auto">Automatic (from visits){c.preferredStaffAuto && c.preferredStaffName ? ` — ${c.preferredStaffName}` : ''}</option>
                   <option value="">None</option>
-                  {active.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  {active.filter((s) => s.stylist || s.id === f.preferredStaffId).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               </Field>
               <div>

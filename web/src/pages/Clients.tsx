@@ -87,7 +87,7 @@ function ClientList() {
           <option value="">All tags</option>{tags?.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
         </select>
         <select className="field h-9 w-auto py-1 text-sm" value={f.staffId} onChange={(e) => set('staff', e.target.value)} aria-label="Stylist">
-          <option value="">Any stylist</option>{staff?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          <option value="">Any stylist</option>{staff?.filter((s) => s.stylist || s.id === f.staffId).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
         <input className="field h-9 w-40 py-1 text-sm" placeholder="Service" value={f.service} onChange={(e) => set('service', e.target.value)} />
         <select className="field h-9 w-auto py-1 text-sm" value={f.last} onChange={(e) => set('last', e.target.value)} aria-label="Last visit">

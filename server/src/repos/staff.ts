@@ -7,6 +7,9 @@ const SELECT = `
     (SELECT count(*)::int FROM leads l WHERE l.assigned_staff_id = s.id AND l.status NOT IN ('won','lost') AND l.archived_at IS NULL) AS assigned_leads
   FROM staff s`;
 
+/** A stylist: bookable online in Square; before that's known, anyone linked to a Square team member (as before). */
+export const isStylistRow = (r: { square_bookable?: boolean | null; square_team_member_id?: string | null }) => r.square_bookable ?? !!r.square_team_member_id;
+
 export function toStaffDTO(r: any): StaffDTO {
   return {
     id: r.id,
@@ -17,6 +20,7 @@ export function toStaffDTO(r: any): StaffDTO {
     canLogin: !!r.password_hash,
     color: r.color,
     squareTeamMemberId: r.square_team_member_id,
+    stylist: isStylistRow(r),
     mobilePhone: r.mobile_phone ?? null,
     highlevelUserId: r.highlevel_user_id,
     openFollowUps: r.open_follow_ups,
