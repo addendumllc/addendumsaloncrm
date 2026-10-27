@@ -1572,6 +1572,8 @@ export interface FontStyle {
   caps?: Partial<Record<FontRole, boolean>>;
   /** Text size as a percentage of standard (100); unset = standard. */
   sizes?: Partial<Record<FontRole, number>>;
+  /** Buttons use the links' font, weight, capitals and size (the default); false = buttons have their own. */
+  buttonsAsLinks?: boolean;
   status: 'draft' | 'published';
 }
 /** An uploaded font file (administrators): usable in any font style. */
@@ -1598,7 +1600,17 @@ export const DEFAULT_FONT_STYLES: FontStyleSettings = {
 export function resolveFontStyle(fs: Partial<FontStyleSettings> | undefined, personal: Partial<PersonalLook> | null | undefined): FontStyle | null {
   const s = { ...DEFAULT_FONT_STYLES, ...(fs ?? {}) };
   const published = s.styles.filter((x) => x.status === 'published');
-  return published.find((x) => x.id === personal?.fontStyleId) ?? published.find((x) => x.id === s.defaultStyle) ?? null;
+  const style = published.find((x) => x.id === personal?.fontStyleId) ?? published.find((x) => x.id === s.defaultStyle) ?? null;
+  return style ? buttonsFollowLinks(style) : null;
+}
+
+/** A font style with its buttons set like its links (unless it gives buttons their own font). */
+export function buttonsFollowLinks(style: FontStyle): FontStyle {
+  if (style.buttonsAsLinks === false) return style;
+  return {
+    ...style, fonts: { ...style.fonts, button: style.fonts.link },
+    weights: { ...(style.weights ?? {}), button: style.weights?.link }, caps: { ...(style.caps ?? {}), button: style.caps?.link }, sizes: { ...(style.sizes ?? {}), button: style.sizes?.link },
+  };
 }
 export const fontFileUrl = (e: FontLibraryEntry) => `/brand/fontfile/${e.id}?v=${encodeURIComponent(e.version)}`;
 

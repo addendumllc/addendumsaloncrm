@@ -149,14 +149,22 @@ function FontStyleEditor({ style, library: libraryIn, onClose, onDone }: { style
         </div>
         <ul className="divide-y divide-line border border-line">
           {FONT_ROLES.map((r) => {
-            const stack = fontStackFor(s.fonts[r.key], library, r.key === 'heading' || r.key === 'subheading' ? 'Georgia, serif' : 'system-ui, sans-serif');
+            // Buttons can follow the links (font, weight, capitals and size) — the default.
+            const linked = r.key === 'button' && s.buttonsAsLinks !== false;
+            const k: FontRole = linked ? 'link' : r.key;
+            const stack = fontStackFor(s.fonts[k], library, r.key === 'heading' || r.key === 'subheading' ? 'Georgia, serif' : 'system-ui, sans-serif');
             return (
               <li key={r.key} className="grid gap-2 px-3 py-3 sm:grid-cols-[9rem_minmax(0,1fr)] sm:items-start">
                 <div><p className="text-[14px] font-medium text-ink">{r.label}</p><p className="text-[12px] text-stone">{r.hint}</p></div>
                 <div className="min-w-0 space-y-2">
                   <p className={cx('truncate text-ink', r.key === 'heading' ? 'text-[26px]' : r.key === 'subheading' ? 'text-[19px]' : 'text-[15px]', r.key === 'link' && 'text-plum underline')}
-                    style={{ fontFamily: stack, fontWeight: s.weights?.[r.key] ?? (r.key === 'button' || r.key === 'label' ? 500 : 400), textTransform: s.caps?.[r.key] ? 'uppercase' : 'none', letterSpacing: s.caps?.[r.key] ? '0.04em' : undefined, zoom: (s.sizes?.[r.key] ?? 100) / 100 }}>{SAMPLE[r.key]}</p>
-                  <div className="flex flex-wrap items-center gap-2">
+                    style={{ fontFamily: stack, fontWeight: s.weights?.[k] ?? (k === 'button' || k === 'label' ? 500 : 400), textTransform: s.caps?.[k] ? 'uppercase' : 'none', letterSpacing: s.caps?.[k] ? '0.04em' : undefined, zoom: (s.sizes?.[k] ?? 100) / 100 }}>{SAMPLE[r.key]}</p>
+                  {r.key === 'button' && (
+                    <label className="flex items-center gap-1.5 text-[13px] text-ink-soft">
+                      <input type="checkbox" className="h-4 w-4 accent-plum" checked={linked} onChange={(e) => setS({ ...s, buttonsAsLinks: e.target.checked })} />Same as links
+                    </label>
+                  )}
+                  {!linked && <div className="flex flex-wrap items-center gap-2">
                     <select className="field h-9 w-auto py-1 text-sm" value={s.fonts[r.key]} onChange={(e) => setFont(r.key, e.target.value)} aria-label={`${r.label} font`}>
                       {library.length > 0 && <optgroup label="Your fonts">{library.map((f) => <option key={f.id} value={`file:${f.id}`}>{f.name}</option>)}</optgroup>}
                       <optgroup label="Serif">{FONT_CHOICES.filter((f) => f.kind === 'serif').map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}</optgroup>
@@ -174,7 +182,7 @@ function FontStyleEditor({ style, library: libraryIn, onClose, onDone }: { style
                     <label className="flex items-center gap-1.5 text-[13px] text-ink-soft">
                       <input type="checkbox" className="h-4 w-4 accent-plum" checked={!!s.caps?.[r.key]} onChange={(e) => setS({ ...s, caps: { ...(s.caps ?? {}), [r.key]: e.target.checked } })} />Capitals
                     </label>
-                  </div>
+                  </div>}
                 </div>
               </li>
             );

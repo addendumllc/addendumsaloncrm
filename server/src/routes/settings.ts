@@ -135,6 +135,7 @@ const settingsPatch = z.object({
         fonts: z.object(Object.fromEntries(['heading', 'subheading', 'body', 'menu', 'button', 'label', 'link'].map((k) => [k, z.string().regex(/^(file:)?[a-z0-9-]{1,40}$/)])) as Record<string, z.ZodString>),
         weights: z.record(z.enum(['heading', 'subheading', 'body', 'menu', 'button', 'label', 'link']), z.union([z.literal(300), z.literal(400), z.literal(500), z.literal(600), z.literal(700)])).optional(),
         caps: z.record(z.enum(['heading', 'subheading', 'body', 'menu', 'button', 'label', 'link']), z.boolean()).optional(),
+        buttonsAsLinks: z.boolean().optional(),
         sizes: z.record(z.enum(['heading', 'subheading', 'body', 'menu', 'button', 'label', 'link']), z.number().int().min(70).max(160)).optional(),
         status: z.enum(['draft', 'published']),
       })).max(30),
