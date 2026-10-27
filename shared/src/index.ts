@@ -2240,6 +2240,8 @@ export const STOCK_REASONS = ['Stock count', 'Received', 'Damaged', 'Lost', 'Cus
 export type StockForecastStatus = 'out' | 'order_now' | 'soon' | 'watch' | 'healthy' | 'no_sales' | 'discontinued';
 export interface StockForecastDTO {
   key: string;
+  /** Extensions that dropped to the recount level and haven't been counted since (Forecast settings → Recount). */
+  recount?: boolean;
   label: string;
   sku: string | null;
   supplier: string | null;
@@ -2300,6 +2302,10 @@ export interface StockForecastSettings {
   leadTimeDays: number; safetyDays: number; coverageDays: number; slowToUseDays: number; soonDays: number; watchDays: number; defaultMoq: number;
   /** Collections no longer reordered (a word in the collection or product name, e.g. "Classic"): treated as discontinued. */
   discontinuedCollections: string[];
+  /** Extensions at or below this many in stock are flagged to recount (one alert each time they drop that low). */
+  recountAt?: number;
+  /** Which products are extensions (inventory collections); empty = by name (wefts, clip-ins, k-tips, tape-ins…). */
+  recountCollections?: string[];
 }
 export interface StockForecastResponse {
   items: StockForecastDTO[];

@@ -548,7 +548,7 @@ export async function stockHistory(f: { key?: string; kind?: string; q?: string;
 // ---------------- Sales and forecasts ----------------
 const SALES_KEY = 'stock.shopify-sales';
 const FORECAST_KEY = 'stock.forecast-settings';
-export const DEFAULT_FORECAST: StockForecastSettings = { leadTimeDays: 30, safetyDays: 14, coverageDays: 60, slowToUseDays: 120, soonDays: 7, watchDays: 21, defaultMoq: 0, discontinuedCollections: ['Classic'] };
+export const DEFAULT_FORECAST: StockForecastSettings = { leadTimeDays: 30, safetyDays: 14, coverageDays: 60, slowToUseDays: 120, soonDays: 7, watchDays: 21, defaultMoq: 0, discontinuedCollections: ['Classic'], recountAt: 3, recountCollections: [] };
 
 /**
  * What a product is counted in, from its name: "Prosecco Redefined Weft · 18\" Weft" → weft(s), "Black Magic Clip-Ins" →
@@ -808,6 +808,7 @@ export async function stockForecast(): Promise<StockForecastResponse> {
   }
   const order: StockForecastDTO['status'][] = ['out', 'order_now', 'soon', 'watch', 'healthy', 'no_sales', 'discontinued'];
   items.sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status) || (a.orderBy ?? '9').localeCompare(b.orderBy ?? '9') || a.label.localeCompare(b.label));
+  await markRecounts(items, settings);
   const state = await getKV<{ updatedAt: string | null; note: string | null }>(SALES_KEY);
   const notes = await salesNotes();
   return {
@@ -1613,6 +1614,75 @@ export async function notifyNewPreorders(notify: (staffIds: string[], title: str
  * Bell notification when a product that sells runs out, or is at risk of running out before a new order could arrive.
  * Each product is announced once per state (out, or at risk) until it's back in stock.
  */
+// ---------------- Recount alerts (extensions running low) ----------------
+const RECOUNT_KEY = 'stock.recount.lowSince';
+const EXTENSION_WORDS = /\b(wefts?|clip-?ins?|k-?tips?|i-?tips?|tape-?ins?|tapes?|ponytails?|halos?|extensions?)\b/i;
+// Care products and tools named after extensions aren't hair (e.g. "Extension Care Kit", "Bond Remover", beads).
+const NOT_HAIR_WORDS = /\b(care|kits?|remover|brush(es)?|shampoo|conditioner|tools?|pliers|beads?|threads?|spray|serum|oil|cap|bands?|packet|pdf)\b/i;
+/** An extension: in one of the chosen collections (or a sub-collection of one), else named like one. */
+const isExtension = (i: StockForecastDTO, s: StockForecastSettings) => (s.recountCollections?.length
+  ? s.recountCollections.some((c) => i.collection === c || !!i.collection?.startsWith(`${c} / `) || i.collections.includes(c))
+  : EXTENSION_WORDS.test(i.label) && !NOT_HAIR_WORDS.test(i.label));
+/** Low enough to recount: an extension still sold, at or below the recount level. */
+const lowForRecount = (i: StockForecastDTO, s: StockForecastSettings) => i.status !== 'discontinued' && isExtension(i, s) && i.stock <= (s.recountAt ?? 3);
+
+/** When each product was last counted (a stock count), by product and by SKU (a SKU's other listings count too). */
+async function lastCounts() {
+  const rows = await db().query<{ k: string; sku: string | null; at: string }>(`SELECT product_key AS k, sku, max(created_at) AS at FROM stock_txns WHERE kind = 'count' GROUP BY 1, 2`);
+  const byKey = new Map<string, number>(); const bySku = new Map<string, number>();
+  for (const r of rows) {
+    const t = new Date(r.at).getTime();
+    byKey.set(r.k, Math.max(byKey.get(r.k) ?? 0, t));
+    if (norm(r.sku)) bySku.set(norm(r.sku), Math.max(bySku.get(norm(r.sku)) ?? 0, t));
+  }
+  return (i: { key: string; sku: string | null }) => Math.max(byKey.get(i.key) ?? 0, bySku.get(norm(i.sku)) ?? 0);
+}
+
+/** Flags extensions that went low (seen by the alert check) and haven't been counted since. */
+async function markRecounts(items: StockForecastDTO[], s: StockForecastSettings) {
+  const low = (await getKV<Record<string, string>>(RECOUNT_KEY)) ?? {};
+  if (!Object.keys(low).length) return;
+  const counted = await lastCounts();
+  for (const i of items) {
+    const since = low[i.key];
+    if (since && lowForRecount(i, s) && counted(i) < new Date(since).getTime()) i.recount = true;
+  }
+}
+
+/**
+ * Scheduler: notes when each extension drops to the recount level (forgotten once it's back above), and sends one
+ * bell notification for the ones that just went low. Counting it (or "Count is right") clears the flag.
+ */
+export async function notifyRecounts(notify: (staffIds: string[], title: string, body: string) => Promise<void>, recipients: () => Promise<string[]>) {
+  const f = await stockForecast();
+  const before = (await getKV<Record<string, string>>(RECOUNT_KEY)) ?? {};
+  const now: Record<string, string> = {};
+  const fresh: StockForecastDTO[] = [];
+  const stamp = new Date().toISOString();
+  for (const i of f.items) {
+    if (!lowForRecount(i, f.settings)) continue;
+    now[i.key] = before[i.key] ?? stamp;
+    if (!before[i.key]) fresh.push(i);
+  }
+  await setKV(RECOUNT_KEY, now);
+  if (!fresh.length) return 0;
+  const ids = await recipients();
+  if (!ids.length) return 0;
+  const title = `${fresh.length} extension${fresh.length === 1 ? '' : 's'} low — please recount`;
+  const body = fresh.slice(0, 6).map((i) => `${i.label}: ${i.stock} in stock`).join('\n') + (fresh.length > 6 ? `\n…and ${fresh.length - 6} more` : '');
+  await notify(ids, title, body);
+  return fresh.length;
+}
+
+/** "Count is right": records a stock count at the current numbers (nothing changes in the stores). */
+export async function confirmCounts(keys: string[], staffId: string | null) {
+  const rows = (await live()).rows;
+  const skus = new Set(rows.filter((r) => keys.includes(r.key) && norm(r.sku)).map((r) => norm(r.sku)));
+  const hit = rows.filter((r) => keys.includes(r.key) || skus.has(norm(r.sku)));
+  for (const r of hit) await log(r, { kind: 'count', reason: 'Recount', note: 'Counted — the number was right', staffId, reference: null, squareAfter: r.squareQty, shopifyAfter: r.shopifyQty });
+  return { counted: hit.length };
+}
+
 export async function notifyStockAlerts(notify: (staffIds: string[], title: string, body: string) => Promise<void>, recipients: () => Promise<string[]>) {
   const f = await stockForecast();
   const state = (i: StockForecastDTO) => (i.status === 'discontinued' || i.skippedUntil ? null : i.stock <= 0 && i.ratePerDay > 0 ? 'out' : i.stockoutRisk ? 'risk' : null);

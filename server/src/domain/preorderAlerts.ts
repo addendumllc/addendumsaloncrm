@@ -1,7 +1,7 @@
 import { db } from '../db/index.js';
 import { effectivePermissions } from '../auth/permissions.js';
 import { shopifyService } from '../integrations/registry.js';
-import { notifyNewPreorders, notifyStockAlerts } from './stock.js';
+import { notifyNewPreorders, notifyRecounts, notifyStockAlerts } from './stock.js';
 
 /** Everyone active who manages inventory (Inventory sync permission). */
 async function inventoryManagers() {
@@ -27,6 +27,16 @@ export async function checkStockAlerts() {
   return notifyStockAlerts(async (ids, title, body) => {
     for (const id of ids) {
       await db().query('INSERT INTO notifications(staff_id, kind, title, body, link) VALUES ($1,$2,$3,$4,$5)', [id, 'stock', title, body, '/inventory-sync?view=reorder&show=alerts']);
+    }
+  }, inventoryManagers);
+}
+
+/** Scheduler: a bell notification when extensions drop to the recount level (Forecast settings → Recount). */
+export async function checkRecounts() {
+  if (!shopifyService()) return 0;
+  return notifyRecounts(async (ids, title, body) => {
+    for (const id of ids) {
+      await db().query('INSERT INTO notifications(staff_id, kind, title, body, link) VALUES ($1,$2,$3,$4,$5)', [id, 'stock', title, body, '/inventory-sync?view=reorder&show=recount']);
     }
   }, inventoryManagers);
 }

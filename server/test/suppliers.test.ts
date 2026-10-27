@@ -414,6 +414,31 @@ describe('Suppliers', () => {
     expect(list.collections.map((c: any) => c.name)).toEqual(['Care']);
   });
 
+  it('recount: extensions at or below the level are flagged with one alert until counted; "Count is right" clears it', async () => {
+    const { notifyRecounts } = await import('../src/domain/stock.js');
+    const base = (await api.get('/api/inventory-sync/stock/forecast')).body.settings;
+    await api.put('/api/inventory-sync/stock/forecast/settings', { ...base, recountAt: 1000, recountCollections: [] });
+    forgetStockCache();
+    const sent: string[] = [];
+    const send = async (_ids: string[], title: string) => { sent.push(title); };
+    const n = await notifyRecounts(send, async () => ['x']);
+    expect(n).toBeGreaterThan(0);
+    expect(sent[0]).toMatch(/low — please recount/);
+    let items = (await api.get('/api/inventory-sync/stock/forecast')).body.items;
+    const flagged = items.filter((i: any) => i.recount);
+    expect(flagged.length).toBeGreaterThan(0);
+    expect(flagged.every((i: any) => /weft|clip|k-?tip|tape|extension/i.test(i.label))).toBe(true); // extensions only (by name)
+    expect(items.some((i: any) => /bond remover|care kit/i.test(i.label) && i.recount)).toBe(false);
+    // Again: nothing new to alert.
+    expect(await notifyRecounts(send, async () => ['x'])).toBe(0);
+    // The count is right → off the list.
+    expect((await api.post('/api/inventory-sync/stock/recounted', { keys: [flagged[0].key] })).status).toBe(200);
+    forgetStockCache();
+    items = (await api.get('/api/inventory-sync/stock/forecast')).body.items;
+    expect(items.find((i: any) => i.key === flagged[0].key).recount).toBeFalsy();
+    await api.put('/api/inventory-sync/stock/forecast/settings', { ...base, recountAt: 3 });
+  });
+
   it('sub-collections sit under their collection; renaming or removing the collection takes them along', async () => {
     const all = (await api.get('/api/inventory-sync/stock/products')).body.products.filter((p: any) => p.sku);
     await api.put('/api/inventory-sync/stock/collections', { names: ['Zeta', 'Brand', 'Brand / Shampoo'] });

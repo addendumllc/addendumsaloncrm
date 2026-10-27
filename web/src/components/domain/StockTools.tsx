@@ -1007,6 +1007,16 @@ function SuggestedOrders({ store, onClose, onMade }: { store: 'all' | 'salon' | 
   );
 }
 
+/** An extension that ran low: recount it — "Count is right" if the number is correct, or enter the new count in Inventory. */
+function RecountBadge({ onRight }: { onRight: () => void }) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5 whitespace-nowrap text-[11px] text-stone" title="Low — count what’s actually on the shelf. A different number: enter it as a new count in Inventory.">
+      <Badge tone="amber">Recount</Badge>
+      <button type="button" className="text-plum hover:underline" onClick={onRight}>Count is right</button>
+    </span>
+  );
+}
+
 /** "Skipped until …" with Undo (To order → All products). */
 function SkippedBadge({ until, onUndo }: { until: string; onUndo: () => void }) {
   return (
@@ -1028,14 +1038,14 @@ function DaysField({ label, hint, value, onChange, unit = 'days' }: { label: str
 }
 
 /** `store`: all products, or only those the salon (Square) or Addendum Hair (online) sells. */
-export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder' }: { onOrders: () => void; store?: 'all' | 'salon' | 'hair'; initialFilter?: 'reorder' | 'alerts' | 'all' }) {
+export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder' }: { onOrders: () => void; store?: 'all' | 'salon' | 'hair'; initialFilter?: 'reorder' | 'alerts' | 'recount' | 'all' }) {
   const toast = useToast();
   const fallbackSupplier = useDefaultSupplier();
   const refresh = useRefresh();
   const qc = useQueryClient();
   const { data: internal } = useInternalCollections();
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['stock-forecast'], queryFn: () => api.get<StockForecastResponse>('/inventory-sync/stock/forecast') });
-  type Filter = 'reorder' | 'alerts' | 'all' | 'skipped' | StockForecastDTO['status'];
+  type Filter = 'reorder' | 'alerts' | 'recount' | 'all' | 'skipped' | StockForecastDTO['status'];
   const [filter, setFilter] = useState<Filter>(initialFilter);
   const [qty, setQty] = useState<Record<string, string>>({});
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -1059,7 +1069,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
   // Each list's rule (live counts beside each): needs ordering = out of stock, order now or reorder soon. A product with
   // no sales history is its own list — never counted as healthy.
   const matches = (i: StockForecastDTO, f: Filter) => (f === 'all' ? true : f === 'skipped' ? !!i.skippedUntil : i.skippedUntil ? false
-    : f === 'alerts' ? isOut(i) || i.stockoutRisk : f === 'reorder' ? ['out', 'order_now', 'soon'].includes(i.status) : i.status === f);
+    : f === 'alerts' ? isOut(i) || i.stockoutRisk : f === 'recount' ? !!i.recount : f === 'reorder' ? ['out', 'order_now', 'soon'].includes(i.status) : i.status === f);
   // Always by collection (A–Z, e.g. all Milbon, then Oribe; none last), then length (18", 22", 24"…, none last), then
   // alphabetical by name (the length left out of the name).
   const collSizeAll = new Map<string, number>();
@@ -1071,7 +1081,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
   const items = inStoreAll.filter((i) => matches(i, filter)).sort((a, b) => byColl(a, b) || lenOf(a) - lenOf(b) || nameOf(a).localeCompare(nameOf(b), undefined, { numeric: true, sensitivity: 'base' }));
   const FILTERS: { value: Filter; label: string }[] = [
     { value: 'reorder', label: 'Needs ordering' }, { value: 'out', label: 'Out of stock' }, { value: 'order_now', label: 'Order now' }, { value: 'soon', label: 'Reorder soon' },
-    { value: 'watch', label: 'Watchlist' }, { value: 'healthy', label: 'Healthy' }, { value: 'no_sales', label: 'No sales history' }, { value: 'alerts', label: 'Stock alerts' },
+    { value: 'watch', label: 'Watchlist' }, { value: 'healthy', label: 'Healthy' }, { value: 'no_sales', label: 'No sales history' }, { value: 'alerts', label: 'Stock alerts' }, { value: 'recount', label: 'Recount' },
     { value: 'skipped', label: 'Skipped' }, { value: 'discontinued', label: 'Discontinued' }, { value: 'all', label: 'All products' },
   ];
   const countOf = (f: Filter) => inStoreAll.filter((i) => matches(i, f)).length;
@@ -1107,6 +1117,15 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
     } finally {
       setBusy(false);
     }
+  };
+  // Recount: "Count is right" records a count at the current number (a different number is entered as a new count).
+  const counted = async (keys: string[]) => {
+    try {
+      await api.post('/inventory-sync/stock/recounted', { keys });
+      toast(`${keys.length === 1 ? 'Counted' : `${keys.length} counted`} — off the recount list`);
+      setPicked(new Set());
+      void refetch();
+    } catch (e) { toast((e as Error).message, 'error'); }
   };
   const moveTo = async (collection: string | null) => {
     setBusy(true);
@@ -1219,6 +1238,22 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
                 <DaysField label="Slow to use after" hint="Flag a minimum order that takes longer than this to sell." value={d.slowToUseDays} onChange={(v) => setDefaults({ ...d, slowToUseDays: v })} />
               </div>
             </section>
+            <section>
+              <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-stone">Recount alerts (extensions)</h3>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <DaysField label="Recount at or below" unit="units" hint="An extension this low is flagged Recount, with one alert, until it’s counted." value={d.recountAt ?? 3} onChange={(v) => setDefaults({ ...d, recountAt: v })} />
+                <Field label="Extensions are in" hint={internal?.collections.length ? 'Tick the collections; none ticked = by name (wefts, clip-ins, k-tips, tape-ins…).' : 'By name: wefts, clip-ins, k-tips, tape-ins, ponytails… (or make inventory collections to choose).'} className="sm:col-span-2">
+                  {internal?.collections.length ? (
+                    <div className="flex flex-wrap gap-x-4 gap-y-1.5 pt-1 text-[13px] text-ink-soft">
+                      {internal.collections.filter((c) => !c.name.includes(' / ')).map((c) => (
+                        <label key={c.name} className="flex items-center gap-1.5"><input type="checkbox" className="h-4 w-4 accent-plum" checked={(d.recountCollections ?? []).includes(c.name)}
+                          onChange={(e) => setDefaults({ ...d, recountCollections: e.target.checked ? [...(d.recountCollections ?? []), c.name] : (d.recountCollections ?? []).filter((x) => x !== c.name) })} />{c.name}</label>
+                      ))}
+                    </div>
+                  ) : <span className="block pt-1 text-[13px] text-stone">Chosen by product name.</span>}
+                </Field>
+              </div>
+            </section>
           </div>
         </Modal>
       )}
@@ -1233,6 +1268,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
             <option value="__new">+ New collection…</option>
             <option value="__none">No collection</option>
           </select>
+          {[...picked].some((k) => data.items.find((i) => i.key === k)?.recount) && <Button size="sm" variant="ghost" disabled={busy} onClick={() => counted([...picked].filter((k) => data.items.find((i) => i.key === k)?.recount))}>Count is right</Button>}
           <select className="field h-9 w-auto py-1 text-sm" value="" disabled={busy} aria-label="Skip selected"
             onChange={(e) => { const v = e.target.value; if (v) void skip([...picked], v === 'forever' ? null : Number(v)); }}>
             <option value="">Skip (not ordering)…</option><option value="14">for 2 weeks</option><option value="30">for 30 days</option><option value="90">for 90 days</option><option value="forever">until I turn it back on</option>
@@ -1252,7 +1288,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
                 <p className="text-[15px] font-medium leading-snug text-ink">{i.label}</p>
                 <p className="text-[12px] text-stone"><span className="font-mono">{i.sku}</span>{(i.supplier ?? fallbackSupplier) ? ` · ${i.supplier ?? fallbackSupplier}` : ''}</p>
               </div>
-              <span className="flex flex-col items-end gap-1"><Badge tone={F_STATUS[i.status].tone}>{F_STATUS[i.status].label}</Badge>{i.stockoutRisk && <Badge tone="rose">Stock-out risk</Badge>}{i.skippedUntil && <SkippedBadge until={i.skippedUntil} onUndo={() => skip([i.key], 'off')} />}</span>
+              <span className="flex flex-col items-end gap-1"><Badge tone={F_STATUS[i.status].tone}>{F_STATUS[i.status].label}</Badge>{i.stockoutRisk && <Badge tone="rose">Stock-out risk</Badge>}{i.recount && <RecountBadge onRight={() => counted([i.key])} />}{i.skippedUntil && <SkippedBadge until={i.skippedUntil} onUndo={() => skip([i.key], 'off')} />}</span>
             </div>
             <dl className="mt-2 grid grid-cols-3 gap-x-3 gap-y-1 text-[13px]">
               <div><dt className="text-[11px] text-stone">In stock</dt><dd className="num">{i.stock}{i.incoming ? <span className="text-stone"> +{i.incoming}</span> : ''}</dd></div>
@@ -1282,7 +1318,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
                 <tr>
                   <td className="px-3 py-1.5"><input type="checkbox" checked={picked.has(i.key)} onChange={() => toggle(i.key)} aria-label={`Select ${i.label}`} /></td>
                   <td className="px-2 py-1.5"><button type="button" className="flex items-start gap-1 text-left text-ink" onClick={() => setOpen(open === i.key ? null : i.key)}>{open === i.key ? <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0" />}<span>{i.label}<span className="block text-[11px] text-stone">{i.sku}</span></span></button></td>
-                  <td className="px-2 py-1.5"><Badge tone={F_STATUS[i.status].tone}>{F_STATUS[i.status].label}</Badge>{i.stockoutRisk && <span className="mt-1 block"><Badge tone="rose">Stock-out risk</Badge></span>}{i.leadSource?.kind === 'missing' && i.status !== 'discontinued' && <span className="mt-1 block" title="No lead time for this product, its collections or its supplier"><Badge tone="amber">Needs lead time</Badge></span>}{i.skippedUntil && <span className="mt-1 block"><SkippedBadge until={i.skippedUntil} onUndo={() => skip([i.key], 'off')} /></span>}</td>
+                  <td className="px-2 py-1.5"><Badge tone={F_STATUS[i.status].tone}>{F_STATUS[i.status].label}</Badge>{i.stockoutRisk && <span className="mt-1 block"><Badge tone="rose">Stock-out risk</Badge></span>}{i.recount && <span className="mt-1 block"><RecountBadge onRight={() => counted([i.key])} /></span>}{i.leadSource?.kind === 'missing' && i.status !== 'discontinued' && <span className="mt-1 block" title="No lead time for this product, its collections or its supplier"><Badge tone="amber">Needs lead time</Badge></span>}{i.skippedUntil && <span className="mt-1 block"><SkippedBadge until={i.skippedUntil} onUndo={() => skip([i.key], 'off')} /></span>}</td>
                   <td className="num px-2 py-1.5 text-right">{i.stock}</td>
                   <td className="num px-2 py-1.5 text-right">{i.incoming || ''}</td>
                   <td className="num px-2 py-1.5 text-right">{i.ratePerDay ? i.ratePerDay.toFixed(2) : '—'}</td>
