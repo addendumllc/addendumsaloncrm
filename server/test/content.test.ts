@@ -152,4 +152,28 @@ describe('Content calendar', () => {
     expect((await db().query<any>("SELECT 1 FROM notifications WHERE staff_id = $1 AND title LIKE 'Time to post%' AND link LIKE $2", [staff, `%${pro.id}`])).length).toBe(1);
     expect(await remindTimeToPost()).toBe(0); // once
   });
+
+  it('a product launch drafts the promotion; posts wait without a date, then move with the release date', async () => {
+    const r = await api.post('/api/content/launches', { product: 'The Bond – Keratin Application Tool Pro', releaseOn: null, accounts: ['a2', 'a3'] });
+    expect(r.status).toBe(201);
+    const c = r.body.campaign;
+    expect(c).toMatchObject({ kind: 'launch', product: 'The Bond – Keratin Application Tool Pro', posts: 15, startsOn: null });
+    const all = async () => (await db().query<any>('SELECT id, account, title, scheduled_at, launch_offset, status FROM content_posts WHERE campaign_id = $1 ORDER BY launch_offset', [c.id]));
+    let posts = await all();
+    expect(posts.every((p: any) => p.scheduled_at === null)).toBe(true);
+    expect(posts.some((p: any) => p.title.includes('The Bond'))).toBe(true);
+    // Release date set: each post at release + its offset.
+    await api.post('/api/content/campaigns', { id: c.id, name: c.name, accounts: c.accounts, startsOn: '2026-12-01', endsOn: null, notes: null });
+    posts = await all();
+    const day = (p: any) => new Date(p.scheduled_at).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    expect(day(posts.find((p: any) => p.launch_offset === -14))).toBe('2026-11-17');
+    expect(day(posts.find((p: any) => p.launch_offset === 0))).toBe('2026-12-01');
+    // One already published stays put when the date moves.
+    const pub = posts.find((p: any) => p.launch_offset === -14);
+    await db().query("UPDATE content_posts SET status = 'published' WHERE id = $1", [pub.id]);
+    await api.post('/api/content/campaigns', { id: c.id, name: c.name, accounts: c.accounts, startsOn: '2026-12-08', endsOn: null, notes: null });
+    posts = await all();
+    expect(day(posts.find((p: any) => p.id === pub.id))).toBe('2026-11-17');
+    expect(day(posts.find((p: any) => p.launch_offset === 0))).toBe('2026-12-08');
+  });
 });

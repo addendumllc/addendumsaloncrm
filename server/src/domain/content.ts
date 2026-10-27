@@ -388,10 +388,14 @@ export async function linkOptions(q: string) {
 // ---------------- Campaigns ----------------
 export async function listCampaigns(): Promise<ContentCampaignDTO[]> {
   return (await db().query<any>(`SELECT c.*, (SELECT count(*)::int FROM content_posts p WHERE p.campaign_id = c.id) AS posts FROM content_campaigns c ORDER BY c.starts_on NULLS LAST, c.name`))
-    .map((c) => ({ id: c.id, name: c.name, accounts: c.accounts ?? [], startsOn: c.starts_on ? String(iso(c.starts_on)).slice(0, 10) : null, endsOn: c.ends_on ? String(iso(c.ends_on)).slice(0, 10) : null, notes: c.notes, posts: c.posts }));
+    .map((c) => ({ id: c.id, name: c.name, accounts: c.accounts ?? [], startsOn: c.starts_on ? String(iso(c.starts_on)).slice(0, 10) : null, endsOn: c.ends_on ? String(iso(c.ends_on)).slice(0, 10) : null, notes: c.notes, posts: c.posts, kind: c.kind ?? 'campaign', product: c.product ?? null }));
 }
 export async function saveCampaign(c: { id?: string; name: string; accounts: ContentAccountId[]; startsOn: string | null; endsOn: string | null; notes: string | null }) {
-  if (c.id) await db().query('UPDATE content_campaigns SET name=$2, accounts=$3, starts_on=$4, ends_on=$5, notes=$6 WHERE id=$1', [c.id, c.name, c.accounts, c.startsOn, c.endsOn, c.notes]);
+  if (c.id) {
+    await db().query('UPDATE content_campaigns SET name=$2, accounts=$3, starts_on=$4, ends_on=$5, notes=$6 WHERE id=$1', [c.id, c.name, c.accounts, c.startsOn, c.endsOn, c.notes]);
+    await placeLaunchPosts(c.id); // a launch's posts follow its release date
+    return listCampaigns();
+  }
   else await db().query('INSERT INTO content_campaigns(name, accounts, starts_on, ends_on, notes) VALUES ($1,$2,$3,$4,$5)', [c.name, c.accounts, c.startsOn, c.endsOn, c.notes]);
   return listCampaigns();
 }
@@ -399,6 +403,51 @@ export async function deleteCampaign(id: string) {
   await db().query('UPDATE content_posts SET campaign_id = NULL WHERE campaign_id = $1', [id]);
   await db().query('DELETE FROM content_campaigns WHERE id = $1', [id]);
   return listCampaigns();
+}
+
+// ---------------- Product launches ----------------
+/** An instant at the given local time on a day, in the salon's time zone (e.g. 10:00 on the release date). */
+async function atLocal(day: string, hh: number, mm = 0) {
+  const tz = (await getSettings()).business.timezone;
+  const guess = new Date(`${day}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00Z`);
+  const local = new Date(guess.toLocaleString('en-US', { timeZone: tz }));
+  return new Date(guess.getTime() + (guess.getTime() - local.getTime()));
+}
+const plusDays = (day: string, n: number) => new Date(Date.parse(`${day}T12:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
+
+/**
+ * A product launch: a campaign for the product with its promotion drafts — teasers, launch day and follow-ups for each
+ * chosen account — placed around the release date (or unscheduled until it's set). Nothing is approved or posted.
+ */
+export async function createLaunch(u: Who, l: { product: string; releaseOn: string | null; accounts: ContentAccountId[]; notes: string | null }) {
+  for (const a of l.accounts) await assertAccount(u, a);
+  const { launchPlan } = await import('./contentLaunch.js');
+  const c = (await db().one<{ id: string }>(`INSERT INTO content_campaigns(name, accounts, starts_on, notes, kind, product) VALUES ($1,$2,$3,$4,'launch',$5) RETURNING id`,
+    [`Launch: ${l.product.trim()}`, l.accounts, l.releaseOn, l.notes, l.product.trim()]))!;
+  const accounts = await contentAccounts();
+  for (const p of launchPlan(l.product, l.accounts)) {
+    const [post] = await createPosts(u, [p.account], {
+      platform: 'instagram', type: p.type, title: p.title, scheduledAt: null, dueAt: null, headline: p.hook, caption: p.caption, cta: p.cta || accounts.find((a) => a.id === p.account)?.cta || null,
+      hashtags: p.hashtags || null, pillar: p.account === 'a3' ? 'Professional product recommendations' : p.account === 'a1' ? 'Retail: Milbon & Oribe' : 'Launches & restocks', autoPost: false,
+      mediaIds: [], externalLinks: [], link: null, campaignId: c.id, assignedStaffId: null, reviewerStaffId: null, publisherStaffId: null, notes: p.notes || null,
+    }, 'draft');
+    await db().query('UPDATE content_posts SET launch_offset = $2 WHERE id = $1', [post.id, p.offset]);
+  }
+  await placeLaunchPosts(c.id);
+  return (await listCampaigns()).find((x) => x.id === c.id)!;
+}
+
+/** Puts a launch's posts at release date + their offset (10:00 salon time); unscheduled while there's no date. Posted or scheduled ones stay. */
+export async function placeLaunchPosts(campaignId: string) {
+  const c = await db().one<{ kind: string; starts_on: string | null }>('SELECT kind, starts_on FROM content_campaigns WHERE id = $1', [campaignId]);
+  if (!c || c.kind !== 'launch') return 0;
+  const day = c.starts_on ? String(iso(c.starts_on)).slice(0, 10) : null;
+  const rows = await db().query<{ id: string; launch_offset: number }>(`SELECT id, launch_offset FROM content_posts WHERE campaign_id = $1 AND launch_offset IS NOT NULL AND status NOT IN ('scheduled','publishing','published')`, [campaignId]);
+  for (const r of rows) {
+    const at = day ? await atLocal(plusDays(day, r.launch_offset), 10) : null;
+    await db().query('UPDATE content_posts SET scheduled_at = $2, reminded_day_before = false, reminded_today = false, reminded_due = false, updated_at = now() WHERE id = $1', [r.id, at]);
+  }
+  return rows.length;
 }
 
 // ---------------- Ideas library ----------------

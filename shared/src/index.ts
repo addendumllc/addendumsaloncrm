@@ -2502,7 +2502,9 @@ export interface ContentPostDTO {
   createdAt: string; updatedAt: string;
 }
 export interface ContentCommentDTO { id: string; kind: 'comment' | 'status' | 'revision'; body: string | null; fromStatus: string | null; toStatus: string | null; staffName: string | null; createdAt: string }
-export interface ContentCampaignDTO { id: string; name: string; accounts: ContentAccountId[]; startsOn: string | null; endsOn: string | null; notes: string | null; posts: number }
+export interface ContentCampaignDTO { id: string; name: string; accounts: ContentAccountId[]; startsOn: string | null; endsOn: string | null; notes: string | null; posts: number;
+  /** A product launch: `product` and its release date (startsOn; null = not set yet), with promotion posts placed around it. */
+  kind: 'campaign' | 'launch'; product: string | null }
 export interface ContentIdeaDTO {
   id: string; accounts: ContentAccountId[]; title: string; pillar: string; audience: string | null; platform: ContentPlatform; format: ContentPostType;
   hook: string | null; visual: string | null; shotList: string | null; caption: string | null; cta: string | null; hashtags: string | null; season: string | null;

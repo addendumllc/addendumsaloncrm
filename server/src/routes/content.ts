@@ -2,7 +2,7 @@ import express, { Router } from 'express';
 import { z } from 'zod';
 import { CONTENT_PLATFORMS, CONTENT_FORMATS } from '@addendum/shared';
 import {
-  accountsFor, addComment, analytics, crossPost, comments, contentAccounts, contentSettings, createPosts, deleteAsset, deleteCampaign, deleteIdea, deletePost, favoriteIdea, generate,
+  accountsFor, addComment, analytics, createLaunch, crossPost, comments, contentAccounts, contentSettings, createPosts, deleteAsset, deleteCampaign, deleteIdea, deletePost, favoriteIdea, generate,
   getPost, importMetrics, keepIdea, suggestIdeas, linkOptions, listAssets, listCampaigns, listIdeas, listPosts, MEDIA_LIMITS, planning, readMedia, repurpose, reschedule, saveCampaign,
   saveContentAccounts, saveContentSettings, saveIdea, saveMedia, setMetrics, transition, updateAsset, updatePost,
 } from '../domain/content.js';
@@ -101,6 +101,13 @@ contentRouter.post('/generate', ah(async (req, res) => {
 contentRouter.get('/campaigns', ah(async (_req, res) => res.json({ campaigns: await listCampaigns() })));
 const campaign = z.object({ id: z.string().uuid().optional(), name: z.string().trim().min(1).max(120), accounts: z.array(account).max(3).default([]), startsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null), endsOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null), notes: text(2000) });
 contentRouter.post('/campaigns', ah(async (req, res) => res.json({ campaigns: await saveCampaign(parse(campaign, req.body) as any) })));
+// A product launch: its campaign plus promotion drafts around the release date (moved when the date changes).
+contentRouter.post('/launches', ah(async (req, res) => {
+  const b = parse(z.object({ product: z.string().trim().min(1).max(120), releaseOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null), accounts: z.array(account).min(1).max(3), notes: text(2000) }), req.body);
+  const campaign = await createLaunch(who(req), b as any);
+  await logAction(req, 'content.launch', 'content_campaign', campaign.id, { product: b.product, posts: campaign.posts });
+  res.status(201).json({ campaign, campaigns: await listCampaigns() });
+}));
 contentRouter.delete('/campaigns/:id', ah(async (req, res) => res.json({ campaigns: await deleteCampaign(req.params.id) })));
 
 contentRouter.get('/ideas', ah(async (req, res) => res.json({ ideas: await listIdeas(who(req)) })));
