@@ -8,6 +8,9 @@ import { BrandMark } from '../components/layout/Brand';
 import { DEFAULT_APPEARANCE, DEFAULT_LOGIN, DEFAULT_WORKSPACES, type Appearance, type LoginSettings, type WorkspaceSettings } from '@addendum/shared';
 import { Button, Field, Segmented } from '../components/ui';
 
+/** The Sign-in code tab on the sign-in screen (off for now). */
+const SHOW_CODE_SIGN_IN = false;
+
 export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -55,7 +58,8 @@ export function LoginPage() {
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-black/30" />
         <p className="relative text-[11px] font-medium uppercase tracking-[0.32em] text-[#F3EEE7]/80">{biz.salon.name} · {biz.hair.name}</p>
         <div className="relative">
-          <p className="font-display text-[44px] uppercase leading-[0.95] tracking-[0.02em] sm:text-[64px] lg:text-[88px]" style={{ fontWeight: 300 }}>{login.headline || 'Addendum'}</p>
+          {/* One line, sized to the panel (it's about half the screen on large screens), never cut off. */}
+          <p className="font-display whitespace-nowrap uppercase leading-[0.95] tracking-[0.02em] text-[clamp(36px,11vw,64px)] lg:text-[clamp(44px,6vw,88px)]" style={{ fontWeight: 300, zoom: 1 }}>{login.headline || 'Addendum'}</p>
           {login.message && <p className="mt-3 max-w-md text-[14px] text-[#F3EEE7]/80 sm:text-[15px]">{login.message}</p>}
         </div>
       </aside>
@@ -64,7 +68,8 @@ export function LoginPage() {
         <BrandMark a={{ ...DEFAULT_APPEARANCE, ...(cfg?.appearance ?? {}) }} size="login" />
         <p className="mt-2 text-center text-[15px] text-stone">Sign in to your workspace</p>
         <form onSubmit={submit} className="mt-8 space-y-4 border border-line bg-white p-6">
-          <Segmented className="w-full" value={mode} onChange={(v) => { setMode(v); setError(null); }} options={[{ value: 'password', label: 'Password' }, { value: 'code', label: 'Sign-in code' }]} />
+          {/* Sign-in codes are hidden for now (password only); turn this back on to offer them again. */}
+          {SHOW_CODE_SIGN_IN && <Segmented className="w-full" value={mode} onChange={(v) => { setMode(v); setError(null); }} options={[{ value: 'password', label: 'Password' }, { value: 'code', label: 'Sign-in code' }]} />}
           <Field label="Email"><input className="field" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></Field>
           {mode === 'password' ? (
             <Field label="Password"><input className="field" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></Field>
