@@ -195,7 +195,8 @@ export function TaskCard({ task, compact }: { task: TaskDTO; compact?: boolean }
               <div><dt className="inline text-stone">Schedule </dt><dd className="inline text-ink-soft">{task.rebook.source === 'preferred' ? 'their preferred date' : `every ${weeksLabel(task.rebook.intervalDays)}`}{task.rebook.source === 'client' || task.rebook.source === 'preferred' ? ' (custom)' : task.rebook.source === 'service' ? ' (service default)' : ' (from history)'}</dd></div>
             </dl>
           ) : task.reason && <p className="mt-1 text-sm text-stone">{task.reason}</p>}
-          {task.notes && !compact && <p className="mt-1 whitespace-pre-line text-sm text-stone">{task.notes}</p>}
+          {/* Compact (Dashboard): the note's first few lines; the full note is in Edit. */}
+          {task.notes && <p className={cx('mt-1 whitespace-pre-line text-sm text-stone', compact && 'line-clamp-3')} title={compact ? task.notes : undefined}>{task.notes}</p>}
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
             <span className={cx('inline-flex items-center gap-1', task.isOverdue ? 'font-medium text-rose' : 'text-stone')}>
               <Clock className="h-3.5 w-3.5" />
