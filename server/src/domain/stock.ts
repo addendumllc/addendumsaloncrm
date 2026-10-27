@@ -242,7 +242,10 @@ export async function renameCollection(from: string, to: string | null, staffId:
 export async function assignCollection(a: { collection: string | null; keys?: string[]; storeCollection?: string; nameContains?: string; skuStarts?: string; skuContains?: string; onlyWithout?: boolean; preview?: boolean }, staffId: string | null) {
   const rows = (await live()).rows.filter((r) => r.status !== 'not_tracked');
   const words = (a.nameContains ?? '').toLowerCase().split(/\s+/).filter(Boolean);
-  const hit = rows.filter((r) => (a.keys ? a.keys.includes(r.key) : true)
+  // Chosen products bring their other listings of the same SKU (To order shows them as one line).
+  const skus = new Set(rows.filter((r) => a.keys?.includes(r.key) && norm(r.sku)).map((r) => norm(r.sku)));
+  const keys = a.keys && new Set([...a.keys, ...rows.filter((r) => skus.has(norm(r.sku))).map((r) => r.key)]);
+  const hit = rows.filter((r) => (keys ? keys.has(r.key) : true)
     && (!a.storeCollection || r.collections.includes(a.storeCollection))
     && words.every((w) => r.label.toLowerCase().includes(w))
     && (!a.skuStarts || norm(r.sku).startsWith(a.skuStarts.trim().toLowerCase()))

@@ -414,6 +414,18 @@ describe('Suppliers', () => {
     expect(list.collections.map((c: any) => c.name)).toEqual(['Care']);
   });
 
+  it('moving one product to a collection (To order) moves its other listings of the same SKU too', async () => {
+    const all = (await api.get('/api/inventory-sync/stock/products')).body.products;
+    const sku = all.map((p: any) => p.sku).find((x: string | null) => x && all.filter((p: any) => p.sku === x).length > 1);
+    expect(sku).toBeTruthy();
+    const same = all.filter((p: any) => p.sku === sku);
+    const r = (await api.post('/api/inventory-sync/stock/collections/assign', { collection: 'Milbon', keys: [same[0].key] })).body;
+    expect(r.count).toBe(same.length);
+    const after = (await api.get('/api/inventory-sync/stock/products')).body.products.filter((p: any) => p.sku === sku);
+    expect(after.every((p: any) => p.collection === 'Milbon')).toBe(true);
+    expect((await api.get('/api/inventory-sync/stock/collections')).body.collections.some((c: any) => c.name === 'Milbon')).toBe(true);
+  });
+
   it('lead times: product → collection rule (longest of several, or shortest) → supplier default → flagged as missing', async () => {
     await api.post('/api/inventory-sync/stock/suppliers', { name: 'Factory', leadTimeDays: 14, shippingDays: 7 });
     await api.post('/api/inventory-sync/stock/suppliers', { name: 'No Default Co' });

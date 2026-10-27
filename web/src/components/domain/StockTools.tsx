@@ -1032,6 +1032,8 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
   const toast = useToast();
   const fallbackSupplier = useDefaultSupplier();
   const refresh = useRefresh();
+  const qc = useQueryClient();
+  const { data: internal } = useInternalCollections();
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['stock-forecast'], queryFn: () => api.get<StockForecastResponse>('/inventory-sync/stock/forecast') });
   type Filter = 'reorder' | 'alerts' | 'all' | 'skipped' | StockForecastDTO['status'];
   const [filter, setFilter] = useState<Filter>(initialFilter);
@@ -1058,10 +1060,15 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
   // no sales history is its own list — never counted as healthy.
   const matches = (i: StockForecastDTO, f: Filter) => (f === 'all' ? true : f === 'skipped' ? !!i.skippedUntil : i.skippedUntil ? false
     : f === 'alerts' ? isOut(i) || i.stockoutRisk : f === 'reorder' ? ['out', 'order_now', 'soon'].includes(i.status) : i.status === f);
-  // Always by length (18", 22", 24"…, no length last), then alphabetical by name (the length left out of the name).
+  // Always by collection (A–Z, e.g. all Milbon, then Oribe; none last), then length (18", 22", 24"…, none last), then
+  // alphabetical by name (the length left out of the name).
+  const collSizeAll = new Map<string, number>();
+  for (const i of inStoreAll) for (const c of i.collections) collSizeAll.set(c, (collSizeAll.get(c) ?? 0) + 1);
+  const collOf = (i: StockForecastDTO) => i.collection ?? [...i.collections].sort((a, b) => (collSizeAll.get(a) ?? 0) - (collSizeAll.get(b) ?? 0) || a.localeCompare(b))[0] ?? null;
+  const byColl = (a: StockForecastDTO, b: StockForecastDTO) => { const x = collOf(a), y = collOf(b); return x === y ? 0 : x == null ? 1 : y == null ? -1 : x.localeCompare(y, undefined, { sensitivity: 'base' }); };
   const lenOf = (i: StockForecastDTO) => { const l = hairLengthOf(i.label, i.sku); return l ? Number.parseInt(l, 10) : 999; };
   const nameOf = (i: StockForecastDTO) => i.label.replace(/\b\d{2}\s*(?:"|”|''|inch(?:es)?\b|in\b)/gi, '').replace(/^[\s\-–·]+/, '').trim();
-  const items = inStoreAll.filter((i) => matches(i, filter)).sort((a, b) => lenOf(a) - lenOf(b) || nameOf(a).localeCompare(nameOf(b), undefined, { numeric: true, sensitivity: 'base' }));
+  const items = inStoreAll.filter((i) => matches(i, filter)).sort((a, b) => byColl(a, b) || lenOf(a) - lenOf(b) || nameOf(a).localeCompare(nameOf(b), undefined, { numeric: true, sensitivity: 'base' }));
   const FILTERS: { value: Filter; label: string }[] = [
     { value: 'reorder', label: 'Needs ordering' }, { value: 'out', label: 'Out of stock' }, { value: 'order_now', label: 'Order now' }, { value: 'soon', label: 'Reorder soon' },
     { value: 'watch', label: 'Watchlist' }, { value: 'healthy', label: 'Healthy' }, { value: 'no_sales', label: 'No sales history' }, { value: 'alerts', label: 'Stock alerts' },
@@ -1095,6 +1102,19 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
       setPicked(new Set());
       refresh();
       onOrders();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const moveTo = async (collection: string | null) => {
+    setBusy(true);
+    try {
+      const r = await api.post<{ count: number }>('/inventory-sync/stock/collections/assign', { collection, keys: [...picked] });
+      toast(`${r.count} listing${r.count === 1 ? '' : 's'} ${collection ? `moved to ${collection}` : 'taken out of their collection'}`);
+      setPicked(new Set());
+      for (const k of ['stock-collections', 'stock-products', 'stock-forecast']) void qc.invalidateQueries({ queryKey: [k] });
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
@@ -1205,7 +1225,15 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
       {picked.size > 0 && (
         <div className="sticky top-0 z-10 mb-3 flex items-center gap-2 rounded-xl2 border border-line bg-white px-4 py-2 text-[13px] shadow-sm">
           <span className="text-ink">{picked.size} selected</span>
-          <select className="field ml-auto h-9 w-auto py-1 text-sm" value="" disabled={busy} aria-label="Skip selected"
+          {/* Move the ticked products into one of the salon's collections (or a new one), e.g. all Milbon into Milbon. */}
+          <select className="field ml-auto h-9 w-auto py-1 text-sm" value="" disabled={busy} aria-label="Move selected to a collection"
+            onChange={(e) => { const v = e.target.value; if (!v) return; const name = v === '__new' ? window.prompt('New collection name (e.g. Milbon)')?.trim() : v === '__none' ? null : v; if (name !== undefined && name !== '') void moveTo(name); }}>
+            <option value="">Move to collection…</option>
+            {(internal?.collections ?? []).map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+            <option value="__new">+ New collection…</option>
+            <option value="__none">No collection</option>
+          </select>
+          <select className="field h-9 w-auto py-1 text-sm" value="" disabled={busy} aria-label="Skip selected"
             onChange={(e) => { const v = e.target.value; if (v) void skip([...picked], v === 'forever' ? null : Number(v)); }}>
             <option value="">Skip (not ordering)…</option><option value="14">for 2 weeks</option><option value="30">for 30 days</option><option value="90">for 90 days</option><option value="forever">until I turn it back on</option>
           </select>
