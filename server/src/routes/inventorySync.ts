@@ -6,7 +6,7 @@ import {
   copyShopifySkuToSquare, editLinkedProduct, getRun, linkByIds, linkBySku, listLinks, listRuns, markSeparate, resolveLink, setProductKind, setShopifySync, skuCandidates, startInventorySync, syncOverview, unlink,
   unmarkSeparate,
 } from '../domain/inventorySync.js';
-import { addToSquare, applyNewLength, applyPrices, applyProPrices, newLengthPlan, priceList, proPricePlan, squareCandidates,
+import { addToSquare, applyNewLength, applySwatches, swatchPlan, applyPrices, applyProPrices, newLengthPlan, priceList, proPricePlan, squareCandidates,
   applyStockChanges, assignCollection, createPurchaseOrders, deleteLeadRule, setSupplierLeadDefault, leadRules, leadTimesFor, saveLeadRule, internalCollections, mergeSuppliers, renameCollection, saveCollectionList, productSales, skipProducts, suggestPurchaseOrders, suggestedOrderPlan, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
   assignSupplier, deleteSupplier, refreshShopifySales, renameSupplier, saveProductSettings, saveSupplier, setForecastSettings, setSupplierLeadTime, stockForecast, stockHistory, stockProducts, updatePurchaseOrder,
 } from '../domain/stock.js';
@@ -224,6 +224,20 @@ inventorySyncRouter.post('/stock/new-length/preview', ah(async (req, res) => {
 inventorySyncRouter.post('/stock/new-length', ah(async (req, res) => {
   const r = await applyNewLength(parse(newLengthBody, req.body));
   await logAction(req, 'stock.new_length', 'stock', null, { created: r.created, failed: r.failed.length });
+  res.json(r);
+}));
+// A sample swatch for each matching product (e.g. Clip-Ins): preview, then create. Prices can wait (see SwatchInput).
+const swatchBody = z.object({
+  search: z.string().trim().min(1).max(100), stores: z.object({ pro: z.boolean(), retail: z.boolean(), square: z.boolean() }),
+  prices: z.object({ pro: cents.nullable(), retail: cents.nullable(), retailPro: cents.nullable(), square: cents.nullable() }),
+});
+inventorySyncRouter.post('/stock/swatches/preview', ah(async (req, res) => {
+  const { services: _s, ...plan } = await swatchPlan(parse(swatchBody, req.body));
+  res.json({ ...plan, plan: plan.plan.map(({ options: _o, productId: _p, ...p }) => ({ ...p, priceCents: p.priceCents < 0 ? null : p.priceCents })) });
+}));
+inventorySyncRouter.post('/stock/swatches', ah(async (req, res) => {
+  const r = await applySwatches(parse(swatchBody, req.body));
+  await logAction(req, 'stock.swatches', 'stock', null, { created: r.created, failed: r.failed.length });
   res.json(r);
 }));
 // Pro listings in the retail store take the professional store's price for the same SKU (preview, then apply).

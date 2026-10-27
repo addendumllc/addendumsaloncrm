@@ -311,3 +311,35 @@ describe('Add a length', () => {
     }
   });
 });
+
+describe('Add a sample swatch', () => {
+  it('one "Sample Swatch" per product (SWATCH- + colour code) in the chosen stores — no price yet: $0 online, variable in Square', async () => {
+    const { DEMO_PRODUCTS } = await import('../src/integrations/square/MockSquareService.js');
+    const PROSTORE = { sku: '18-BMCI-120g', inventoryItemId: 'gid://shopify/InventoryItem/87', label: 'Black Magic Clip-Ins – 18 inch - 120g', tracked: true };
+    const RETAIL = { sku: '18-BMCI-120g', inventoryItemId: 'gid://shopify/InventoryItem/287', label: 'Black Magic Clip-Ins – 18 inch - 120g', tracked: true };
+    const c1 = MockShopifyService.catalog.length; const c2 = MockShopifyStore2.catalog.length; const sq = DEMO_PRODUCTS.length;
+    MockShopifyService.catalog.push(PROSTORE);
+    MockShopifyStore2.catalog.push(RETAIL);
+    DEMO_PRODUCTS.push({ ...DEMO_PRODUCTS[0], variationId: 'demo-clip18s', itemId: 'item-clips', itemName: 'Black Magic Clip-Ins', variationName: '18" Clip-Ins', sku: '18-BMCI-120g', upc: null, priceCents: 55000, trackInventory: true });
+    const body = { search: 'clip-ins', stores: { pro: true, retail: true, square: true }, prices: { pro: null, retail: null, retailPro: null, square: null } };
+    try {
+      const plan = (await api.post('/api/inventory-sync/stock/swatches/preview', body)).body;
+      expect(plan.plan.map((p: any) => [p.store, p.sku, p.option, p.priceCents]).sort()).toEqual([
+        ['pro', 'SWATCH-BMCI', 'Sample Swatch', 0],
+        ['retail', 'SWATCH-BMCI', 'Sample Swatch', 0],
+        ['square', 'SWATCH-BMCI', 'Sample Swatch', null],
+      ]);
+      // Only the chosen stores.
+      expect((await api.post('/api/inventory-sync/stock/swatches/preview', { ...body, stores: { pro: false, retail: true, square: false } })).body.plan.map((p: any) => p.store)).toEqual(['retail']);
+      const r = (await api.post('/api/inventory-sync/stock/swatches', body)).body;
+      expect(r).toMatchObject({ created: 3, failed: [] });
+      const added = MockShopifyService.catalog.find((c) => c.sku === 'SWATCH-BMCI')!;
+      expect(MockShopifyService.stock.get(added.inventoryItemId)).toBe(0);
+      expect(DEMO_PRODUCTS.find((p) => p.sku === 'SWATCH-BMCI')).toMatchObject({ itemId: 'item-clips', variationName: 'Sample Swatch', priceCents: null });
+      // Already there: nothing more to create.
+      expect((await api.post('/api/inventory-sync/stock/swatches/preview', body)).body.plan).toEqual([]);
+    } finally {
+      MockShopifyService.catalog.splice(c1); MockShopifyStore2.catalog.splice(c2); DEMO_PRODUCTS.splice(sq);
+    }
+  });
+});

@@ -70,7 +70,7 @@ export class MockSquareService implements SquareService {
       return { sku: it.sku, variationId: id };
     });
   }
-  async addVariations(variations: { itemId: string; name: string; sku: string; priceCents: number }[]) {
+  async addVariations(variations: { itemId: string; name: string; sku: string; priceCents: number | null }[]) {
     return variations.map((v, i) => {
       const item = DEMO_PRODUCTS.find((p) => p.itemId === v.itemId);
       if (!item) throw new Error('not found');

@@ -281,12 +281,14 @@ export class SquareApiService implements SquareService {
     return (res?.id_mappings ?? []).filter((m) => varIds.has(m.client_object_id)).map((m) => ({ sku: varIds.get(m.client_object_id)!, variationId: m.object_id }));
   }
 
-  async addVariations(variations: { itemId: string; name: string; sku: string; priceCents: number }[], idempotencyKey: string) {
+  async addVariations(variations: { itemId: string; name: string; sku: string; priceCents: number | null }[], idempotencyKey: string) {
     const ids = new Map<string, string>();
     const objects = variations.map((v, i) => {
       ids.set(`#var-${i}`, v.sku);
       return { type: 'ITEM_VARIATION', id: `#var-${i}`, present_at_all_locations: true, item_variation_data: {
-        item_id: v.itemId, name: v.name, sku: v.sku, pricing_type: 'FIXED_PRICING', price_money: { amount: v.priceCents, currency: 'USD' }, track_inventory: true,
+        // No price yet: variable pricing (the price is entered at the sale), never a $0 item.
+        item_id: v.itemId, name: v.name, sku: v.sku, track_inventory: true,
+        ...(v.priceCents == null ? { pricing_type: 'VARIABLE_PRICING' } : { pricing_type: 'FIXED_PRICING', price_money: { amount: v.priceCents, currency: 'USD' } }),
       } };
     });
     const res = await this.call<{ id_mappings?: { client_object_id: string; object_id: string }[] }>('POST', '/v2/catalog/batch-upsert', { idempotency_key: idempotencyKey.slice(0, 128), batches: [{ objects }] });

@@ -1919,6 +1919,118 @@ export async function applyNewLength(input: NewLengthInput) {
   return { created, failed, skipped };
 }
 
+// ---------------- Add a sample swatch (Inventory → Products → Add a length / swatch) ----------------
+export interface SwatchInput {
+  /** Words the products' names must contain, e.g. "Clip-Ins". */
+  search: string;
+  /** Which stores get it. */
+  stores: { pro: boolean; retail: boolean; square: boolean };
+  /** Prices (null: no price yet — $0 online, where it can't sell until stock is added; variable price in Square). */
+  prices: { pro: number | null; retail: number | null; retailPro: number | null; square: number | null };
+}
+export const SWATCH_OPTION = 'Sample Swatch';
+/** "18-BMCI-120g" → "SWATCH-BMCI": one swatch per colour, whatever the length or weight. */
+export const swatchSku = (sku: string) => {
+  const code = sku.trim().replace(/^\d{1,3}-/, '').replace(/-\d+\s*g$/i, '');
+  return code ? `SWATCH-${code.toUpperCase()}` : null;
+};
+
+/**
+ * Plans a "Sample Swatch" variant for each matching product (one per product, from its SKU's colour code), in the
+ * chosen stores — the professional store, the retail store's retail and Pro listings, and Square. The option that
+ * differs between the product's variants (the length) becomes "Sample Swatch". Stock starts at 0. Nothing is changed here.
+ */
+export async function swatchPlan(input: SwatchInput) {
+  const { config } = await import('../config.js');
+  const c = config();
+  const s1 = shopifyService();
+  const s2 = shopifyService2();
+  const words = input.search.toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) throw badRequest('Enter which products, e.g. Clip-Ins.');
+  const proFirst = /professional/i.test(c.SHOPIFY_STORE_DOMAIN ?? '') || !/professional/i.test(c.SHOPIFY2_STORE_DOMAIN ?? '');
+  const [pro, retail] = s1 && s2 ? (proFirst ? [s1, s2] : [s2, s1]) : [s1, null];
+  const names = { pro: shopifyNameOf(proFirst ? 'shopify' : 'shopify2'), retail: s2 ? shopifyNameOf(proFirst ? 'shopify2' : 'shopify') : null, square: storeNames().square };
+  const matches = (text: string) => words.every((w) => text.toLowerCase().includes(w));
+  const plan: NewVariantPlan[] = [];
+  const skipped: { store: string; label: string; reason: string }[] = [];
+
+  const shopifyPart = async (svc: NonNullable<typeof s1>, which: 'pro' | 'retail') => {
+    const prices = await svc.listPrices();
+    const hits = prices.filter((p) => p.sku && !/^swatch-/i.test(p.sku) && matches(`${p.productTitle ?? ''} ${p.label}`));
+    const variants = new Map((await svc.productVariants([...new Set(hits.map((h) => h.productId))])).map((v) => [v.productId, v]));
+    const named = (p: { label: string; productTitle?: string }) => /\bpro\b/i.test(`${p.productTitle ?? ''} ${p.label}`);
+    const skusWithNamedPro = new Set(prices.filter(named).map((p) => norm(p.sku)));
+    const byProduct = new Map<string, typeof hits>();
+    for (const h of hits) byProduct.set(h.productId, [...(byProduct.get(h.productId) ?? []), h]);
+    for (const [productId, list] of byProduct) {
+      const h = [...list].sort((a, b) => (a.sku ?? '').localeCompare(b.sku ?? '', undefined, { numeric: true }))[0];
+      const isPro = which === 'retail' && (named(h) || (isProListing(h) && !skusWithNamedPro.has(norm(h.sku))));
+      const storeName = which === 'pro' ? names.pro : `${names.retail}${isPro ? ' (Pro listing)' : ''}`;
+      const price = which === 'pro' ? input.prices.pro : isPro ? input.prices.retailPro : input.prices.retail;
+      const sku = swatchSku(h.sku!);
+      const pv = variants.get(productId);
+      const source = pv?.variants.find((v) => norm(v.sku) === norm(h.sku));
+      if (!sku || !pv || !source) { skipped.push({ store: storeName, label: h.productTitle ?? h.label, reason: 'Couldn’t read its options' }); continue; }
+      // The option(s) that differ between its variants (the length) become "Sample Swatch"; a single variant: the first.
+      const varies = source.options.map((o, i) => pv.variants.some((v) => v.options[i]?.value !== o.value));
+      const options = source.options.map((o, i) => ({ name: o.name, value: varies[i] || (!varies.some(Boolean) && i === 0) ? SWATCH_OPTION : o.value }));
+      const taken = pv.variants.some((v) => norm(v.sku) === norm(sku) || v.options.every((o, i) => o.value === options[i]?.value));
+      if (taken) { skipped.push({ store: storeName, label: h.productTitle ?? h.label, reason: 'Already has a sample swatch' }); continue; }
+      plan.push({ store: which, label: h.productTitle ?? h.label, fromSku: h.sku!, sku, option: options.map((o) => o.value).join(' / '), priceCents: price ?? 0, productId, options, pro: isPro });
+    }
+  };
+  if (pro && input.stores.pro) await shopifyPart(pro, 'pro');
+  if (retail && input.stores.retail) await shopifyPart(retail, 'retail');
+
+  const sq = await squareService();
+  if (sq && input.stores.square) {
+    const products = await sq.listProducts();
+    const have = new Set(products.map((p) => norm(p.sku)).filter(Boolean));
+    const byItem = new Map<string, typeof products>();
+    for (const p of products.filter((x) => x.sku && !/^swatch-/i.test(x.sku) && matches(`${x.itemName} ${x.variationName}`))) byItem.set(p.itemId, [...(byItem.get(p.itemId) ?? []), p]);
+    for (const [itemId, list] of byItem) {
+      const p = [...list].sort((a, b) => (a.sku ?? '').localeCompare(b.sku ?? '', undefined, { numeric: true }))[0];
+      const sku = swatchSku(p.sku!);
+      if (!sku) continue;
+      if (have.has(norm(sku)) || products.some((x) => x.itemId === itemId && /swatch/i.test(x.variationName ?? ''))) { skipped.push({ store: names.square, label: p.itemName, reason: 'Already has a sample swatch' }); continue; }
+      have.add(norm(sku));
+      plan.push({ store: 'square', label: p.itemName, fromSku: p.sku!, sku, option: SWATCH_OPTION, priceCents: input.prices.square ?? -1, productId: itemId, options: [] });
+    }
+  }
+  return { stores: names, plan, skipped, services: { pro, retail, sq } };
+}
+
+/** Creates what swatchPlan lists (worked out again now). Each store and product is tried separately. */
+export async function applySwatches(input: SwatchInput) {
+  const { plan, skipped, services } = await swatchPlan(input);
+  const failed: { label: string; store: string; message: string }[] = [];
+  let created = 0;
+  for (const which of ['pro', 'retail'] as const) {
+    const svc = services[which];
+    const mine = plan.filter((p) => p.store === which);
+    if (!svc || !mine.length) continue;
+    const loc = await svc.locationId();
+    for (const p of mine) {
+      try { created += (await svc.addVariants(p.productId, [{ options: p.options, sku: p.sku, priceCents: p.priceCents }], loc)).length; }
+      catch (e) { failed.push({ label: p.label, store: which, message: (e as Error).message }); }
+    }
+  }
+  const sqPlan = plan.filter((p) => p.store === 'square');
+  if (services.sq && sqPlan.length) {
+    try {
+      const made = await services.sq.addVariations(sqPlan.map((p) => ({ itemId: p.productId, name: p.option, sku: p.sku, priceCents: p.priceCents < 0 ? null : p.priceCents })), `swatch-${Date.now().toString(36)}`);
+      created += made.length;
+      const ok = new Set(made.map((m) => norm(m.sku)));
+      for (const p of sqPlan) if (!ok.has(norm(p.sku))) failed.push({ label: p.label, store: 'square', message: 'Square didn’t confirm it' });
+    } catch (e) {
+      const msg = e instanceof IntegrationError && e.authProblem ? 'Square needs the ITEMS_WRITE permission to add variations.' : (e as Error).message;
+      for (const p of sqPlan) failed.push({ label: p.label, store: 'square', message: msg });
+    }
+  }
+  forgetStockCache();
+  return { created, failed, skipped };
+}
+
 // ---------------- Add online products to Square (Inventory → Products → Add to Square) ----------------
 /**
  * "Black Magic - Clip-Ins - 18 inch - 120g" → item "Black Magic Clip-Ins", variation `18" Clip-Ins`, category

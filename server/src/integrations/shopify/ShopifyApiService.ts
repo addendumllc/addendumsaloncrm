@@ -287,7 +287,8 @@ export class ShopifyApiService implements ShopifyService {
         `mutation($pid: ID!, $v: [ProductVariantsBulkInput!]!) { productVariantsBulkCreate(productId: $pid, variants: $v) { productVariants { sku inventoryItem { id } } userErrors { field message } } }`,
         { pid: productId, v: variants.map((x) => ({
           optionValues: x.options.map((o) => ({ optionName: o.name, name: o.value })), price: (x.priceCents / 100).toFixed(2),
-          inventoryItem: { sku: x.sku, tracked: true }, inventoryQuantities: [{ locationId, availableQuantity: 0 }],
+          // Tracked, starting at 0, and never sold past 0 — a new variant can't be bought until stock is added.
+          inventoryItem: { sku: x.sku, tracked: true }, inventoryPolicy: 'DENY', inventoryQuantities: [{ locationId, availableQuantity: 0 }],
         })) });
     } catch (e) {
       if (e instanceof IntegrationError && e.authProblem) throw new IntegrationError('shopify', 'The Shopify app needs the write_products permission to add variants. Add it to the app, then try again.', false, true, e.technical);
