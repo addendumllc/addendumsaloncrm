@@ -31,6 +31,7 @@ import { accessRouter } from './routes/access.js';
 import { announcementsRouter } from './routes/announcements.js';
 import { projectionsRouter } from './routes/projections.js';
 import { contentRouter } from './routes/content.js';
+import { contentStudioRouter } from './routes/contentStudio.js';
 import { networkGate } from './auth/access.js';
 import { webhooksRouter } from './routes/webhooks.js';
 
@@ -131,6 +132,7 @@ export function createApp() {
   app.use('/api/access', accessRouter);
   app.use('/api/announcements', announcementsRouter);
   app.use('/api/projections', projectionsRouter);
+  app.use('/api/content/studio', contentStudioRouter);
   app.use('/api/content', contentRouter);
   app.use('/api', miscRouter);
   app.use('/api', settingsRouter);

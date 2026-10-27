@@ -141,7 +141,7 @@ function SignedIn() {
     <>{awayNote}{can('timeclock:use') && <FirstOpenOfDay userId={me!.id} />}<Routes>
       <Route path="/" element={canAny('dashboard:view') ? <DashboardPage /> : <Navigate to={home} replace />} />
       <Route path="/follow-ups" element={guard(['tasks:read_all', 'tasks:read_own'], <FollowUpsPage />)} />
-      <Route path="/content" element={guard(['content:manage'], <ContentPage />)} />
+      <Route path="/content" element={guard(['content:manage', 'content:studio'], <ContentPage />)} />
       <Route path="/tasks" element={guard(['tasks:read_all', 'tasks:read_own', 'hair:manage'], <TasksPage />)} />
       {/* For people without the dashboard (stylists by default); everyone else sees announcements on the dashboard. */}
       <Route path="/announcements" element={guard(['announcements:read', 'announcements:publish', 'announcements:manage'], <AnnouncementsPage />)} />

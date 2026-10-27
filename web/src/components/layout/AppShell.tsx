@@ -37,7 +37,7 @@ export const NAV: { to: string; label: string; icon: typeof Home; end?: boolean;
   { to: '/clients', label: 'Clients', icon: Users, anyOf: ['clients:read', 'clients:read_assigned', 'leads:read', 'hair:manage'] },
   { to: '/inventory', label: 'Order Hair', icon: Package, anyOf: ['inventory:order', 'inventory:read_all', 'inventory:view', 'inventory:manage'] },
   { to: '/inventory-sync', label: 'Inventory', icon: ArrowLeftRight, anyOf: ['inventory:sync'] },
-  { to: '/content', label: 'Content Calendar', icon: Images, anyOf: ['content:manage'] },
+  { to: '/content', label: 'Content Calendar', icon: Images, anyOf: ['content:manage', 'content:studio'] },
   { to: '/my-commission', label: 'Earnings & Goals', icon: Wallet, anyOf: ['commission:own'] },
   { to: '/commission', label: 'Team Payroll', icon: CircleDollarSign, anyOf: ['commission:team', 'commission:approve'] },
   // Analytics: the stores' reports, plus What to order, Inventory and Purchases (its sub-tabs).

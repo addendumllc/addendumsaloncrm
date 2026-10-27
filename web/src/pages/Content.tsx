@@ -11,11 +11,22 @@ import { AssetsTab } from './content/Assets';
 import { AnalyticsTab } from './content/Analytics';
 import { SettingsTab } from './content/SettingsTab';
 import { PostEditor, type Prefill } from './content/PostEditor';
+import { StudioTab } from './content/Studio';
+import { useCanDo } from '../api/hooks';
 
-type Tab = 'calendar' | 'ideas' | 'assets' | 'planning' | 'analytics' | 'settings';
+type Tab = 'calendar' | 'studio' | 'ideas' | 'assets' | 'planning' | 'analytics' | 'settings';
+
+/** Content calendar — or just the Content Studio for people who only have "Content Studio". */
+export function ContentPage() {
+  const canDo = useCanDo();
+  if (!canDo('content:manage') && !canDo('*')) return (
+    <div><PageHeader title="Content Studio" subtitle="On-brand copy and photo/video ideas for every format." /><StudioTab /></div>
+  );
+  return <ContentCalendarPage />;
+}
 
 /** Content calendar for @addendum.salon, @addendumhair and @addendumhairpro: plan, write, review, publish and measure. */
-export function ContentPage() {
+function ContentCalendarPage() {
   const b = useContentBasics();
   const [params, setParams] = useSearchParams();
   // Planning now sits under the calendar (old ?tab=planning links open the calendar).
@@ -43,10 +54,11 @@ export function ContentPage() {
       <PageHeader title="Content calendar" subtitle={b.mine.map((a) => a.name).join(' · ')}
         actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => create()}>New post</Button>} />
       <PageTabs value={tab} onChange={setTab} options={[
-        { value: 'calendar', label: 'Calendar' }, { value: 'ideas', label: 'Ideas library' }, { value: 'assets', label: 'Assets' }, { value: 'analytics', label: 'Analytics' },
+        { value: 'calendar', label: 'Calendar' }, { value: 'studio', label: 'Studio' }, { value: 'ideas', label: 'Ideas library' }, { value: 'assets', label: 'Assets' }, { value: 'analytics', label: 'Analytics' },
         ...(b.isAdmin ? [{ value: 'settings' as const, label: 'Settings' }] : []),
       ]} />
       {tab === 'calendar' && <CalendarTab b={b} onOpen={open} onNew={(date) => create({ date })} onUse={create} />}
+      {tab === 'studio' && <StudioTab />}
       {tab === 'ideas' && <IdeasTab b={b} onUse={create} />}
       {tab === 'assets' && <AssetsTab b={b} />}
       {tab === 'analytics' && <AnalyticsTab b={b} onOpen={open} />}

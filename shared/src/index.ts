@@ -136,6 +136,7 @@ export const PERMISSIONS_CATALOG: PermissionDef[] = [
   { key: 'workspace:salon', category: 'Businesses', action: 'view', label: 'Addendum Salon workspace', description: 'Can switch to the Addendum Salon workspace (its look, menu and defaults).' },
   { key: 'workspace:hair', category: 'Businesses', action: 'view', label: 'Addendum Hair workspace', description: 'Can switch to the Addendum Hair workspace. Data in it (Hair clients, Shopify inventory…) still needs its own permission.' },
   { key: 'content:manage', category: 'Marketing', action: 'edit', label: 'Content calendar', description: 'Plan and draft posts for the social accounts, use the ideas library and AI drafts, upload photos and videos, and send posts for review.' },
+  { key: 'content:studio', category: 'Marketing', action: 'create', label: 'Content Studio', description: 'Generate on-brand copy and photo/video ideas (posts, Reels, Stories, texts, emails, signage) and save them — without the rest of the content calendar.' },
   { key: 'content:approve', category: 'Marketing', action: 'edit', label: 'Approve content', description: 'Approve posts or request changes.' },
   { key: 'content:publish', category: 'Marketing', action: 'edit', label: 'Schedule and publish content', description: 'Schedule approved posts, turn on auto-posting, and confirm posts as published.' },
   { key: 'hair:manage', category: 'Addendum Hair', action: 'edit', label: 'Manage Addendum Hair clients and tasks', description: 'Addendum Hair’s own client list, tasks and follow-ups (separate from salon clients).' },
