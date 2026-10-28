@@ -139,6 +139,8 @@ export const access = (t: Pick<Row, 'stylist_staff_id' | 'created_by_staff_id'>,
     download: see && (own || can(u, 'transformations:download')),
   };
 };
+/** Social-post details (Instagram links, captions, hashtags, tags) are administrators' (manage the library or approve consent). */
+const socialAdmin = (u: Who) => can(u, 'transformations:manage') || can(u, 'transformations:consent');
 const seesAll = (u: Who) => can(u, 'transformations:view_all') || can(u, 'transformations:manage');
 
 const BASE = `SELECT t.*, s.name AS stylist_name, NULLIF(TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')), '') AS client_name
@@ -344,6 +346,7 @@ export async function createTransformation(b: TransformationInput, u: Who) {
   const status = b.consentStatus ?? 'pending';
   // New work starts as Pending Consent or Internal Use Only; approval is a separate, permissioned step.
   if (status !== 'pending' && status !== 'internal' && status !== 'do_not_publish') throw badRequest('New transformations start as Pending Consent or Internal Use Only. Approve them for social media once consent is verified.');
+  if (!socialAdmin(u)) b = { ...b, caption: null, hashtags: null, tags: [] };
   const services = [b.mainService, ...(b.services ?? [])];
   const id = await db().tx(async (q) => {
     const [r] = await q.query<{ id: string }>(`INSERT INTO transformations(title, stylist_staff_id, service_date, client_id, main_service, details, technical_notes, internal_notes, caption, hashtags, tags, created_by_staff_id, appointment_id)
@@ -355,7 +358,7 @@ export async function createTransformation(b: TransformationInput, u: Who) {
     await q.query('INSERT INTO transformation_consent(transformation_id, status) VALUES ($1,$2)', [r.id, status]);
     return r.id;
   });
-  if (b.instagramUrl) await addInstagram(id, b.instagramUrl, true, u);
+  if (b.instagramUrl && socialAdmin(u)) await addInstagram(id, b.instagramUrl, true, u);
   return getTransformation(id, u);
 }
 
@@ -379,6 +382,7 @@ export async function updateTransformation(id: string, b: Partial<Transformation
   if (b.details !== undefined) put('details', JSON.stringify(b.details ?? {}));
   if (b.technicalNotes !== undefined) put('technical_notes', b.technicalNotes);
   if (b.internalNotes !== undefined) put('internal_notes', b.internalNotes);
+  if ((b.caption !== undefined || b.hashtags !== undefined || b.tags !== undefined) && !socialAdmin(u)) throw forbidden('Captions, hashtags and tags are for social posts — administrators add them.');
   if (b.caption !== undefined) put('caption', b.caption);
   if (b.hashtags !== undefined) put('hashtags', b.hashtags);
   if (b.tags !== undefined) put('tags', cleanTags(b.tags));
@@ -650,6 +654,7 @@ export async function instagramPreview(url: string): Promise<{ status: 'ok' | 'u
 }
 
 export async function addInstagram(id: string, rawUrl: string, primary: boolean, u: Who) {
+  if (!socialAdmin(u)) throw forbidden('Instagram links are for social posts — administrators add them.');
   await editable(id, u);
   const p = parseInstagramUrl(rawUrl);
   if (!p) throw badRequest('Paste the link to an Instagram post or Reel (instagram.com/p/… or instagram.com/reel/…).');
@@ -666,6 +671,7 @@ async function igRow(iid: string, u: Who) {
   const i = await db().one<any>('SELECT * FROM transformation_instagram WHERE id = $1', [iid]);
   if (!i) throw notFound('That link');
   await editable(i.transformation_id, u);
+  if (!socialAdmin(u)) throw forbidden('Instagram links are for social posts — administrators manage them.');
   return i;
 }
 export async function refreshInstagram(iid: string, u: Who) {

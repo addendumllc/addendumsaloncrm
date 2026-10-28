@@ -59,7 +59,10 @@ describe('Transformations Library', () => {
     expect(t.code).toMatch(/^T-\d{4}$/);
     expect(t.stylistName).toBe('Jennifer');
     expect(t.consent.status).toBe('pending'); // never approved by default
-    expect(t.tags).toEqual(['copper', 'fall']);
+    // Captions, hashtags and tags are for social posts: a stylist's are left out; administrators add them.
+    expect([t.tags, t.caption]).toEqual([[], null]);
+    const adm = await owner.patch(`/api/transformations/${tid}`, { caption: 'Warm copper for fall', tags: ['#Copper', 'fall'] });
+    expect(adm.body.transformation.tags).toEqual(['copper', 'fall']);
     expect(t.missing).toContain('Photo or Instagram link');
 
     const up = await jen.upload(`/api/transformations/${tid}/photos?kind=before&name=IMG_1.jpg`, jpeg('a'));
@@ -78,7 +81,9 @@ describe('Transformations Library', () => {
     expect((await jen.file(`/api/transformations/media/${photoA}/original`)).body.equals(jpeg('a'))).toBe(true);
     expect(fs.readdirSync(path.join(MEDIA, 'originals'), { recursive: true }).filter((f) => String(f).includes('.')).length).toBe(2);
 
-    const e = await jen.patch(`/api/transformations/${tid}`, { title: 'Copper balayage', caption: 'Copper, softly' });
+    expect((await jen.patch(`/api/transformations/${tid}`, { caption: 'Copper, softly' })).status).toBe(403);
+    await owner.patch(`/api/transformations/${tid}`, { caption: 'Copper, softly' });
+    const e = await jen.patch(`/api/transformations/${tid}`, { title: 'Copper balayage' });
     expect([e.status, e.body.transformation.title]).toEqual([200, 'Copper balayage']);
     const order = await jen.post(`/api/transformations/${tid}/photos/order`, { ids: [up2.body.photoId, photoA] });
     expect(order.body.transformation.photos[0].kind).toBe('after');
@@ -103,25 +108,27 @@ describe('Transformations Library', () => {
   });
 
   it('3. Instagram links: a preview from oEmbed when available, otherwise a link card (nothing downloaded)', async () => {
-    const bad = await jen.post(`/api/transformations/${tid}/instagram`, { url: 'https://example.com/p/abc' });
+    // Social-post details: administrators only.
+    expect((await jen.post(`/api/transformations/${tid}/instagram`, { url: 'https://www.instagram.com/p/AbC123/' })).status).toBe(403);
+    const bad = await owner.post(`/api/transformations/${tid}/instagram`, { url: 'https://example.com/p/abc' });
     expect(bad.status).toBe(400);
     // Without the Meta app: kept as a link card.
-    const r = await jen.post(`/api/transformations/${tid}/instagram`, { url: 'https://instagram.com/reel/Cx12_ab/?igsh=xyz' });
+    const r = await owner.post(`/api/transformations/${tid}/instagram`, { url: 'https://instagram.com/reel/Cx12_ab/?igsh=xyz' });
     const ig = r.body.transformation.instagram[0];
-    expect(ig).toMatchObject({ url: 'https://www.instagram.com/reel/Cx12_ab/', postType: 'reel', previewStatus: 'no_access', thumbnailUrl: null, addedBy: 'Jennifer' });
+    expect(ig).toMatchObject({ url: 'https://www.instagram.com/reel/Cx12_ab/', postType: 'reel', previewStatus: 'no_access', thumbnailUrl: null, addedBy: 'Lisa Ha' });
     // With the Meta app: metadata only.
     await api.put('/api/admin/credentials/instagram', { values: { META_APP_ID: '123', META_APP_SECRET: 'sec' } }).catch(() => null);
     const { loadConfig, config } = await import('../src/config.js');
     if (!config().META_APP_ID) loadConfig({ ...(process.env as any), DEMO_MODE: 'true', OWNER_EMAIL: 'owner@addendumsalon.com', OWNER_PASSWORD: 'addendum-demo', APP_URL: 'http://localhost:4000', META_APP_ID: '123', META_APP_SECRET: 'sec' });
     const calls: string[] = [];
     setOembedFetch(async (u) => { calls.push(u); return u.includes('DELETED') ? { status: 400, json: { error: { code: 24, message: 'not found' } } } : { status: 200, json: { thumbnail_url: 'https://scontent.cdninstagram.com/x.jpg', author_name: 'addendum.salon', title: 'Copper' } }; });
-    const ok = await jen.post(`/api/transformations/${tid}/instagram`, { url: 'https://www.instagram.com/p/AbC123/', isPrimary: true });
+    const ok = await owner.post(`/api/transformations/${tid}/instagram`, { url: 'https://www.instagram.com/p/AbC123/', isPrimary: true });
     const p = ok.body.transformation.instagram.find((i: any) => i.isPrimary);
     expect(p).toMatchObject({ postType: 'post', previewStatus: 'ok', author: 'addendum.salon', thumbnailUrl: 'https://scontent.cdninstagram.com/x.jpg' });
     expect(calls[0]).toContain('instagram_oembed');
-    const gone = await jen.post(`/api/transformations/${tid}/instagram`, { url: 'https://www.instagram.com/p/DELETED/' });
+    const gone = await owner.post(`/api/transformations/${tid}/instagram`, { url: 'https://www.instagram.com/p/DELETED/' });
     expect(gone.body.transformation.instagram.find((i: any) => i.url.includes('DELETED')).previewStatus).toBe('unavailable');
-    expect((await jen.post(`/api/transformations/${tid}/instagram`, { url: 'https://www.instagram.com/p/AbC123/' })).status).toBe(400); // already there
+    expect((await owner.post(`/api/transformations/${tid}/instagram`, { url: 'https://www.instagram.com/p/AbC123/' })).status).toBe(400); // already there
     // An Instagram link is not consent.
     expect(ok.body.transformation.consent.status).toBe('pending');
   });

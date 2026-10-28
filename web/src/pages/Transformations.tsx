@@ -328,11 +328,11 @@ function Detail({ id, o, onClose, onEdit, onExport, onChanged }: { id: string; o
           {t.canSeeTechnical && (t.technicalNotes || t.internalNotes) && <Section title="Technical & internal (not exported to social)">
             <div className="rounded-lg border border-amber/30 bg-amber/5 p-3"><Rows rows={[['Formula / technical', t.technicalNotes], ['Internal notes', t.internalNotes]]} /></div>
           </Section>}
-          <Section title="For social media" aside={socialText ? <Button size="sm" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copy(socialText, toast)}>Copy caption</Button> : undefined}>
+          {(o.can.manage || o.can.consent) && <Section title="For social media" aside={socialText ? <Button size="sm" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copy(socialText, toast)}>Copy caption</Button> : undefined}>
             {t.caption ? <p className="whitespace-pre-wrap text-[14px] text-ink">{t.caption}</p> : <p className="text-[13px] text-stone">No caption yet.</p>}
             {t.hashtags && <p className="mt-1 text-[13px] text-plum">{t.hashtags}</p>}
             <Button size="sm" variant="ghost" className="mt-1 !px-0" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copy([t.mainService, ...t.services.filter((s) => s !== t.mainService), e?.hasExtensions ? `${e.method ?? 'Extensions'}${e.length ? ` · ${e.length}` : ''}${e.shade ? ` · ${e.shade}` : ''}` : null].filter(Boolean).join(' · '), toast)}>Copy service info</Button>
-          </Section>
+          </Section>}
           <Section title="Consent & publishing" aside={(t.canEdit || o.can.consent) ? <Button size="sm" onClick={() => setConsent(true)}>Update</Button> : undefined}>
             <div className="mb-2 flex flex-wrap gap-1.5"><ConsentBadge t={t} />{t.consent.verifiedAt ? <Badge tone="sage">Verified by {t.consent.verifiedBy}</Badge> : <Badge>Not verified</Badge>}</div>
             <Rows rows={[['Client consent', { unknown: 'Not asked yet', requested: 'Requested', given: 'Given', declined: 'Declined' }[t.consent.clientConsent]],
@@ -496,6 +496,8 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
   const allServices = [d.mainService, ...d.services];
   const extRelevant = allServices.some(isExt) || d.hasExtensions;
   const canTech = !cur || cur.canSeeTechnical;
+  // Instagram links, captions, hashtags and tags are for social posts: administrators only (the server checks too).
+  const social = o.can.manage || o.can.consent;
   const photos = cur?.photos ?? [];
 
   const add = (files: FileList | File[] | null) => {
@@ -529,7 +531,7 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
     ...(o.can.manage && d.stylistStaffId && d.stylistStaffId !== cur?.stylistStaffId ? { stylistStaffId: d.stylistStaffId } : {}),
     details: Object.fromEntries(Object.entries(d.details).map(([k, v]) => [k, v || null])),
     ...(canTech ? { technicalNotes: d.technicalNotes || null, internalNotes: d.internalNotes || null } : {}),
-    caption: d.caption || null, hashtags: d.hashtags || null, tags: d.tags.split(',').map((x) => x.trim()).filter(Boolean),
+    ...(social ? { caption: d.caption || null, hashtags: d.hashtags || null, tags: d.tags.split(',').map((x) => x.trim()).filter(Boolean) } : {}),
     extension: extRelevant ? { hasExtensions: true, ...Object.fromEntries(Object.entries(d.ext).map(([k, v]) => [k, k === 'blending' ? !!v : v || null])) } : null,
   });
 
@@ -541,7 +543,7 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
     try {
       let rec = cur;
       if (!rec) {
-        rec = (await api.post<{ transformation: TransformationDTO }>('/transformations', { ...body(), consentStatus: d.consentStatus, instagramUrl: d.instagramUrl.trim() || null, appointmentId: appt?.appointmentId ?? null })).transformation;
+        rec = (await api.post<{ transformation: TransformationDTO }>('/transformations', { ...body(), consentStatus: d.consentStatus, instagramUrl: social ? d.instagramUrl.trim() || null : null, appointmentId: appt?.appointmentId ?? null })).transformation;
         setCur(rec);
       } else {
         rec = (await api.patch<{ transformation: TransformationDTO }>(`/transformations/${rec.id}`, body())).transformation;
@@ -694,6 +696,7 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
               <Field label="Products used"><input className="field" {...det('products')} /></Field>
             </div>
             {canTech && <Field label="Internal notes"><textarea className="field min-h-[56px]" value={d.internalNotes} onChange={(e) => setD({ ...d, internalNotes: e.target.value })} /></Field>}
+            {social && <>
             <Field label="Instagram post or Reel" hint="Link only — nothing is copied from Instagram.">
               {cur ? (
                 <div className="space-y-2">
@@ -714,6 +717,7 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
                 <datalist id="tf-tags">{o.tags.map((x) => <option key={x} value={x} />)}</datalist>
               </Field>
             </div>
+            </>}
             {!cur && (
               <Field label="Publication & usage" hint="Stays unpublished until the client’s consent is recorded and approved.">
                 <select className="field" value={d.consentStatus} onChange={(e) => setD({ ...d, consentStatus: e.target.value })}>
