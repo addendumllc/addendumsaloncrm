@@ -1,3 +1,4 @@
+import { TransformationsDue } from '../components/domain/TransformationsDue';
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
@@ -170,6 +171,7 @@ export function DashboardPage() {
           {widgets.priorities && <h1 className="h-display mt-1 text-[40px] leading-[1.05] sm:text-[52px]"><Tc>Today's Priorities</Tc></h1>}
         </div>
       </div>
+      <TransformationsDue className="mt-4" />
       <WidgetGrid page="dashboard" defs={defs} />
     </div>
   );

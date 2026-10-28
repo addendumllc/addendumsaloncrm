@@ -94,10 +94,14 @@ export function TransformationsPage() {
   const [confirming, setConfirming] = useState<Appt | null>(null);
   const openParam = params.get('open');
   useEffect(() => { if (openParam) setOpen(openParam); }, [openParam]);
+  const editParam = params.get('edit');
+  useEffect(() => {
+    if (editParam) api.get<{ transformation: TransformationDTO }>(`/transformations/${editParam}`).then((r) => setEdit(r.transformation)).catch(() => undefined);
+  }, [editParam]);
   const [exportId, setExportId] = useState<string | null>(null);
   const [settings, setSettings] = useState(false);
   const [collect, setCollect] = useState(false);
-  const refresh = () => { void qc.invalidateQueries({ queryKey: ['transformations'] }); void qc.invalidateQueries({ queryKey: ['transformation'] }); void qc.invalidateQueries({ queryKey: ['transformations-options'] }); };
+  const refresh = () => { void qc.invalidateQueries({ queryKey: ['transformations'] }); void qc.invalidateQueries({ queryKey: ['transformation'] }); void qc.invalidateQueries({ queryKey: ['transformations-options'] }); void qc.invalidateQueries({ queryKey: ['tf-confirm'] }); };
   if (opts.isLoading) return <PageLoading />;
   if (opts.error) return <ErrorNote error={opts.error} onRetry={() => opts.refetch()} />;
   const o = opts.data!;
@@ -590,7 +594,7 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
 
   const save = async () => {
     // Administrators can leave it for the stylist (e.g. adding an Instagram post); stylists say what was done.
-    if (!d.mainService && !o.can.manage) return toast('Choose the service.', 'error');
+    if (!d.mainService && !o.can.manage) return toast('Tap what was done.', 'error');
     const pending = queue.filter((q) => q.status === 'waiting' || q.status === 'failed');
     if (!photos.length && !pending.length && !(cur?.instagram.length) && !d.instagramUrl.trim()) return toast('Add at least one photo or an Instagram link.', 'error');
     setBusy(true);
@@ -714,11 +718,12 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
         </Field>
         {photoList}
 
-        <Field label="Service"><select className="field" value={d.mainService} onChange={(e) => setD({ ...d, mainService: e.target.value, services: d.services.filter((s) => s !== e.target.value) })}><option value="">Choose…</option>{serviceOptions.map((s) => <option key={s}>{s}</option>)}</select></Field>
-        <Field label="Also performed" hint="Tap any other services done in this visit.">
-          <div className="flex flex-wrap gap-1.5">{serviceOptions.filter((s) => s !== d.mainService).map((s) => {
-            const on = d.services.includes(s);
-            return <button key={s} type="button" onClick={() => setD({ ...d, services: on ? d.services.filter((x) => x !== s) : [...d.services, s] })} className={chipClass(on)}>{on && <Check className="h-3 w-3" />}{s}</button>;
+        <Field label="What was done" hint="Tap every service done in this visit.">
+          <div className="flex flex-wrap gap-2">{serviceOptions.map((s) => {
+            const done = [d.mainService, ...d.services].filter(Boolean);
+            const on = done.includes(s);
+            const next = on ? done.filter((x) => x !== s) : [...done, s];
+            return <button key={s} type="button" aria-pressed={on} onClick={() => setD({ ...d, mainService: next[0] ?? '', services: next.slice(1) })} className={chipClass(on, 'min-h-[40px] px-3.5 text-[14px]')}>{on && <Check className="h-3.5 w-3.5" />}{s}</button>;
           })}</div>
         </Field>
         {extRelevant && (

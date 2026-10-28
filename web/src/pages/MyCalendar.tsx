@@ -1,3 +1,4 @@
+import { TransformationsDue } from '../components/domain/TransformationsDue';
 import { useState } from 'react';
 import { APPOINTMENT_STATUS_LABELS, type AppointmentDTO, type AppointmentDisplayStatus } from '@addendum/shared';
 import { CalendarDays, ChevronLeft, ChevronRight, StickyNote } from 'lucide-react';
@@ -35,6 +36,7 @@ export function MyCalendarPage() {
   return (
     <div className="animate-rise">
       <PageHeader title="My Calendar" subtitle={<>Your appointments{me?.name ? `, ${me.name}` : ''} · from Square</>} />
+      <TransformationsDue />
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <Button size="sm" icon={<ChevronLeft className="h-4 w-4" />} onClick={() => setStart(addDaysKey(start, -7))} aria-label="Previous week" />
         <Button size="sm" onClick={() => setStart(weekStart(today))} disabled={start === weekStart(today)}>This week</Button>
