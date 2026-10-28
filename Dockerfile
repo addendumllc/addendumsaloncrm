@@ -18,6 +18,8 @@ COPY --from=build /app/shared ./shared
 COPY --from=build /app/server/package.json ./server/
 COPY --from=build /app/server/dist ./server/dist
 COPY --from=build /app/web/dist ./web/dist
+# Uploaded media (a docker volume in production) must be writable by the app user.
+RUN mkdir -p /app/server/data/media && chown -R node:node /app/server/data
 USER node
 EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s CMD wget -qO- http://localhost:4000/api/health || exit 1

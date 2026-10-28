@@ -80,6 +80,8 @@ export const API_RULES: { method: string; path: RegExp; anyOf: string[] }[] = [
   { method: 'GET', path: /^\/settings\/booking-links$/, anyOf: ANY_SIGNED_IN },
   { method: '*', path: /^\/content\/studio(\/.*)?$/, anyOf: ['content:manage', 'content:studio'] },
   { method: '*', path: /^\/content(\/.*)?$/, anyOf: ['content:manage'] },
+  // Transformations Library: each route then checks the record (own / all / download / consent).
+  { method: '*', path: /^\/transformations(\/.*)?$/, anyOf: ['transformations:own', 'transformations:view_all', 'transformations:manage'] },
   // Location & Access: everyone can see whether they're on the salon network; changing it is Owner/Admin only (checked in the route).
   { method: 'GET', path: /^\/access\/status$/, anyOf: ANY_SIGNED_IN },
   // Each person's own sidebar order and hidden items (Customize menu).

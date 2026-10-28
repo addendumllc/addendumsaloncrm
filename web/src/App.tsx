@@ -24,6 +24,7 @@ import { ClientsPage } from './pages/Clients';
 import { ClientProfilePage } from './pages/ClientProfile';
 import { LeadsPage } from './pages/Leads';
 import { MessagesPage } from './pages/Messages';
+const TransformationsPage = lazy(() => import('./pages/Transformations').then((m) => ({ default: m.TransformationsPage })));
 const AnalyticsPage = lazy(() => import('./pages/Analytics').then((m) => ({ default: m.AnalyticsPage })));
 const InventoryPage = lazy(() => import('./pages/Inventory').then((m) => ({ default: m.InventoryPage })));
 const TimeClockPage = lazy(() => import('./pages/TimeClock').then((m) => ({ default: m.TimeClockPage })));
@@ -142,6 +143,7 @@ function SignedIn() {
       <Route path="/" element={canAny('dashboard:view') ? <DashboardPage /> : <Navigate to={home} replace />} />
       <Route path="/follow-ups" element={guard(['tasks:read_all', 'tasks:read_own'], <FollowUpsPage />)} />
       <Route path="/content" element={guard(['content:manage', 'content:studio'], <ContentPage />)} />
+      <Route path="/transformations" element={guard(['transformations:own', 'transformations:view_all', 'transformations:manage'], <TransformationsPage />)} />
       <Route path="/tasks" element={guard(['tasks:read_all', 'tasks:read_own', 'hair:manage'], <TasksPage />)} />
       {/* For people without the dashboard (stylists by default); everyone else sees announcements on the dashboard. */}
       <Route path="/announcements" element={guard(['announcements:read', 'announcements:publish', 'announcements:manage'], <AnnouncementsPage />)} />

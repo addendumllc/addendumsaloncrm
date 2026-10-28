@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { CalendarDays, CheckSquare, ListTodo, LogOut, Megaphone, Package, Settings, Timer, Users, Wallet } from 'lucide-react';
+import { Camera, CalendarDays, CheckSquare, ListTodo, LogOut, Megaphone, Package, Settings, Timer, Users, Wallet } from 'lucide-react';
 import { api } from '../../api/client';
 import { pathInAwaySections } from '@addendum/shared';
 import { useMe } from '../../api/hooks';
@@ -28,6 +28,7 @@ const ALL = [
   { to: '/clients', label: 'Clients', icon: Users, anyOf: ['clients:read', 'clients:read_assigned', 'leads:read', 'hair:manage'] },
   { to: '/inventory', label: 'Order Hair', icon: Package, anyOf: ['inventory:order', 'inventory:view', 'inventory:read_all'] },
   { to: '/my-commission', label: 'Earnings & Goals', short: 'Earnings', icon: Wallet, anyOf: ['commission:own'] },
+  { to: '/transformations', label: 'Transformations', short: 'Work', icon: Camera, anyOf: ['transformations:own', 'transformations:view_all', 'transformations:manage'] },
   { to: '/settings', label: 'Settings', icon: Settings, anyOf: [''] },
 ];
 

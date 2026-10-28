@@ -32,6 +32,7 @@ import { announcementsRouter } from './routes/announcements.js';
 import { projectionsRouter } from './routes/projections.js';
 import { contentRouter } from './routes/content.js';
 import { contentStudioRouter } from './routes/contentStudio.js';
+import { transformationsRouter } from './routes/transformations.js';
 import { networkGate } from './auth/access.js';
 import { webhooksRouter } from './routes/webhooks.js';
 
@@ -55,7 +56,9 @@ export function createApp() {
           'script-src': ["'self'"],
           'style-src': ["'self'", "'unsafe-inline'"],
           // Product photos from the listings: Shopify's CDN and Square's catalog image storage.
-          'img-src': ["'self'", 'data:', 'https://cdn.shopify.com', 'https://items-images-production.s3.us-west-2.amazonaws.com', 'https://items-images-sandbox.s3.us-west-2.amazonaws.com'],
+          'img-src': ["'self'", 'data:', 'https://cdn.shopify.com', 'https://items-images-production.s3.us-west-2.amazonaws.com', 'https://items-images-sandbox.s3.us-west-2.amazonaws.com',
+            // Instagram preview thumbnails returned by Meta's oEmbed (shown from Instagram, never copied).
+            'https://*.cdninstagram.com', 'https://*.fbcdn.net'],
           'font-src': ["'self'", 'data:'],
           'connect-src': ["'self'"],
           'frame-ancestors': ["'self'", ...embedOrigins],
@@ -134,6 +137,7 @@ export function createApp() {
   app.use('/api/projections', projectionsRouter);
   app.use('/api/content/studio', contentStudioRouter);
   app.use('/api/content', contentRouter);
+  app.use('/api/transformations', transformationsRouter);
   app.use('/api', miscRouter);
   app.use('/api', settingsRouter);
   app.use('/api/clients', clientsRouter);

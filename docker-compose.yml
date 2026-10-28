@@ -17,6 +17,8 @@ services:
       DATABASE_URL: postgres://addendum:${POSTGRES_PASSWORD}@db:5432/addendum
     # Only reachable from this server; the public goes through Caddy.
     ports: ["127.0.0.1:4000:4000"]
+    # Transformation photos and export ZIPs live here (kept across deploys and rebuilds).
+    volumes: [media:/app/server/data/media]
     depends_on: [db]
   caddy:
     image: caddy:2-alpine
@@ -29,5 +31,6 @@ services:
     depends_on: [app]
 volumes:
   pgdata:
+  media:
   caddy_data:
   caddy_config:

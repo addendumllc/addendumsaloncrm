@@ -19,6 +19,8 @@ const schema = z.object({
   /** Postgres connection string. Leave empty to use the embedded database in ./data (great for demo/dev). */
   DATABASE_URL: z.string().optional(),
   PGLITE_DIR: z.string().default('./data/pglite'),
+  /** Uploaded files kept on disk (transformation photos, export ZIPs) — a persistent volume in production. */
+  MEDIA_DIR: z.string().default('./data/media'),
   /** 32+ char secret used to encrypt stored OAuth tokens. Required in production. */
   ENCRYPTION_KEY: z.string().optional(),
   /** Only while rotating the key: the old ENCRYPTION_KEY, so saved secrets can be re-encrypted with the new one. */

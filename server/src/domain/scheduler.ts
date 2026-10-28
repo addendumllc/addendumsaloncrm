@@ -1,3 +1,4 @@
+import { cleanupExports } from './transformations.js';
 import { config } from '../config.js';
 import { squareService } from '../integrations/registry.js';
 import { getIntegration } from '../repos/integrations.js';
@@ -42,6 +43,7 @@ export function startScheduler() {
       await guard('recount-alerts', () => checkRecounts()); // extensions dropped to the recount level → bell
       await guard('content-reminders', () => remindContent()); // the person on a post: the day before and on the day
       await guard('content-ideas', () => maybeSuggestWeekly()); // weekly: fresh ideas per account (kept only when saved)
+      await guard('transformation-exports', () => cleanupExports()); // expired download ZIPs are removed
       if (tick % 60 === 0) await guard('content-metrics', () => importRecentMetrics()); // Instagram numbers for recent posts (hourly check, each post daily)
     }
     if (tick % Math.max(1, config().SQUARE_SYNC_INTERVAL_MINUTES) === 0) {

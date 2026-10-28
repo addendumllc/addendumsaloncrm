@@ -67,6 +67,7 @@ export const PERMISSION_CATEGORIES = [
   'Location and access',
   'Time clock',
   'Marketing',
+  'Transformations',
 ] as const;
 
 export const PERMISSIONS_CATALOG: PermissionDef[] = [
@@ -136,6 +137,13 @@ export const PERMISSIONS_CATALOG: PermissionDef[] = [
   { key: 'workspace:salon', category: 'Businesses', action: 'view', label: 'Addendum Salon workspace', description: 'Can switch to the Addendum Salon workspace (its look, menu and defaults).' },
   { key: 'workspace:hair', category: 'Businesses', action: 'view', label: 'Addendum Hair workspace', description: 'Can switch to the Addendum Hair workspace. Data in it (Hair clients, Shopify inventory…) still needs its own permission.' },
   { key: 'content:manage', category: 'Marketing', action: 'edit', label: 'Content calendar', description: 'Plan and draft posts for the social accounts, use the ideas library and AI drafts, upload photos and videos, and send posts for review.' },
+  { key: 'transformations:own', category: 'Transformations', action: 'create', label: 'Own transformations', description: 'Create transformation records, upload and manage their own photos, add service, extension and Instagram details, and download their own work.' },
+  { key: 'transformations:view_all', category: 'Transformations', action: 'view', label: 'View all transformations', description: 'See every stylist’s transformations in the library (without technical notes unless also granted).' },
+  { key: 'transformations:manage', category: 'Transformations', action: 'edit', label: 'Manage the transformations library', description: 'Edit or reassign any transformation, and manage the services list, tags and collections.' },
+  { key: 'transformations:consent', category: 'Transformations', action: 'edit', label: 'Approve consent and publishing', description: 'Mark client photo consent as verified and change publication approval (e.g. Approved for Social Media).' },
+  { key: 'transformations:technical', category: 'Transformations', action: 'view', label: 'See technical notes', description: 'Colour formulas, technical and internal notes on transformations they can see (their own are always visible).', sensitive: true },
+  { key: 'transformations:download', category: 'Transformations', action: 'export', label: 'Download transformation photos', description: 'Download original photos and details of transformations they can see.' },
+  { key: 'transformations:bulk', category: 'Transformations', action: 'export', label: 'Bulk download transformations', description: 'Download selected records, filtered collections or the whole library as ZIP files.', sensitive: true },
   { key: 'content:studio', category: 'Marketing', action: 'create', label: 'Content Studio', description: 'Generate on-brand copy and photo/video ideas (posts, Reels, Stories, texts, emails, signage) and save them — without the rest of the content calendar.' },
   { key: 'content:approve', category: 'Marketing', action: 'edit', label: 'Approve content', description: 'Approve posts or request changes.' },
   { key: 'content:publish', category: 'Marketing', action: 'edit', label: 'Schedule and publish content', description: 'Schedule approved posts, turn on auto-posting, and confirm posts as published.' },
@@ -205,7 +213,8 @@ export const SENSITIVE_PERMISSIONS = PERMISSIONS_CATALOG.filter((p) => p.sensiti
  */
 export const ROLE_DEFAULT_PERMISSIONS: Record<BuiltinRole, string[]> = {
   // Away-from-the-salon exceptions are granted per person or role, never by default.
-  admin: PERMISSION_KEYS.filter((k) => !k.startsWith('location:') && !k.startsWith('timeclock:')),
+  // Colour formulas and whole-library ZIP downloads are granted to the people who need them, not every administrator.
+  admin: PERMISSION_KEYS.filter((k) => !k.startsWith('location:') && !k.startsWith('timeclock:') && k !== 'transformations:technical' && k !== 'transformations:bulk'),
   receptionist: [
     'workspace:salon', 'dashboard:view', 'clients:read', 'clients:write', 'clients:contact', 'clients:history', 'clients:notes',
     'leads:read', 'leads:write', 'appointments:read', 'messages:read', 'messages:send', 'services:read',
@@ -218,7 +227,7 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<BuiltinRole, string[]> = {
   // Their own appointments, their own clients (contact, history, notes), their own follow-ups, hair orders, commission.
   stylist: [
     'workspace:salon', 'appointments:read_own', 'clients:read_assigned', 'clients:contact', 'clients:history', 'clients:notes', 'services:read',
-    'tasks:read_own', 'tasks:write', 'inventory:view', 'inventory:order', 'commission:own', 'announcements:read',
+    'tasks:read_own', 'tasks:write', 'inventory:view', 'inventory:order', 'commission:own', 'announcements:read', 'transformations:own',
     // Used if an administrator gives stylists the Dashboard.
     'dashboard:schedule', 'dashboard:priorities', 'dashboard:followups', 'dashboard:announcements', 'dashboard:orders', 'dashboard:my_commission',
   ],
@@ -2540,4 +2549,29 @@ export interface ContentSettings {
   access: Partial<Record<ContentAccountId, string[]>>;
   /** The Flodesk segments each account emails by default (mapped by administrators — not assumed one per account). */
   emailAudiences?: Partial<Record<ContentAccountId, { id: string; name: string }[]>>;
+}
+
+// ---------------- Transformations library ----------------
+export type TransformationConsentStatus = 'pending' | 'approved_social' | 'internal' | 'do_not_publish';
+export const CONSENT_STATUSES: { value: TransformationConsentStatus; label: string }[] = [
+  { value: 'pending', label: 'Pending Consent' }, { value: 'approved_social', label: 'Approved for Social Media' }, { value: 'internal', label: 'Internal Use Only' }, { value: 'do_not_publish', label: 'Do Not Publish' },
+];
+export const EXTENSION_METHODS = ['Weft', 'K-tip', 'Tape-in', 'Hybrid', 'Other'];
+export const EXTENSION_WORK = ['Installation', 'Maintenance / move-up', 'Removal'];
+export type TransformationPhotoKind = 'before' | 'after' | 'finished' | 'detail' | 'other';
+export interface TransformationPhotoDTO { id: string; kind: TransformationPhotoKind; caption: string | null; position: number; mime: string; size: number; originalName: string | null; thumbUrl: string; originalUrl: string; uploadedBy: string | null; uploadedAt: string }
+export interface TransformationInstagramDTO { id: string; url: string; postType: 'post' | 'reel' | 'other'; title: string | null; author: string | null; thumbnailUrl: string | null; previewStatus: 'unchecked' | 'ok' | 'unavailable' | 'no_access'; isPrimary: boolean; addedBy: string | null; addedAt: string }
+export interface TransformationExtensionDTO { hasExtensions: boolean; method: string | null; brand: string | null; length: string | null; shade: string | null; quantity: string | null; workType: string | null; blending: boolean | null; customization: string | null; maintenanceNotes: string | null; nextAppointment: string | null }
+export interface TransformationConsentDTO { status: TransformationConsentStatus; clientConsent: 'unknown' | 'requested' | 'given' | 'declined'; socialPermission: boolean; marketingPermission: boolean; scope: string | null; consentDate: string | null; identifiable: boolean | null; restrictions: string | null; expiresOn: string | null; verifiedBy: string | null; verifiedAt: string | null }
+export interface TransformationDetails { startingCondition?: string | null; desiredResult?: string | null; techniques?: string | null; products?: string | null; lengthTexture?: string | null; styling?: string | null; aftercare?: string | null }
+export interface TransformationDTO {
+  id: string; number: number; code: string; title: string; stylistStaffId: string | null; stylistName: string | null; serviceDate: string; clientId: string | null; clientName: string | null;
+  mainService: string; services: string[]; details: TransformationDetails; extension: TransformationExtensionDTO | null;
+  /** Only for people allowed to see them (their own, or "See technical notes"); otherwise null. */
+  technicalNotes: string | null; internalNotes: string | null; canSeeTechnical: boolean;
+  caption: string | null; hashtags: string | null; tags: string[]; collections: { id: string; name: string }[];
+  photos: TransformationPhotoDTO[]; instagram: TransformationInstagramDTO[]; consent: TransformationConsentDTO;
+  /** Approved for social media, not expired, with a photo or Instagram reference. */
+  readyForSocial: boolean; missing: string[];
+  canEdit: boolean; canDownload: boolean; createdBy: string | null; createdAt: string; updatedAt: string;
 }
