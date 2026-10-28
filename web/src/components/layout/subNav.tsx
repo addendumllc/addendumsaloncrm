@@ -52,7 +52,7 @@ export const SUB_NAV: Record<string, SubNav> = {
     params: ['tab'],
     items: [
       { to: '/transformations', label: 'Library' },
-      { to: '/transformations?tab=social', label: 'Ready for Social' },
+      { to: '/transformations?tab=social', label: 'Ready for Social', anyOf: ['transformations:manage', 'transformations:consent'] },
     ],
   },
   // Tasks: each page starts with Addendum Salon / Addendum Hair.

@@ -40,11 +40,19 @@ function useLibrary(f: Filter, ready: boolean) {
 }
 
 /** The picture a card shows: an after / finished photo first, then any photo, then the Instagram preview. */
-function Cover({ t, className }: { t: TransformationDTO; className?: string }) {
+function Cover({ t, className, small }: { t: TransformationDTO; className?: string; small?: boolean }) {
   const photo = t.photos.find((p) => p.kind === 'after' || p.kind === 'finished') ?? t.photos[0];
   const ig = t.instagram.find((i) => i.isPrimary) ?? t.instagram[0];
   const [broken, setBroken] = useState(false);
   const src = photo ? photo.thumbUrl : ig?.thumbnailUrl;
+  // No photo of our own but an Instagram post: show the post's picture with Instagram's embed (shown, never copied).
+  if (!photo && ig && !(src && !broken) && !small) return (
+    <span className={cx('relative block overflow-hidden bg-mist', className)}>
+      <iframe title="Instagram post" src={`${ig.url.replace(/\/?$/, '/')}embed/`} loading="lazy" scrolling="no" tabIndex={-1}
+        className="pointer-events-none absolute inset-x-0 -top-[56px] h-[calc(100%+180px)] w-full border-0 bg-white" sandbox="allow-scripts allow-same-origin" />
+      <Instagram className="absolute left-1.5 top-1.5 h-4 w-4 text-white drop-shadow" />
+    </span>
+  );
   return (
     <span className={cx('relative block overflow-hidden bg-mist', className)}>
       {src && !broken ? <img src={src} alt="" loading="lazy" className="h-full w-full object-cover" onError={() => setBroken(true)} />
@@ -54,6 +62,12 @@ function Cover({ t, className }: { t: TransformationDTO; className?: string }) {
     </span>
   );
 }
+/** What was done, in a line: the services, and for extensions the method (hybrid: each method). */
+const doneOf = (t: TransformationDTO) => {
+  const e = t.extension;
+  const ext = e?.hasExtensions ? (e.parts?.length ? [...new Set(e.parts.map((x) => x.method).filter(Boolean))].join(' + ') : e.method) : null;
+  return [...t.services.length ? t.services : [t.mainService], ext].filter(Boolean).join(' · ');
+};
 const ConsentBadge = ({ t }: { t: TransformationDTO }) => <Badge tone={t.readyForSocial ? 'sage' : CONSENT_TONE[t.consent.status] === 'sage' ? 'amber' : CONSENT_TONE[t.consent.status]}>{t.readyForSocial ? 'Ready for Social' : consentLabel(t.consent.status)}</Badge>;
 
 export function TransformationsPage() {
@@ -85,6 +99,8 @@ export function TransformationsPage() {
   if (opts.isLoading) return <PageLoading />;
   if (opts.error) return <ErrorNote error={opts.error} onRetry={() => opts.refetch()} />;
   const o = opts.data!;
+  // Consent, approval and social posts are for administrators; stylists see who did what.
+  const social = o.can.manage || o.can.consent;
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const startExport = async (body: object) => {
     try { setExportId((await api.post<{ id: string }>('/transformations/exports', body)).id); } catch (e) { toast((e as Error).message, 'error'); }
@@ -95,7 +111,7 @@ export function TransformationsPage() {
 
   return (
     <div>
-      <PageHeader title="Transformations" subtitle="Your work, with the services behind it — approved photos ready for social media."
+      <PageHeader title="Transformations" subtitle={social ? 'The salon’s work and what was done — approve photos for social media.' : 'Your work and what was done.'}
         actions={<>
           {o.can.manage && <Button icon={<Settings2 className="h-4 w-4" />} onClick={() => setSettings(true)}>Services & collections</Button>}
           {o.can.create && <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEdit('new')}>New transformation</Button>}
@@ -116,7 +132,7 @@ export function TransformationsPage() {
           {[...new Set([...EXTENSION_METHODS.filter((m) => m !== 'Other'), ...o.methods])].map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
         {o.collections.length > 0 && <select className="field h-10 w-auto" aria-label="Collection" value={f.collection} onChange={(e) => set('collection')(e.target.value)}><option value="">All collections</option>{o.collections.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.count})</option>)}</select>}
-        {tab === 'library' && <select className="field h-10 w-auto" aria-label="Approval" value={f.consent} onChange={(e) => set('consent')(e.target.value)}><option value="">Any approval</option>{CONSENT_STATUSES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}</select>}
+        {tab === 'library' && social && <select className="field h-10 w-auto" aria-label="Approval" value={f.consent} onChange={(e) => set('consent')(e.target.value)}><option value="">Any approval</option>{CONSENT_STATUSES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}</select>}
         <span className="flex items-center gap-1 text-[13px] text-stone">
           <input type="date" className="field h-10 w-auto" aria-label="From" value={f.from} onChange={(e) => set('from')(e.target.value)} />–
           <input type="date" className="field h-10 w-auto" aria-label="To" value={f.to} onChange={(e) => set('to')(e.target.value)} />
@@ -155,9 +171,10 @@ export function TransformationsPage() {
               <button type="button" className="block w-full text-left" onClick={() => (selecting ? toggle(t.id) : setOpen(t.id))}>
                 <Cover t={t} className="aspect-[4/5] w-full" />
                 <span className="block px-3 py-2.5">
-                  <span className="block truncate text-[14px] font-medium text-ink">{t.title}</span>
-                  <span className="block truncate text-[12px] text-stone">{t.stylistName ?? 'Unassigned'} · {fmtDate(t.serviceDate)}</span>
-                  <span className="mt-1.5 flex flex-wrap gap-1"><ConsentBadge t={t} />{t.extension?.hasExtensions && <Badge>{t.extension.method ?? 'Extensions'}</Badge>}</span>
+                  <span className="block truncate text-[15px] font-medium text-ink">{t.stylistName ?? 'Stylist unknown'}</span>
+                  <span className="mt-0.5 block text-[14px] leading-snug text-ink-soft">{doneOf(t)}</span>
+                  <span className="mt-1 block text-[12px] text-stone">{fmtDate(t.serviceDate)}</span>
+                  {social && t.readyForSocial && <span className="mt-1.5 flex"><Badge tone="sage">Ready for Social</Badge></span>}
                   {tab === 'social' && t.caption && <span className="mt-1.5 line-clamp-2 block text-[12px] text-ink-soft">{t.caption}</span>}
                 </span>
               </button>
@@ -170,12 +187,13 @@ export function TransformationsPage() {
           {items.map((t) => (
             <button key={t.id} type="button" className={cx('flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-mist/60', sel.has(t.id) && 'bg-plum-tint')} onClick={() => (selecting ? toggle(t.id) : setOpen(t.id))}>
               {selecting && <input type="checkbox" readOnly checked={sel.has(t.id)} className="h-4 w-4 accent-plum" aria-label="Select" />}
-              <Cover t={t} className="h-14 w-14 shrink-0 rounded-lg" />
+              <Cover t={t} small className="h-14 w-14 shrink-0 rounded-lg" />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[14px] font-medium text-ink">{t.title} <span className="text-[12px] font-normal text-stone">{t.code}</span></span>
-                <span className="block truncate text-[12px] text-stone">{t.stylistName ?? 'Unassigned'} · {fmtDate(t.serviceDate)} · {t.services.join(', ')}</span>
+                <span className="block truncate text-[15px] font-medium text-ink">{t.stylistName ?? 'Stylist unknown'}</span>
+                <span className="block truncate text-[14px] text-ink-soft">{doneOf(t)}</span>
               </span>
-              <span className="hidden shrink-0 sm:block"><ConsentBadge t={t} /></span>
+              <span className="hidden shrink-0 text-[12px] text-stone sm:block">{fmtDate(t.serviceDate)}</span>
+              {social && t.readyForSocial && <span className="hidden shrink-0 sm:block"><Badge tone="sage">Ready for Social</Badge></span>}
               <span className="hidden w-16 shrink-0 text-right text-[12px] text-stone sm:block">{t.photos.length} photo{t.photos.length === 1 ? '' : 's'}</span>
             </button>
           ))}
@@ -333,14 +351,14 @@ function Detail({ id, o, onClose, onEdit, onExport, onChanged }: { id: string; o
             {t.hashtags && <p className="mt-1 text-[13px] text-plum">{t.hashtags}</p>}
             <Button size="sm" variant="ghost" className="mt-1 !px-0" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copy([t.mainService, ...t.services.filter((s) => s !== t.mainService), e?.hasExtensions ? `${e.method ?? 'Extensions'}${e.length ? ` · ${e.length}` : ''}${e.shade ? ` · ${e.shade}` : ''}` : null].filter(Boolean).join(' · '), toast)}>Copy service info</Button>
           </Section>}
-          <Section title="Consent & publishing" aside={(t.canEdit || o.can.consent) ? <Button size="sm" onClick={() => setConsent(true)}>Update</Button> : undefined}>
+          {(o.can.manage || o.can.consent) && <Section title="Consent & publishing" aside={<Button size="sm" onClick={() => setConsent(true)}>Update</Button>}>
             <div className="mb-2 flex flex-wrap gap-1.5"><ConsentBadge t={t} />{t.consent.verifiedAt ? <Badge tone="sage">Verified by {t.consent.verifiedBy}</Badge> : <Badge>Not verified</Badge>}</div>
             <Rows rows={[['Client consent', { unknown: 'Not asked yet', requested: 'Requested', given: 'Given', declined: 'Declined' }[t.consent.clientConsent]],
               ['Social media', t.consent.socialPermission ? 'Allowed' : 'Not allowed'], ['Marketing / ads', t.consent.marketingPermission ? 'Allowed' : 'Not allowed'],
               ['Scope', t.consent.scope], ['Consent date', t.consent.consentDate && fmtDate(t.consent.consentDate)], ['Identifiable', t.consent.identifiable == null ? null : t.consent.identifiable ? 'Yes' : 'No (face not shown)'],
               ['Restrictions', t.consent.restrictions], ['Expires', t.consent.expiresOn && fmtDate(t.consent.expiresOn)]]} />
             {t.missing.length > 0 && <p className="mt-2 flex flex-wrap gap-1 text-[12px] text-stone">Still needed: {t.missing.map((m) => <Badge key={m} tone="amber">{m}</Badge>)}</p>}
-          </Section>
+          </Section>}
         </div>
       </div>
       {consent && <ConsentEditor t={t} o={o} onClose={() => { setConsent(false); void refetch(); onChanged(); }} />}
@@ -753,7 +771,7 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
               </Field>
             </div>
             </>}
-            {!cur && (
+            {!cur && social && (
               <Field label="Publication & usage" hint="Stays unpublished until the client’s consent is recorded and approved.">
                 <select className="field" value={d.consentStatus} onChange={(e) => setD({ ...d, consentStatus: e.target.value })}>
                   <option value="pending">Pending Consent</option><option value="internal">Internal Use Only</option><option value="do_not_publish">Do Not Publish</option>
