@@ -554,7 +554,7 @@ async function storeOriginal(up: Upload) {
     throw e;
   }
 }
-const KINDS = ['before', 'after', 'finished', 'detail', 'other'];
+const KINDS = ['original', 'before', 'after', 'finished', 'detail', 'other'];
 
 /** Adds a photo or video. `receive` reads the upload — only after the permission check, so nothing is stored for refusals. */
 export async function addPhoto(id: string, receive: () => Promise<Upload>, meta: { kind?: string; caption?: string | null; name?: string | null }, u: Who) {
@@ -652,7 +652,7 @@ export async function photoFile(mid: string, which: 'thumb' | 'original', u: Who
   return { path: p, mime, name: `${photoName(row, m)}.${path.extname(m.file_path).slice(1)}` };
 }
 const safe = (s: string, max = 60) => (s.normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^A-Za-z0-9 _-]+/g, ' ').trim().replace(/\s+/g, '_').slice(0, max) || 'Untitled');
-const KIND_LABEL: Record<string, string> = { before: 'Before', after: 'After', finished: 'Finished', detail: 'Detail', other: 'Photo' };
+const KIND_LABEL: Record<string, string> = { original: 'Original', before: 'Before', after: 'After', finished: 'Finished', detail: 'Detail', other: 'Photo' };
 const photoName = (t: Pick<Row, 'number' | 'title'>, m: { kind: string; position: number }) => `${code(t.number)}_${safe(t.title, 40)}_${KIND_LABEL[m.kind] ?? 'Photo'}_${String(m.position + 1).padStart(2, '0')}`;
 
 // ---------------- Instagram ----------------

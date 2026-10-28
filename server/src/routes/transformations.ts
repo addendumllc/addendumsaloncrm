@@ -102,7 +102,7 @@ transformationsRouter.get(`/exports/:eid${ID}/download`, ah(async (req, res) => 
 
 // Photos.
 transformationsRouter.patch(`/photos/:mid${ID}`, ah(async (req, res) => {
-  const b = parse(z.object({ kind: z.enum(['before', 'after', 'finished', 'detail', 'other']).optional(), caption: text(500) }), req.body);
+  const b = parse(z.object({ kind: z.enum(['original', 'before', 'after', 'finished', 'detail', 'other']).optional(), caption: text(500) }), req.body);
   res.json({ transformation: await updatePhoto(req.params.mid, b, req.user!) });
 }));
 transformationsRouter.put(`/photos/:mid${ID}/thumb`, rawThumb, ah(async (req, res) => res.json(await setThumbnail(req.params.mid, body(req.body), req.user!))));

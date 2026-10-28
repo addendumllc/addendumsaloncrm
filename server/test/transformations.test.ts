@@ -401,4 +401,12 @@ describe('Transformations Library', () => {
     expect((await mike.get(`/api/transformations/${r[1].id}`)).status).toBe(200); // unknown stylist: any stylist can see and claim it
     expect((await jen.get('/api/transformations/to-confirm')).body.needsDetails.map((x: any) => x.id)).toContain(r[0].id);
   });
+
+  it('photos can be marked Original (the unedited files), named that way in downloads', async () => {
+    const t = (await jen.post('/api/transformations', { mainService: 'Haircut' })).body.transformation;
+    const up = await jen.upload(`/api/transformations/${t.id}/photos?kind=original&name=IMG_9.jpg`, jpeg('orig'));
+    expect(up.body.transformation.photos[0].kind).toBe('original');
+    const st = await waitExport(jen, (await jen.post('/api/transformations/exports', { preset: 'one', ids: [t.id] })).body.id);
+    expect((await jen.file(st.downloadUrl)).body.toString('latin1')).toContain('/Original.jpg');
+  });
 });

@@ -18,7 +18,7 @@ interface Options {
 interface Filter { q: string; stylist: string; service: string; extensions: string; collection: string; consent: string; from: string; to: string; sort: string }
 const EMPTY: Filter = { q: '', stylist: '', service: '', extensions: '', collection: '', consent: '', from: '', to: '', sort: 'newest' };
 const KINDS: { value: TransformationPhotoKind; label: string }[] = [
-  { value: 'before', label: 'Before' }, { value: 'after', label: 'After' }, { value: 'finished', label: 'Finished look' }, { value: 'detail', label: 'Detail' }, { value: 'other', label: 'Other' },
+  { value: 'original', label: 'Original' }, { value: 'before', label: 'Before' }, { value: 'after', label: 'After' }, { value: 'finished', label: 'Finished look' }, { value: 'detail', label: 'Detail' }, { value: 'other', label: 'Other' },
 ];
 const isVideo = (p: { mime: string }) => p.mime.startsWith('video/');
 const kindLabel = (k: string) => KINDS.find((x) => x.value === k)?.label ?? 'Photo';
@@ -529,7 +529,8 @@ function videoPoster(file: File): Promise<Blob | null> {
   });
 }
 const ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,.heic,.heif,video/mp4,video/quicktime,video/webm,.mov,.mp4,.m4v';
-const guessKind = (name: string, i: number, existing: number): TransformationPhotoKind => /before/i.test(name) ? 'before' : /detail/i.test(name) ? 'detail' : existing + i === 0 ? 'before' : 'after';
+// Work added from an Instagram post: what the stylist uploads is most likely the original files of it.
+const guessKind = (name: string, i: number, existing: number, fromInstagram = false): TransformationPhotoKind => /before/i.test(name) ? 'before' : fromInstagram ? 'original' : /detail/i.test(name) ? 'detail' : existing + i === 0 ? 'before' : 'after';
 
 export interface Appt { appointmentId: string; date: string; clientId: string | null; clientName: string | null; services: string[] }
 
@@ -566,7 +567,7 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
     // The same file picked twice is queued once (the server also keeps one copy).
     const have = new Set(queue.map((q) => `${q.file.name}|${q.file.size}|${q.file.lastModified}`));
     const fresh = list.filter((f) => !have.has(`${f.name}|${f.size}|${f.lastModified}`));
-    setQueue((q) => [...q, ...fresh.map((f, i) => ({ key: `${f.name}-${f.size}-${f.lastModified}-${Math.random()}`, file: f, preview: URL.createObjectURL(f), kind: guessKind(f.name, q.length + i, photos.length), caption: '', progress: 0, status: 'waiting' as const }))]);
+    setQueue((q) => [...q, ...fresh.map((f, i) => ({ key: `${f.name}-${f.size}-${f.lastModified}-${Math.random()}`, file: f, preview: URL.createObjectURL(f), kind: guessKind(f.name, q.length + i, photos.length, !!cur?.instagram.length), caption: '', progress: 0, status: 'waiting' as const }))]);
   };
   const patchQ = (key: string, p: Partial<Queued>) => setQueue((q) => q.map((x) => (x.key === key ? { ...x, ...p } : x)));
 
@@ -708,20 +709,20 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
         )}
         {appt && <p className="rounded-lg bg-mist px-3 py-2 text-[14px] text-ink-soft">{fmtDate(appt.date)}{appt.clientName ? ` · ${appt.clientName}` : ''} · {appt.services.join(', ') || 'Appointment'}</p>}
 
-        <Field label="Photos & videos">
+        <Field label="Photos & videos" hint="Mark each one: Original, Before, After, Finished look or Detail.">
           <div
             onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
             onDrop={(e) => { e.preventDefault(); setDrag(false); add(e.dataTransfer.files); }}
             className={cx('flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-5 text-center text-[13px] text-stone', drag ? 'border-plum bg-plum-tint' : 'border-line')}>
             <Upload className="h-5 w-5" />
             <span><span className="hidden sm:inline">Drag photos or videos here, or </span><button type="button" className="text-plum underline" onClick={() => file.current?.click()}>choose photos & videos</button></span>
-            <span className="text-[12px]">Pick as many as you like for this transformation — before, after and detail shots.</span>
+            <span className="text-[12px]">Upload the originals if you have them (full quality, unedited), plus before, after and detail shots — as many as you like.</span>
             <input ref={file} type="file" multiple accept={ACCEPT} className="hidden" onChange={(e) => { add(e.target.files); e.target.value = ''; }} />
           </div>
         </Field>
         {cur && cur.instagram.length > 0 && (
           <div className="space-y-2">
-            <p className="text-[12px] font-semibold uppercase tracking-wide text-stone">Original</p>
+            <p className="text-[12px] font-semibold uppercase tracking-wide text-stone">On Instagram</p>
             {cur.instagram.map((i) => <InstagramCard key={i.id} i={i} actions={social ? <span className="flex shrink-0">
               {!i.isPrimary && <button type="button" className="rounded p-2 text-stone hover:bg-mist sm:p-1" title="Use as the main reference" onClick={() => photoAction(() => api.patch(`/transformations/instagram/${i.id}`, { isPrimary: true }))}><Star className="h-4 w-4" /></button>}
               <button type="button" className="rounded p-2 text-stone hover:bg-mist hover:text-rose sm:p-1" title="Remove link" onClick={() => photoAction(() => api.del(`/transformations/instagram/${i.id}`))}><Trash2 className="h-4 w-4" /></button>

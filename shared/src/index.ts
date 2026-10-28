@@ -2599,7 +2599,7 @@ export const CONSENT_STATUSES: { value: TransformationConsentStatus; label: stri
 ];
 export const EXTENSION_METHODS = ['Weft', 'K-tip', 'Tape-in', 'Hybrid', 'Other'];
 export const EXTENSION_WORK = ['Installation', 'Maintenance / move-up', 'Removal'];
-export type TransformationPhotoKind = 'before' | 'after' | 'finished' | 'detail' | 'other';
+export type TransformationPhotoKind = 'original' | 'before' | 'after' | 'finished' | 'detail' | 'other';
 export interface TransformationPhotoDTO { id: string; kind: TransformationPhotoKind; caption: string | null; position: number; mime: string; size: number; originalName: string | null; thumbUrl: string; originalUrl: string; uploadedBy: string | null; uploadedAt: string }
 export interface TransformationInstagramDTO { id: string; url: string; postType: 'post' | 'reel' | 'other'; title: string | null; author: string | null; thumbnailUrl: string | null; previewStatus: 'unchecked' | 'ok' | 'unavailable' | 'no_access'; isPrimary: boolean; addedBy: string | null; addedAt: string }
 /** One method and colour of a hybrid install. */
