@@ -8,7 +8,7 @@ import {
   unmarkSeparate,
 } from '../domain/inventorySync.js';
 import { addToSquare, confirmCounts, applyNewLength, applySwatches, moveSwatchesFirst, swatchPlan, applyPrices, applyProPrices, newLengthPlan, priceList, proPricePlan, squareCandidates,
-  applyStockChanges, assignCollection, createPurchaseOrders, deleteLeadRule, setSupplierLeadDefault, leadRules, leadTimesFor, saveLeadRule, internalCollections, mergeSuppliers, renameCollection, saveCollectionList, productSales, skipProducts, suggestPurchaseOrders, suggestedOrderPlan, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder,
+  applyStockChanges, assignCollection, createPurchaseOrders, deleteLeadRule, setSupplierLeadDefault, leadRules, leadTimesFor, saveLeadRule, internalCollections, mergeSuppliers, renameCollection, saveCollectionList, productSales, skipProducts, suggestPurchaseOrders, suggestedOrderPlan, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder, reopenPurchaseOrder, correctReceived,
   assignSupplier, deleteSupplier, refreshShopifySales, renameSupplier, saveProductSettings, saveSupplier, setForecastSettings, setSupplierLeadTime, stockForecast, stockHistory, stockProducts, updatePurchaseOrder,
 } from '../domain/stock.js';
 import { setSquareSku } from '../domain/squareInventory.js';
@@ -348,6 +348,18 @@ inventorySyncRouter.post('/stock/purchase-orders/:id/move', ah(async (req, res) 
   const b = parse(z.object({ store: z.enum(['salon', 'shopify']), moveStock: z.boolean().default(false) }), req.body);
   const r = await movePurchaseOrder(req.params.id, b.store, b.moveStock, req.user!.id);
   await logAction(req, 'stock.po_move', 'purchase_order', req.params.id, { store: b.store, movedUnits: r.movedUnits, notMoved: r.notMoved.length });
+  res.json(r);
+}));
+// Correcting an order afterwards: reopen it (received or cancelled) to edit it, or fix how many of an item were received.
+inventorySyncRouter.post('/stock/purchase-orders/:id/reopen', ah(async (req, res) => {
+  const order = await reopenPurchaseOrder(req.params.id);
+  await logAction(req, 'stock.po_reopen', 'purchase_order', req.params.id, { number: order.number });
+  res.json({ order });
+}));
+inventorySyncRouter.post('/stock/purchase-orders/:id/lines/:lineId/received', ah(async (req, res) => {
+  const b = parse(z.object({ received: z.number().int().min(0).max(1_000_000), note: z.string().trim().max(500).nullable().optional() }), req.body);
+  const r = await correctReceived(req.params.id, req.params.lineId, b.received, req.user!.id, b.note ?? null);
+  await logAction(req, 'stock.po_correct_received', 'purchase_order', req.params.id, { line: req.params.lineId, received: b.received });
   res.json(r);
 }));
 inventorySyncRouter.post('/stock/purchase-orders/:id/receive', ah(async (req, res) => {

@@ -1059,6 +1059,42 @@ export async function deletePurchaseOrder(id: string) {
 }
 
 /** Receives units (all or part): added to stock in Square and Shopify, logged with the order number. */
+/**
+ * Reopens a received or cancelled order so it can be corrected (items, quantities, costs, supplier); what was received
+ * stays received. It goes back to Ordered (Draft if it was never ordered) — Receive works again for what's still due.
+ */
+export async function reopenPurchaseOrder(id: string) {
+  const p = await onePO(id);
+  if (p.status !== 'received' && p.status !== 'cancelled') throw badRequest('This order is already open.');
+  await db().query(`UPDATE purchase_orders SET status = CASE WHEN ordered_at IS NULL THEN 'draft' ELSE 'ordered' END, received_at = NULL, updated_at = now() WHERE id = $1`, [id]);
+  return onePO(id);
+}
+
+/**
+ * Corrects how many of an item were received (e.g. 10 were entered but 8 came): the stock in the order's store moves by
+ * the difference and the change is logged. The order is received when every item is, open again otherwise.
+ */
+export async function correctReceived(id: string, lineId: string, received: number, staffId: string | null, note?: string | null) {
+  const p = await onePO(id);
+  if (p.status === 'draft') throw badRequest('Nothing has been received on a draft.');
+  const l = p.lines.find((x) => x.id === lineId);
+  if (!l) throw notFound('That item');
+  if (!Number.isInteger(received) || received < 0) throw badRequest('Enter whole units.');
+  const delta = received - l.received;
+  if (!delta) return { order: p, result: null };
+  const res = await applyStockChanges([{ key: l.productKey, delta }], { kind: 'adjust', reason: 'Purchase order correction', note: note ?? null, staffId,
+    reference: p.name ? `${p.name} (PO #${p.number})` : `PO #${p.number}`, only: p.store === 'shopify' ? 'shopify' : 'square' });
+  if (!res.results.some((r) => r.ok && r.key === l.productKey)) throw badRequest(res.results[0]?.note || 'The store’s stock couldn’t be changed — nothing was corrected.');
+  await db().tx(async (q) => {
+    // Received more than ordered: the order quantity follows, so the order stays consistent.
+    await q.query('UPDATE purchase_order_lines SET received = $2, quantity = GREATEST(quantity, $2) WHERE id = $1', [lineId, received]);
+    await q.query(`UPDATE purchase_orders SET
+        status = CASE WHEN status = 'cancelled' THEN status WHEN NOT EXISTS (SELECT 1 FROM purchase_order_lines WHERE po_id = $1 AND received < quantity) THEN 'received' WHEN status = 'received' THEN 'ordered' ELSE status END,
+        received_at = CASE WHEN NOT EXISTS (SELECT 1 FROM purchase_order_lines WHERE po_id = $1 AND received < quantity) THEN COALESCE(received_at, now()) ELSE NULL END, updated_at = now() WHERE id = $1`, [id]);
+  });
+  return { order: await onePO(id), result: res };
+}
+
 export async function receivePurchaseOrder(id: string, got: { lineId: string; quantity: number }[], staffId: string | null, note?: string | null) {
   const p = await onePO(id);
   if (p.status === 'draft' || p.status === 'cancelled' || p.status === 'received') throw badRequest(p.status === 'draft' ? 'Mark the order as ordered first.' : 'This order is closed.');

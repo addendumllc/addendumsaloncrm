@@ -1452,6 +1452,18 @@ export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'sho
   const patch = async (p: PurchaseOrderDTO, body: object) => {
     try { await api.patch(`/inventory-sync/stock/purchase-orders/${p.id}`, body); refresh(); } catch (e) { toast((e as Error).message, 'error'); }
   };
+  // A received or cancelled order that was wrong: open it again to change items, quantities, costs or supplier.
+  const reopen = async (p: PurchaseOrderDTO) => {
+    if (!window.confirm(`Reopen PO #${p.number} to edit it? What was received stays received; you can receive anything still missing.`)) return;
+    try { await api.post(`/inventory-sync/stock/purchase-orders/${p.id}/reopen`); setEditing(p.id); refresh(); } catch (e) { toast((e as Error).message, 'error'); }
+  };
+  // How many really arrived (fixes stock in the order's store by the difference).
+  const fixReceived = async (p: PurchaseOrderDTO, l: PurchaseOrderDTO['lines'][number], n: number) => {
+    const d = n - l.received;
+    if (!window.confirm(`${productName(l.label, l.sku)}: change received from ${l.received} to ${n}? Stock goes ${d > 0 ? 'up' : 'down'} by ${Math.abs(d)}.`)) return false;
+    try { await api.post(`/inventory-sync/stock/purchase-orders/${p.id}/lines/${l.id}/received`, { received: n }); refresh(); toast('Received amount corrected — stock updated'); return true; }
+    catch (e) { toast((e as Error).message, 'error'); return false; }
+  };
   const del = async (p: PurchaseOrderDTO) => {
     if (!window.confirm(`Delete draft PO #${p.number}?`)) return;
     try { await api.del(`/inventory-sync/stock/purchase-orders/${p.id}`); refresh(); } catch (e) { toast((e as Error).message, 'error'); }
@@ -1469,7 +1481,8 @@ export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'sho
           <Badge tone={PO_STATUS[p.status].tone}>{PO_STATUS[p.status].label}</Badge>
           <span className="text-[13px] text-ink-soft">{p.supplier ?? fallbackSupplier ?? 'Supplier not set'} · {p.lines.length} item{p.lines.length === 1 ? '' : 's'}{p.totalCents ? ` · $${(p.totalCents / 100).toFixed(2)}` : ''} · made {dateShort(p.createdAt)}{p.createdByName ? ` by ${p.createdByName}` : ''}</span>
           <span className="ml-auto flex flex-wrap gap-1.5">
-            <Button size="sm" variant={editing === p.id ? 'primary' : 'ghost'} icon={editing === p.id ? undefined : <Pencil className="h-4 w-4" />} onClick={() => setEditing(editing === p.id ? null : p.id)}>{editing === p.id ? 'Done' : ['received', 'cancelled'].includes(p.status) ? 'Edit lots' : 'Edit'}</Button>
+            <Button size="sm" variant={editing === p.id ? 'primary' : 'ghost'} icon={editing === p.id ? undefined : <Pencil className="h-4 w-4" />} onClick={() => setEditing(editing === p.id ? null : p.id)}>{editing === p.id ? 'Done' : 'Edit'}</Button>
+            {['received', 'cancelled'].includes(p.status) && <Button size="sm" onClick={() => reopen(p)}>Reopen to edit</Button>}
             {p.status === 'draft' && <Button size="sm" variant="primary" onClick={() => patch(p, { status: 'ordered' })}>Mark ordered</Button>}
             {p.status === 'ordered' && <Button size="sm" onClick={() => patch(p, { status: 'shipped' })}>Mark shipped</Button>}
             {(p.status === 'ordered' || p.status === 'shipped') && <Button size="sm" variant="primary" icon={<PackageCheck className="h-4 w-4" />} onClick={() => setReceiving(p)}>Receive</Button>}
@@ -1531,6 +1544,11 @@ export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'sho
                         onBlur={(e) => { const v = e.target.value.trim(); const c = v === '' ? null : Math.round(Number(v.replace(/[$,]/g, '')) * 100); if (c !== l.costCents && (c == null || Number.isFinite(c))) patchLine(p, l.id, { costCents: c }); }} /></label>
                   </>
                 ) : <span className="num">{l.received ? `${l.received} / ` : ''}{l.quantity}</span>}
+                {edit && p.status !== 'draft' && (
+                  <label className="inline-flex items-center gap-1 text-[12px] text-stone" title="How many really arrived — stock changes by the difference">Received
+                    <input inputMode="numeric" className={cx(small, 'w-14 text-right')} defaultValue={l.received}
+                      onBlur={async (e) => { const n = Math.round(Number(e.target.value)); if (!Number.isFinite(n) || n < 0 || n === l.received) { e.target.value = String(l.received); return; } if (!(await fixReceived(p, l, n))) e.target.value = String(l.received); }} /></label>
+                )}
                 {/* Each item's own lead time (draft) or arrival date (ordered) — products from one supplier can take different times. */}
                 <span className="text-[12px] text-ink-soft">
                   {p.status === 'draft' ? (

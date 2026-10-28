@@ -78,6 +78,29 @@ describe('Inventory tools (Stockline features)', () => {
     expect(demoSquareStock.get(SQ.weft60)).toBe(12);
   });
 
+  it('a wrong purchase order can be fixed afterwards: reopen it, and correct what was received (stock follows)', async () => {
+    const po = (await api.post('/api/inventory-sync/stock/purchase-orders', { lines: [{ productKey: SQ.weft60, quantity: 10 }], store: 'salon' })).body.orders[0];
+    await api.patch(`/api/inventory-sync/stock/purchase-orders/${po.id}`, { status: 'ordered' });
+    const before = demoSquareStock.get(SQ.weft60)!;
+    const got = await api.post(`/api/inventory-sync/stock/purchase-orders/${po.id}/receive`, { lines: [{ lineId: po.lines[0].id, quantity: 10 }] });
+    expect(got.body.order.status).toBe('received');
+    expect(demoSquareStock.get(SQ.weft60)).toBe(before + 10);
+    // Closed: items can't change until it's reopened.
+    expect((await api.patch(`/api/inventory-sync/stock/purchase-orders/${po.id}/lines/${po.lines[0].id}`, { costCents: 3900 })).status).toBe(400);
+    // Only 8 really came: correct it — stock comes down by 2 and the order is open again for the last 2.
+    const fix = await api.post(`/api/inventory-sync/stock/purchase-orders/${po.id}/lines/${po.lines[0].id}/received`, { received: 8 });
+    expect(fix.status).toBe(200);
+    expect(fix.body.order).toMatchObject({ status: 'ordered' });
+    expect(fix.body.order.lines[0].received).toBe(8);
+    expect(demoSquareStock.get(SQ.weft60)).toBe(before + 8);
+    // Back to complete, then reopen to edit the cost and add an item.
+    await api.post(`/api/inventory-sync/stock/purchase-orders/${po.id}/lines/${po.lines[0].id}/received`, { received: 10 });
+    expect((await api.post(`/api/inventory-sync/stock/purchase-orders/${po.id}/reopen`)).body.order.status).toBe('ordered');
+    expect((await api.patch(`/api/inventory-sync/stock/purchase-orders/${po.id}/lines/${po.lines[0].id}`, { costCents: 3900 })).body.order.lines[0].costCents).toBe(3900);
+    expect((await api.post(`/api/inventory-sync/stock/purchase-orders/${po.id}/reopen`)).status).toBe(400); // already open
+    expect(demoSquareStock.get(SQ.weft60)).toBe(before + 10);
+  });
+
   it('forecasts from sales, suggests orders, and purchase orders add stock when received', async () => {
     await api.put('/api/inventory-sync/stock/products/settings', { rows: [{ key: SQ.weft60, supplier: 'Hair Co', costCents: 4000, leadTimeDays: 45, moq: 10, caseSize: 5 }] });
     const f = (await api.post('/api/inventory-sync/stock/sales/refresh')).body;
