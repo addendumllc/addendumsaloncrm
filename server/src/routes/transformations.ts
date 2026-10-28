@@ -5,7 +5,7 @@ import { can } from '../auth/permissions.js';
 import {
   addInstagram, addPhoto, createCollection, createTransformation, deleteCollection, deleteTransformation, detailsCsv, exportFile, exportStatus, getTransformation,
   listTransformations, options, receiveUpload, photoFile, refreshInstagram, removeInstagram, removePhoto, reorderPhotos, replacePhoto, setCollectionItems,
-  setInstagramPrimary, setServiceList, setThumbnail, skipAppointment, startExport, toConfirm, updateConsent, updatePhoto, updateTransformation,
+  setInstagramPrimary, setServiceList, setThumbnail, skipAppointment, startExport, toConfirm, needsDetails, updateConsent, updatePhoto, updateTransformation,
 } from '../domain/transformations.js';
 import { forbidden } from '../lib/errors.js';
 import { ah, isoDate, logAction, parse, uuid } from './util.js';
@@ -34,7 +34,8 @@ const details = z.object({
 }).partial();
 const fields = {
   title: z.string().trim().max(200), stylistStaffId: uuid.nullable().optional(), serviceDate: isoDate, clientId: uuid.nullable().optional(),
-  mainService: z.string().trim().min(1, 'choose the main service').max(120), services: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
+  // Blank only when an administrator adds work for a stylist to fill in (checked in the domain).
+  mainService: z.string().trim().max(120), services: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
   details: details.optional(), extension: extension.optional(), technicalNotes: text(5000), internalNotes: text(5000), caption: text(2200), hashtags: text(1000),
   tags: z.array(z.string().max(60)).max(40).optional(),
 };
@@ -48,7 +49,7 @@ const listSchema = z.object({
 const blank = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== '' && v != null));
 
 transformationsRouter.get('/', ah(async (req, res) => res.json(await listTransformations(parse(listSchema, blank(req.query as any)), req.user!))));
-transformationsRouter.get('/to-confirm', ah(async (req, res) => res.json({ items: await toConfirm(req.user!) })));
+transformationsRouter.get('/to-confirm', ah(async (req, res) => res.json({ items: await toConfirm(req.user!), needsDetails: await needsDetails(req.user!) })));
 transformationsRouter.post(`/to-confirm/:aid${ID}/skip`, ah(async (req, res) => { await skipAppointment(req.params.aid, req.user!); res.json({ ok: true }); }));
 transformationsRouter.get('/options', ah(async (req, res) => res.json(await options(req.user!))));
 transformationsRouter.put('/options/services', ah(async (req, res) => {

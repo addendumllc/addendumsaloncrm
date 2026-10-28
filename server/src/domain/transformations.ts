@@ -219,6 +219,7 @@ async function dtos(rows: Row[], u: Who): Promise<TransformationDTO[]> {
     }));
     const c = consentDTO(cs.get(r.id)?.[0]);
     const missing: string[] = [];
+    if (!r.main_service) missing.push('Service');
     if (!photos.length && !instagram.length) missing.push('Photo or Instagram link');
     if (c.status !== 'approved_social') missing.push('Approval for social media');
     else if (!approvedForSocial(c)) missing.push(consentExpired(c) ? 'Consent has expired' : 'Verified client consent');
@@ -343,8 +344,10 @@ export async function createTransformation(b: TransformationInput, u: Who) {
     if (a.staff_id) stylist = a.staff_id;
     b = { ...b, clientId: b.clientId ?? a.client_id, serviceDate: b.serviceDate || a.day };
   }
+  // The service can be left for the stylist only by an administrator adding work for them (e.g. from an Instagram post).
+  if (!b.mainService?.trim() && !can(u, 'transformations:manage')) throw badRequest('Choose the service.');
   // The title is optional: the service names it until someone writes one.
-  const title = b.title?.trim() || b.mainService.trim();
+  const title = b.title?.trim() || b.mainService.trim() || 'Transformation';
   const serviceDate = b.serviceDate || today();
   const status = b.consentStatus ?? 'pending';
   // New work starts as Pending Consent or Internal Use Only; approval is a separate, permissioned step.
@@ -362,6 +365,12 @@ export async function createTransformation(b: TransformationInput, u: Who) {
     return r.id;
   });
   if (b.instagramUrl && socialAdmin(u)) await addInstagram(id, b.instagramUrl, true, u);
+  // Added for a stylist by someone else: let them know so they can add what was done.
+  if (stylist !== u.id) {
+    await db().query("INSERT INTO notifications(staff_id, kind, title, body, link) VALUES ($1,'transformation',$2,$3,$4)", [stylist,
+      b.mainService.trim() ? 'A transformation was added for you' : 'Add what was done for a transformation',
+      b.mainService.trim() ? `${title} — check the details and add your notes.` : 'Choose the services and add your notes.', `/transformations?open=${id}`]).catch(() => undefined);
+  }
   return getTransformation(id, u);
 }
 
@@ -377,11 +386,16 @@ export async function updateTransformation(id: string, b: Partial<Transformation
   const set: string[] = [];
   const p: unknown[] = [id];
   const put = (col: string, v: unknown) => { p.push(v); set.push(`${col} = $${p.length}`); };
-  if (b.title !== undefined) put('title', b.title.trim() || b.mainService?.trim() || row.main_service);
+  if (b.title !== undefined) put('title', b.title.trim() || b.mainService?.trim() || row.main_service || 'Transformation');
+  // Still the placeholder name: the service names it once the stylist adds it.
+  else if (b.mainService?.trim() && (row.title === 'Transformation' || !row.main_service)) put('title', b.mainService.trim());
   if (b.stylistStaffId !== undefined) put('stylist_staff_id', b.stylistStaffId);
   if (b.serviceDate !== undefined) put('service_date', b.serviceDate);
   if (b.clientId !== undefined) put('client_id', b.clientId);
-  if (b.mainService !== undefined) put('main_service', b.mainService.trim());
+  if (b.mainService !== undefined) {
+    if (!b.mainService.trim() && !can(u, 'transformations:manage')) throw badRequest('Choose the service.');
+    put('main_service', b.mainService.trim());
+  }
   if (b.details !== undefined) put('details', JSON.stringify(b.details ?? {}));
   if (b.technicalNotes !== undefined) put('technical_notes', b.technicalNotes);
   if (b.internalNotes !== undefined) put('internal_notes', b.internalNotes);
@@ -415,6 +429,12 @@ export function matchService(name: string, list: string[]) {
     ?? name;
 }
 /** This stylist's finished appointments in the last two weeks that don't have a transformation yet (and weren't skipped). */
+/** Their transformations still waiting for what was done (added for them without a service). */
+export async function needsDetails(u: Who) {
+  if (!can(u, 'transformations:own')) return [];
+  return db().query<{ id: string; date: string; title: string }>(`SELECT id, to_char(service_date, 'YYYY-MM-DD') AS date, title FROM transformations
+    WHERE stylist_staff_id = $1 AND main_service = '' ORDER BY service_date DESC LIMIT 50`, [u.id]);
+}
 export async function toConfirm(u: Who) {
   if (!can(u, 'transformations:own')) return [];
   const rows = await db().query<any>(`SELECT a.id, to_char(a.start_at, 'YYYY-MM-DD') AS day, a.start_at, a.client_id,

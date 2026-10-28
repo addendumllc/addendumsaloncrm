@@ -66,7 +66,7 @@ function Cover({ t, className, small }: { t: TransformationDTO; className?: stri
 const doneOf = (t: TransformationDTO) => {
   const e = t.extension;
   const ext = e?.hasExtensions ? (e.parts?.length ? [...new Set(e.parts.map((x) => x.method).filter(Boolean))].join(' + ') : e.method) : null;
-  return [...t.services.length ? t.services : [t.mainService], ext].filter(Boolean).join(' · ');
+  return [...t.services.length ? t.services : [t.mainService], ext].filter(Boolean).join(' · ') || 'Service to be added';
 };
 const ConsentBadge = ({ t }: { t: TransformationDTO }) => <Badge tone={t.readyForSocial ? 'sage' : CONSENT_TONE[t.consent.status] === 'sage' ? 'amber' : CONSENT_TONE[t.consent.status]}>{t.readyForSocial ? 'Ready for Social' : consentLabel(t.consent.status)}</Badge>;
 
@@ -92,6 +92,8 @@ export function TransformationsPage() {
   const [open, setOpen] = useState<string | null>(null);
   const [edit, setEdit] = useState<TransformationDTO | 'new' | null>(null);
   const [confirming, setConfirming] = useState<Appt | null>(null);
+  const openParam = params.get('open');
+  useEffect(() => { if (openParam) setOpen(openParam); }, [openParam]);
   const [exportId, setExportId] = useState<string | null>(null);
   const [settings, setSettings] = useState(false);
   const [collect, setCollect] = useState(false);
@@ -118,7 +120,7 @@ export function TransformationsPage() {
         </>} />
       <SectionPicker path="/transformations" names={names} can={canDo} />
 
-      {tab === 'library' && o.can.create && <ToConfirm onConfirm={setConfirming} />}
+      {tab === 'library' && o.can.create && <ToConfirm onConfirm={setConfirming} onDetails={(id) => api.get<{ transformation: TransformationDTO }>(`/transformations/${id}`).then((r) => setEdit(r.transformation)).catch((e) => toast((e as Error).message, 'error'))} />}
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <label className="relative min-w-[12rem] flex-1 sm:max-w-sm">
@@ -214,16 +216,33 @@ export function TransformationsPage() {
 }
 
 /** Their finished appointments without a transformation yet: confirm one (photos + notes), or say there are no photos. */
-function ToConfirm({ onConfirm }: { onConfirm: (a: Appt) => void }) {
+function ToConfirm({ onConfirm, onDetails }: { onConfirm: (a: Appt) => void; onDetails: (id: string) => void }) {
   const qc = useQueryClient();
   const toast = useToast();
-  const { data } = useQuery({ queryKey: ['tf-confirm'], queryFn: () => api.get<{ items: Appt[] }>('/transformations/to-confirm').then((r) => r.items) });
-  if (!data?.length) return null;
+  const { data: all } = useQuery({ queryKey: ['tf-confirm'], queryFn: () => api.get<{ items: Appt[]; needsDetails: { id: string; date: string; title: string }[] }>('/transformations/to-confirm') });
+  const data = all?.items ?? [];
+  const needs = all?.needsDetails ?? [];
+  if (!data.length && !needs.length) return null;
   const skip = async (a: Appt) => {
     try { await api.post(`/transformations/to-confirm/${a.appointmentId}/skip`); void qc.invalidateQueries({ queryKey: ['tf-confirm'] }); } catch (e) { toast((e as Error).message, 'error'); }
   };
   return (
-    <section className="mb-6">
+    <>
+    {needs.length > 0 && (
+      <section className="mb-6">
+        <h2 className="h-display mb-2 text-[20px]">Needs your details <span className="font-sans text-[14px] text-stone">({needs.length})</span></h2>
+        <p className="mb-2 text-[13px] text-stone">Added for you — say what was done and add your notes.</p>
+        <div className="panel divide-y divide-line !p-0">
+          {needs.map((n) => (
+            <div key={n.id} className="flex items-center gap-3 px-3 py-2.5">
+              <span className="min-w-0 flex-1 text-[14px] text-ink">{fmtDate(n.date)}{n.title && n.title !== 'Transformation' ? ` · ${n.title}` : ''}</span>
+              <Button size="sm" variant="primary" icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => onDetails(n.id)}>Add details</Button>
+            </div>
+          ))}
+        </div>
+      </section>
+    )}
+    {data.length > 0 && <section className="mb-6">
       <h2 className="h-display mb-2 text-[20px]">To confirm <span className="font-sans text-[14px] text-stone">({data.length})</span></h2>
       <p className="mb-2 text-[13px] text-stone">Your appointments from the last two weeks. Add the photos and a note, or mark ones without photos.</p>
       <div className="panel divide-y divide-line !p-0">
@@ -235,7 +254,8 @@ function ToConfirm({ onConfirm }: { onConfirm: (a: Appt) => void }) {
           </div>
         ))}
       </div>
-    </section>
+    </section>}
+    </>
   );
 }
 
@@ -569,7 +589,8 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
   });
 
   const save = async () => {
-    if (!d.mainService) return toast('Choose the service.', 'error');
+    // Administrators can leave it for the stylist (e.g. adding an Instagram post); stylists say what was done.
+    if (!d.mainService && !o.can.manage) return toast('Choose the service.', 'error');
     const pending = queue.filter((q) => q.status === 'waiting' || q.status === 'failed');
     if (!photos.length && !pending.length && !(cur?.instagram.length) && !d.instagramUrl.trim()) return toast('Add at least one photo or an Instagram link.', 'error');
     setBusy(true);

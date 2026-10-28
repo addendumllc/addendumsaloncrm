@@ -367,4 +367,20 @@ describe('Transformations Library', () => {
     expect(perms.some((p) => p.startsWith('timeclock:'))).toBe(false); // not asked to clock in
     expect((await owner.get(`/api/transformations/${tid}`)).body.transformation.technicalNotes).toBe('Formula 7N + 20 vol');
   });
+
+  it('an administrator can add work without the service; the stylist is told and fills it in', async () => {
+    const jenId = await staffId('jennifer@addendumsalon.com');
+    expect((await jen.post('/api/transformations', { mainService: '' })).status).toBe(400); // stylists say what was done
+    const t = (await owner.post('/api/transformations', { mainService: '', stylistStaffId: jenId, instagramUrl: 'https://www.instagram.com/p/DN8mpAniVIo/?img_index=1' })).body.transformation;
+    expect([t.title, t.mainService, t.stylistName]).toEqual(['Transformation', '', 'Jennifer']);
+    expect(t.missing).toContain('Service');
+    expect(t.instagram[0].url).toBe('https://www.instagram.com/p/DN8mpAniVIo/');
+    const n = await db().one<any>("SELECT * FROM notifications WHERE staff_id = $1 AND kind = 'transformation' ORDER BY created_at DESC LIMIT 1", [jenId]);
+    expect(n).toMatchObject({ title: 'Add what was done for a transformation', link: `/transformations?open=${t.id}` });
+    expect((await jen.get('/api/transformations/to-confirm')).body.needsDetails.map((x: any) => x.id)).toContain(t.id);
+    expect((await jen.patch(`/api/transformations/${t.id}`, { mainService: '' })).status).toBe(400);
+    const done = await jen.patch(`/api/transformations/${t.id}`, { mainService: 'Balayage / lightening', services: ['Gloss or toner'], technicalNotes: 'Lightener 20 vol' });
+    expect([done.status, done.body.transformation.title]).toEqual([200, 'Balayage / lightening']);
+    expect((await jen.get('/api/transformations/to-confirm')).body.needsDetails.map((x: any) => x.id)).not.toContain(t.id);
+  });
 });
