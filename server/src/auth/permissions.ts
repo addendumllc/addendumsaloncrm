@@ -81,6 +81,8 @@ export const API_RULES: { method: string; path: RegExp; anyOf: string[] }[] = [
   { method: '*', path: /^\/content\/studio(\/.*)?$/, anyOf: ['content:manage', 'content:studio'] },
   { method: '*', path: /^\/content(\/.*)?$/, anyOf: ['content:manage'] },
   // Transformations Library: each route then checks the record (own / all / download / consent).
+  // My Content: each person's own, private Instagram plan (the routes only ever touch their own posts).
+  { method: '*', path: /^\/my-content(\/.*)?$/, anyOf: ['content:personal'] },
   { method: '*', path: /^\/transformations(\/.*)?$/, anyOf: ['transformations:own', 'transformations:view_all', 'transformations:manage'] },
   // Location & Access: everyone can see whether they're on the salon network; changing it is Owner/Admin only (checked in the route).
   { method: 'GET', path: /^\/access\/status$/, anyOf: ANY_SIGNED_IN },

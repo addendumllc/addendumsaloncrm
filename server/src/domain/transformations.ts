@@ -44,18 +44,18 @@ export async function setServiceList(list: string[]) {
 
 // ---------------- storage ----------------
 export const mediaRoot = () => path.resolve(config().MEDIA_DIR);
-const abs = (rel: string) => {
+export const abs = (rel: string) => {
   const p = path.resolve(mediaRoot(), rel);
   if (!p.startsWith(mediaRoot() + path.sep)) throw badRequest('Bad file path.');
   return p;
 };
-async function writeFileOnce(rel: string, bytes: Buffer) {
+export async function writeFileOnce(rel: string, bytes: Buffer) {
   const p = abs(rel);
   await fs.promises.mkdir(path.dirname(p), { recursive: true });
   // wx: never overwrite (an existing file with the same hash is the same photo).
   await fs.promises.writeFile(p, bytes, { flag: 'wx' }).catch((e) => { if (e.code !== 'EEXIST') throw e; });
 }
-const removeFile = (rel: string | null) => (rel ? fs.promises.unlink(abs(rel)).catch(() => {}) : Promise.resolve());
+export const removeFile = (rel: string | null) => (rel ? fs.promises.unlink(abs(rel)).catch(() => {}) : Promise.resolve());
 
 /** The photo formats accepted, recognised from the file's own bytes (not its name). */
 export function sniffImage(b: Buffer): { mime: string; ext: string } | null {
@@ -534,11 +534,12 @@ export async function updateConsent(id: string, b: ConsentInput, u: Who) {
 }
 
 // ---------------- photos ----------------
-async function removeIfUnused(rel: string) {
-  if (!(await db().one('SELECT 1 FROM transformation_media WHERE file_path = $1', [rel]))) await removeFile(rel);
+/** Removes a stored file once nothing uses it (transformation photos and stylists' own content share the storage). */
+export async function removeIfUnused(rel: string) {
+  if (!(await db().one('SELECT 1 FROM transformation_media WHERE file_path = $1 UNION ALL SELECT 1 FROM personal_post_media WHERE file_path = $1', [rel]))) await removeFile(rel);
 }
 /** Moves a received upload into storage, named by its content (the same file twice is stored once; never overwritten). */
-async function storeOriginal(up: Upload) {
+export async function storeOriginal(up: Upload) {
   try {
     if (!up.size) throw badRequest('The file is empty.');
     const kind = sniffMedia(up.head);

@@ -4,7 +4,7 @@ import { useAccessStatus } from './NetworkBlocked';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   ArrowLeftRight, BarChart3, ChevronDown, Timer, Bell, CalendarDays, CircleDollarSign, Package, CheckSquare, Home, ListTodo, LogOut, Menu as MenuIcon, MessageSquare, Plus, Settings, Sparkles, Users, Wallet, X,
-  Images, Camera,
+  Images, Camera, CalendarHeart,
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api/client';
@@ -38,6 +38,7 @@ export const NAV: { to: string; label: string; icon: typeof Home; end?: boolean;
   { to: '/inventory', label: 'Order Hair', icon: Package, anyOf: ['inventory:order', 'inventory:read_all', 'inventory:view', 'inventory:manage'] },
   { to: '/inventory-sync', label: 'Inventory', icon: ArrowLeftRight, anyOf: ['inventory:sync'] },
   { to: '/content', label: 'Content Calendar', icon: Images, anyOf: ['content:manage', 'content:studio'] },
+  { to: '/my-content', label: 'My Content', icon: CalendarHeart, anyOf: ['content:personal'] },
   { to: '/transformations', label: 'Transformations', icon: Camera, anyOf: ['transformations:own', 'transformations:view_all', 'transformations:manage'] },
   { to: '/my-commission', label: 'Earnings & Goals', icon: Wallet, anyOf: ['commission:own'] },
   { to: '/commission', label: 'Team Payroll', icon: CircleDollarSign, anyOf: ['commission:team', 'commission:approve'] },

@@ -33,6 +33,7 @@ import { projectionsRouter } from './routes/projections.js';
 import { contentRouter } from './routes/content.js';
 import { contentStudioRouter } from './routes/contentStudio.js';
 import { transformationsRouter } from './routes/transformations.js';
+import { myContentRouter } from './routes/myContent.js';
 import { networkGate } from './auth/access.js';
 import { webhooksRouter } from './routes/webhooks.js';
 
@@ -140,6 +141,7 @@ export function createApp() {
   app.use('/api/content/studio', contentStudioRouter);
   app.use('/api/content', contentRouter);
   app.use('/api/transformations', transformationsRouter);
+  app.use('/api/my-content', myContentRouter);
   app.use('/api', miscRouter);
   app.use('/api', settingsRouter);
   app.use('/api/clients', clientsRouter);

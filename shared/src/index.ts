@@ -144,6 +144,7 @@ export const PERMISSIONS_CATALOG: PermissionDef[] = [
   { key: 'transformations:technical', category: 'Transformations', action: 'view', label: 'See technical notes', description: 'Colour formulas, technical and internal notes on transformations they can see (their own are always visible).', sensitive: true },
   { key: 'transformations:download', category: 'Transformations', action: 'export', label: 'Download transformation photos', description: 'Download original photos and details of transformations they can see.' },
   { key: 'transformations:bulk', category: 'Transformations', action: 'export', label: 'Bulk download transformations', description: 'Download selected records, filtered collections or the whole library as ZIP files.', sensitive: true },
+  { key: 'content:personal', category: 'Marketing', action: 'create', label: 'My Content (own Instagram plan)', description: 'Their own private content calendar for their Instagram: post ideas, captions, photos and dates. Only they can see it.' },
   { key: 'content:studio', category: 'Marketing', action: 'create', label: 'Content Studio', description: 'Generate on-brand copy and photo/video ideas (posts, Reels, Stories, texts, emails, signage) and save them — without the rest of the content calendar.' },
   { key: 'content:approve', category: 'Marketing', action: 'edit', label: 'Approve content', description: 'Approve posts or request changes.' },
   { key: 'content:publish', category: 'Marketing', action: 'edit', label: 'Schedule and publish content', description: 'Schedule approved posts, turn on auto-posting, and confirm posts as published.' },
@@ -185,7 +186,7 @@ export const PERMISSIONS_CATALOG: PermissionDef[] = [
   { key: 'location:clients_away', category: 'Location and access', action: 'view', label: 'Away from the salon: Clients', description: 'Clients and new-client inquiries work away from the approved networks.', sensitive: true },
   { key: 'location:messages_away', category: 'Location and access', action: 'view', label: 'Away from the salon: Messages', description: 'Messages work away from the approved networks.', sensitive: true },
   { key: 'location:orders_away', category: 'Location and access', action: 'view', label: 'Away from the salon: Order Hair', description: 'Order Hair works away from the approved networks.' },
-  { key: 'location:transformations_away', category: 'Location and access', action: 'view', label: 'Away from the salon: Transformations', description: 'Transformations work away from the approved networks: their work, uploading photos and videos, and adding or editing details.' },
+  { key: 'location:transformations_away', category: 'Location and access', action: 'view', label: 'Away from the salon: Transformations & My Content', description: 'Transformations and their own My Content plan work away from the approved networks: their work, uploading photos and videos, and adding or editing details.' },
   { key: 'location:commission_away', category: 'Location and access', action: 'view', label: 'Away from the salon: Earnings & Goals', description: 'Their own commission works away from the approved networks.' },
 ];
 
@@ -199,7 +200,7 @@ export const AWAY_SECTIONS: { key: AwaySection; permission: string; label: strin
   { key: 'messages', permission: 'location:messages_away', label: 'Messages', paths: ['/messages'], needsAnyOf: ['messages:read'] },
   { key: 'orders', permission: 'location:orders_away', label: 'Order Hair', paths: ['/inventory'], needsAnyOf: ['inventory:order', 'inventory:read_all', 'inventory:view', 'inventory:manage'] },
   { key: 'commission', permission: 'location:commission_away', label: 'Earnings & Goals', paths: ['/my-commission'], needsAnyOf: ['commission:own'] },
-  { key: 'transformations', permission: 'location:transformations_away', label: 'Transformations', paths: ['/transformations'], needsAnyOf: ['transformations:own', 'transformations:view_all', 'transformations:manage'] },
+  { key: 'transformations', permission: 'location:transformations_away', label: 'Transformations & My Content', paths: ['/transformations', '/my-content'], needsAnyOf: ['transformations:own', 'transformations:view_all', 'transformations:manage', 'content:personal'] },
 ];
 
 /** The app path (e.g. "/clients/123") is part of one of these away sections. */
@@ -229,7 +230,7 @@ export const ROLE_DEFAULT_PERMISSIONS: Record<BuiltinRole, string[]> = {
   // Their own appointments, their own clients (contact, history, notes), their own follow-ups, hair orders, commission.
   stylist: [
     'workspace:salon', 'appointments:read_own', 'clients:read_assigned', 'clients:contact', 'clients:history', 'clients:notes', 'services:read',
-    'tasks:read_own', 'tasks:write', 'inventory:view', 'inventory:order', 'commission:own', 'announcements:read', 'transformations:own',
+    'tasks:read_own', 'tasks:write', 'inventory:view', 'inventory:order', 'commission:own', 'announcements:read', 'transformations:own', 'content:personal',
     // Used if an administrator gives stylists the Dashboard.
     'dashboard:schedule', 'dashboard:priorities', 'dashboard:followups', 'dashboard:announcements', 'dashboard:orders', 'dashboard:my_commission',
   ],
