@@ -3,8 +3,7 @@ import { Fragment, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   STOCK_REASONS, hairLengthOf, productSearchText, productSearchWords, type PurchaseOrderDTO, type StockApplyResultDTO, type SupplierDTO, type StockChangeInput, type StockForecastDTO, type StockForecastResponse,
-  type StockProductDTO, type StockProductStatus, type StockTxnDTO,
-} from '@addendum/shared';
+  type StockProductDTO, type StockProductStatus, type StockTxnDTO, productName, hairCompareByMethod } from '@addendum/shared';
 import { AlertTriangle, ArrowLeftRight, Settings2, ChevronDown, ChevronRight, Download, FileUp, ListPlus, PackageCheck, Plus, Replace, Search, Trash2, Pencil, X } from 'lucide-react';
 import { api } from '../../api/client';
 import { useCanDo } from '../../api/hooks';
@@ -334,7 +333,7 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
               <div className="flex items-start gap-3">
                 <input type="checkbox" className="mt-1 h-5 w-5 shrink-0 accent-plum" checked={picked.has(p.key)} onChange={() => setPicked((x) => { const n = new Set(x); if (n.has(p.key)) n.delete(p.key); else n.add(p.key); return n; })} aria-label={`Select ${p.label}`} />
                 <ProductThumb src={p.imageUrl} alt={p.label} size="lg" />
-                <div className="min-w-0 flex-1"><p className="text-[15px] font-medium leading-snug text-ink">{p.label}<ProductSettingsButton productKey={p.key} className="ml-1 align-middle" /></p><Collections p={p} /></div>
+                <div className="min-w-0 flex-1"><p className="text-[15px] font-medium leading-snug text-ink">{productName(p.label, p.sku)}<ProductSettingsButton productKey={p.key} className="ml-1 align-middle" /></p><Collections p={p} /></div>
                 {b}
               </div>
               <div className="mt-2"><StockCell p={p} store2={data.store2} /></div>
@@ -389,7 +388,7 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
                   <span className="flex items-start gap-3">
                     <ProductThumb src={p.imageUrl} alt={p.label} />
                     <span className="min-w-0">
-                      <span className="block text-ink" title={p.label}>{p.label}<ProductSettingsButton productKey={p.key} className="ml-1 align-middle" /></span>
+                      <span className="block text-ink" title={p.label}>{productName(p.label, p.sku)}<ProductSettingsButton productKey={p.key} className="ml-1 align-middle" /></span>
                       {/* Ordering details: the SKU under the name (it's edited in Stock & SKU). */}
                       {details && <span className="block font-mono text-[12px] text-stone">{p.sku ?? 'No SKU'}</span>}
                       <Collections p={p} />
@@ -815,7 +814,7 @@ export function StockView({ store = 'all', initialQuery = '' }: { store?: 'all' 
             <li key={p.key} className={cx('flex items-center gap-3 rounded-xl2 border bg-white p-3', vals[p.key]?.trim() ? 'border-amber/50' : 'border-line')}>
               <ProductThumb src={p.imageUrl} alt={p.label} />
               <div className="min-w-0 flex-1">
-                <p className="text-[15px] font-medium leading-snug text-ink">{p.label}<ProductSettingsButton productKey={p.key} className="ml-1 align-middle" /></p>
+                <p className="text-[15px] font-medium leading-snug text-ink">{productName(p.label, p.sku)}<ProductSettingsButton productKey={p.key} className="ml-1 align-middle" /></p>
                 <p className="truncate font-mono text-[12px] text-stone">{p.sku ?? 'No SKU'}{p.collections.length ? <span className="font-sans"> · {p.collections.slice(0, 2).join(' · ')}</span> : null}</p>
                 <div className="mt-1"><StockCell p={p} store2={data.store2} /></div>
               </div>
@@ -831,7 +830,7 @@ export function StockView({ store = 'all', initialQuery = '' }: { store?: 'all' 
             <tbody className="divide-y divide-line">
               {shown.slice(0, 400).map((p) => (
                 <tr key={p.key}>
-                  <td className="px-3 py-1.5 text-ink"><span className="flex items-center gap-2.5"><ProductThumb src={p.imageUrl} alt={p.label} size="sm" /><span>{p.label}<ProductSettingsButton productKey={p.key} className="ml-1 align-middle" /><Collections p={p} /></span></span></td>
+                  <td className="px-3 py-1.5 text-ink"><span className="flex items-center gap-2.5"><ProductThumb src={p.imageUrl} alt={p.label} size="sm" /><span>{productName(p.label, p.sku)}<ProductSettingsButton productKey={p.key} className="ml-1 align-middle" /><Collections p={p} /></span></span></td>
                   <td className="px-2 py-1.5 font-mono text-ink-soft">{p.sku}</td>
                   <td className="px-2 py-1.5"><StockCell p={p} store2={data.store2} /></td>
                   <td className="px-2 py-1.5"><input inputMode="numeric" className={cx('w-full rounded-md border border-line bg-white px-2 py-1 num', vals[p.key]?.trim() && 'border-amber bg-amber-tint')} value={vals[p.key] ?? ''} onChange={(e) => setVals((v) => ({ ...v, [p.key]: e.target.value }))} /></td>
@@ -914,7 +913,7 @@ export function groupLines<L extends { productKey: string; label: string; sku: s
   const len = (l: L) => hairLengthOf(l.label, l.sku);
   const n = (l: L) => { const x = len(l); return x ? Number.parseInt(x, 10) : 999; };
   const headOf = (l: L) => (by === 'length' ? len(l) ?? 'No length' : by === 'collection' ? collectionOf(l.productKey) : [collectionOf(l.productKey), len(l)].filter(Boolean).join(' · '));
-  const sorted = [...lines].sort((a, b) => (by === 'length' ? 0 : collectionOf(a.productKey).localeCompare(collectionOf(b.productKey))) || n(a) - n(b) || a.label.localeCompare(b.label));
+  const sorted = [...lines].sort((a, b) => (by === 'length' ? 0 : collectionOf(a.productKey).localeCompare(collectionOf(b.productKey))) || n(a) - n(b) || hairCompareByMethod(a, b));
   return sorted.map((line, i) => ({ head: i === 0 || headOf(sorted[i - 1]) !== headOf(line) ? headOf(line) : null, line }));
 }
 
@@ -992,7 +991,7 @@ function SuggestedOrders({ store, onClose, onMade }: { store: 'all' | 'salon' | 
                 {g.lines.map((l) => (
                   <li key={l.productKey} className={cx('flex items-center gap-3 px-3 py-1.5', off.has(l.productKey) && 'opacity-50')}>
                     <input type="checkbox" className="h-4 w-4 accent-plum" checked={!off.has(l.productKey)} onChange={() => toggle(l.productKey)} aria-label={`Include ${l.label}`} />
-                    <span className="min-w-0 flex-1"><span className="block truncate text-ink">{l.label}</span><span className="font-mono text-[11px] text-stone">{l.sku}</span></span>
+                    <span className="min-w-0 flex-1"><span className="block truncate text-ink">{productName(l.label, l.sku)}</span><span className="font-mono text-[11px] text-stone">{l.sku}</span></span>
                     <Badge tone={F_STATUS[l.status].tone}>{F_STATUS[l.status].label}</Badge>
                     <span className="num w-16 text-right text-stone">{l.stock} in stock</span>
                     <input inputMode="numeric" disabled={off.has(l.productKey)} className="w-16 rounded-md border border-line bg-white px-2 py-1 text-right num" value={qty[l.productKey] ?? String(l.quantity)} onChange={(e) => setQty((x) => ({ ...x, [l.productKey]: e.target.value }))} aria-label={`Amount of ${l.label}`} />
@@ -1286,7 +1285,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
             <div className="flex items-start gap-3">
               <input type="checkbox" className="mt-1 h-5 w-5 shrink-0 accent-plum" checked={picked.has(i.key)} onChange={() => toggle(i.key)} aria-label={`Select ${i.label}`} />
               <div className="min-w-0 flex-1">
-                <p className="text-[15px] font-medium leading-snug text-ink">{i.label}<ProductSettingsButton productKey={i.key} className="ml-1 align-middle" /></p>
+                <p className="text-[15px] font-medium leading-snug text-ink">{productName(i.label, i.sku)}<ProductSettingsButton productKey={i.key} className="ml-1 align-middle" /></p>
                 <p className="text-[12px] text-stone"><span className="font-mono">{i.sku}</span>{(i.supplier ?? fallbackSupplier) ? ` · ${i.supplier ?? fallbackSupplier}` : ''}</p>
               </div>
               <span className="flex flex-col items-end gap-1"><Badge tone={F_STATUS[i.status].tone}>{F_STATUS[i.status].label}</Badge>{i.stockoutRisk && <Badge tone="rose">Stock-out risk</Badge>}{i.recount && <RecountBadge onRight={() => counted([i.key])} />}{i.skippedUntil && <SkippedBadge until={i.skippedUntil} onUndo={() => skip([i.key], 'off')} />}</span>
@@ -1318,7 +1317,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
               <Fragment key={i.key}>
                 <tr>
                   <td className="px-3 py-1.5"><input type="checkbox" checked={picked.has(i.key)} onChange={() => toggle(i.key)} aria-label={`Select ${i.label}`} /></td>
-                  <td className="px-2 py-1.5"><button type="button" className="flex items-start gap-1 text-left text-ink" onClick={() => setOpen(open === i.key ? null : i.key)}>{open === i.key ? <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0" />}<span>{i.label}<span className="block text-[11px] text-stone">{i.sku}</span></span></button><ProductSettingsButton productKey={i.key} className="ml-4" /></td>
+                  <td className="px-2 py-1.5"><button type="button" className="flex items-start gap-1 text-left text-ink" onClick={() => setOpen(open === i.key ? null : i.key)}>{open === i.key ? <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0" />}<span>{productName(i.label, i.sku)}<span className="block text-[11px] text-stone">{i.sku}</span></span></button><ProductSettingsButton productKey={i.key} className="ml-4" /></td>
                   <td className="px-2 py-1.5"><Badge tone={F_STATUS[i.status].tone}>{F_STATUS[i.status].label}</Badge>{i.stockoutRisk && <span className="mt-1 block"><Badge tone="rose">Stock-out risk</Badge></span>}{i.recount && <span className="mt-1 block"><RecountBadge onRight={() => counted([i.key])} /></span>}{i.leadSource?.kind === 'missing' && i.status !== 'discontinued' && <span className="mt-1 block" title="No lead time for this product, its collections or its supplier"><Badge tone="amber">Needs lead time</Badge></span>}{i.skippedUntil && <span className="mt-1 block"><SkippedBadge until={i.skippedUntil} onUndo={() => skip([i.key], 'off')} /></span>}</td>
                   <td className="num px-2 py-1.5 text-right">{i.stock}</td>
                   <td className="num px-2 py-1.5 text-right">{i.incoming || ''}</td>
@@ -1517,7 +1516,7 @@ export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'sho
               {head && <li className="bg-mist/40 px-2 pb-1 pt-2 text-[12px] font-semibold uppercase tracking-wide text-stone">{head}</li>}
               <li className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
                 <span className="min-w-[min(100%,12rem)] flex-1 text-ink">
-                  {l.label}<ProductSettingsButton productKey={l.productKey} className="ml-1 align-middle" /><span className="ml-2 text-[11px] text-stone">{l.sku}{p.supplier?.includes(' + ') && l.supplier ? ` · ${l.supplier}` : ''}</span>
+                  {productName(l.label, l.sku)}<ProductSettingsButton productKey={l.productKey} className="ml-1 align-middle" /><span className="ml-2 text-[11px] text-stone">{l.sku}{p.supplier?.includes(' + ') && l.supplier ? ` · ${l.supplier}` : ''}</span>
                 </span>
                 {/* A short note per item (e.g. a different lot, or "2 damaged"), at any stage. */}
                 <input className={cx(small, 'w-32 text-[12px]')} maxLength={40} defaultValue={l.lotNote ?? ''} placeholder="Note" aria-label={`Note for ${l.label}`}
@@ -1603,7 +1602,7 @@ function AddToOrder({ po, onAdded }: { po: PurchaseOrderDTO; onAdded: () => void
       <input className="field h-10 pl-9 text-[16px] sm:text-[14px]" placeholder="Add a product to this order" value={q} onChange={(e) => setQ(e.target.value)} />
       {found.length > 0 && (
         <ul className="absolute z-20 mt-1 w-full rounded-lg border border-line bg-white shadow-pop">
-          {found.map((p) => <li key={p.key}><button type="button" className="w-full px-3 py-2 text-left text-[13px] hover:bg-mist" onClick={() => add(p)}>{p.label} <span className="text-stone">{p.sku}</span></button></li>)}
+          {found.map((p) => <li key={p.key}><button type="button" className="w-full px-3 py-2 text-left text-[13px] hover:bg-mist" onClick={() => add(p)}>{productName(p.label, p.sku)} <span className="text-stone">{p.sku}</span></button></li>)}
         </ul>
       )}
     </div>
@@ -1644,7 +1643,7 @@ function ReceiveModal({ po, onClose }: { po: PurchaseOrderDTO; onClose: () => vo
       <Field label="Lot number" hint="For the whole order." className="mb-3"><input className="field w-48 font-mono" maxLength={40} value={lot} onChange={(e) => setLot(e.target.value)} placeholder="e.g. L0724" /></Field>
       <table className="w-full text-[13px]"><tbody className="divide-y divide-line">
         {po.lines.map((l) => (
-          <tr key={l.id}><td className="py-1.5 text-ink">{l.label}<span className="block text-[11px] text-stone">{l.received} of {l.quantity} received so far</span>
+          <tr key={l.id}><td className="py-1.5 text-ink">{productName(l.label, l.sku)}<span className="block text-[11px] text-stone">{l.received} of {l.quantity} received so far</span>
               <input className="mt-1 w-40 rounded-md border border-line bg-white px-2 py-1 text-[12px]" maxLength={40} placeholder="Note (optional)" value={lots[l.id] ?? ''} onChange={(e) => setLots((x) => ({ ...x, [l.id]: e.target.value }))} aria-label={`Note for ${l.label}`} /></td>
             <td className="w-24 py-1.5 pl-2 align-top"><input inputMode="numeric" className="field num" value={got[l.id] ?? ''} onChange={(e) => setGot((g) => ({ ...g, [l.id]: e.target.value }))} aria-label={`Received of ${l.label}`} /></td></tr>
         ))}
@@ -1703,7 +1702,7 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
   const allTheirs = chosenList.length ? (data?.products ?? []).filter((p) => p.status === 'active' && inStore(p) && chosenList.includes(p.supplier ?? fallback ?? '')) : [];
   const collections = [...new Set(allTheirs.map(collOf))].sort((a, b) => a.localeCompare(b));
   const theirs = allTheirs.filter((p) => (!coll || collOf(p) === coll) && (showSkipped || !isSkipped(p)))
-    .sort((a, b) => collOf(a).localeCompare(collOf(b)) || lenN(a) - lenN(b) || rank(a) - rank(b) || a.label.localeCompare(b.label));
+    .sort((a, b) => collOf(a).localeCompare(collOf(b)) || lenN(a) - lenN(b) || rank(a) - rank(b) || hairCompareByMethod(a, b));
   // Suggested: would sell out within 2 weeks (and, for 18" packs, neither the 20g nor 25g pack is in stock).
   const suggested = theirs.filter((p) => fc.get(p.key)?.suggestNow && !has(p.key) && !isSkipped(p));
   const skipOne = async (p: StockProductDTO, on: boolean) => {
@@ -1797,7 +1796,7 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
                     <li className={cx('flex items-center', off && 'opacity-50')}>
                       <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 px-3 py-2 text-[13px] hover:bg-mist/50">
                         <input type="checkbox" className="h-4 w-4 shrink-0 accent-plum" disabled={off} checked={has(p.key)} onChange={() => (has(p.key) ? setLines((x) => x.filter((l) => l.p.key !== p.key)) : add([p]))} />
-                        <span className="min-w-0 flex-1"><span className="block truncate text-ink">{p.label}</span>
+                        <span className="min-w-0 flex-1"><span className="block truncate text-ink">{productName(p.label, p.sku)}</span>
                           <span className="block text-[11px] text-stone"><span className="font-mono">{p.sku}</span> · {f ? `${f.stock} in stock` : ''}{leadOf(p) != null ? ` · ${leadOf(p)} day lead` : ''}{chosenList.length > 1 ? ` · ${p.supplier ?? fallback}` : ''}</span></span>
                         {low && f && !off && <Badge tone={f.status === 'out' || f.status === 'order_now' ? 'rose' : 'amber'}>{f.suggestedQty > 0 ? `Suggest ${f.suggestedQty}` : f.status === 'out' ? 'Out' : 'Low'}</Badge>}
                       </label>
@@ -1816,7 +1815,7 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
           <input className="field h-11 pl-9 text-[16px] sm:text-[14px]" placeholder={chosen ? 'Add another product: name, colour, collection or SKU' : SEARCH_HINT} value={q} onChange={(e) => setQ(e.target.value)} />
           {found.length > 0 && (
             <ul className="absolute z-20 mt-1 w-full rounded-lg border border-line bg-white shadow-pop">
-              {found.map((p) => <li key={p.key}><button type="button" className="w-full px-3 py-2 text-left text-[13px] hover:bg-mist" onClick={() => { add([p]); setQ(''); }}>{p.label} <span className="text-stone">{p.sku}{p.supplier && !chosenList.includes(p.supplier) ? ` · ${p.supplier}` : ''}</span></button></li>)}
+              {found.map((p) => <li key={p.key}><button type="button" className="w-full px-3 py-2 text-left text-[13px] hover:bg-mist" onClick={() => { add([p]); setQ(''); }}>{productName(p.label, p.sku)} <span className="text-stone">{p.sku}{p.supplier && !chosenList.includes(p.supplier) ? ` · ${p.supplier}` : ''}</span></button></li>)}
             </ul>
           )}
         </div>
@@ -1955,7 +1954,7 @@ export function SuppliersView() {
                             const f = fc.get(p.key);
                             return (
                               <tr key={p.key}>
-                                <td className="px-2 py-1.5 text-ink">{p.label}<span className="block font-mono text-[11px] text-stone">{p.sku}</span></td>
+                                <td className="px-2 py-1.5 text-ink">{productName(p.label, p.sku)}<span className="block font-mono text-[11px] text-stone">{p.sku}</span></td>
                                 <td className="px-2 py-1.5 font-mono text-stone">{p.supplierSku ?? '—'}</td>
                                 <td className="px-2 py-1.5 text-ink-soft">{p.collection ?? p.collections[0] ?? '—'}</td>
                                 <td className="num px-2 py-1.5 text-right">{own(p.leadTimeDays, s.leadTimeDays)}</td>
@@ -2096,7 +2095,7 @@ function AssignSupplierModal({ supplier, onClose, onSaved }: { supplier: Supplie
               <li key={p.key}>
                 <label className="flex cursor-pointer items-center gap-3 px-3 py-2.5 text-[14px] hover:bg-mist/50">
                   <input type="checkbox" className="h-4 w-4 shrink-0 accent-plum" checked={picked.has(p.key)} onChange={() => setPicked((cur) => { const n = new Set(cur); if (n.has(p.key)) n.delete(p.key); else n.add(p.key); return n; })} />
-                  <span className="min-w-0 flex-1"><span className="block truncate text-ink">{p.label}</span>
+                  <span className="min-w-0 flex-1"><span className="block truncate text-ink">{productName(p.label, p.sku)}</span>
                     <span className="block truncate text-[12px] text-stone"><span className="font-mono">{p.sku ?? 'No SKU'}</span>{p.supplier ? ` · now: ${p.supplier}` : ''}</span></span>
                 </label>
               </li>

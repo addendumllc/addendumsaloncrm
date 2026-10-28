@@ -1,3 +1,4 @@
+import { productName, hairCompare } from '@addendum/shared';
 import { collectionLabel, inCollection as inOwnCollection } from './Collections';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -52,7 +53,7 @@ export function ForecastWidget({ scope }: { scope: 'all' | 'salon' | 'online' })
   const shown = inColl.filter((i) => by === 'product' || !group || groupOf(i) === group);
   const of = (s: Status) => shown.filter((i) => i.status === s);
   const cost = (list: Item[]) => list.reduce((n, i) => n + (i.costCents ?? 0) * i.suggestedQty, 0);
-  const list = of(status).sort((a, b) => (a.orderBy ?? '').localeCompare(b.orderBy ?? '') || a.label.localeCompare(b.label));
+  const list = of(status).sort((a, b) => (a.orderBy ?? '').localeCompare(b.orderBy ?? '') || hairCompare(a, b));
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -108,7 +109,7 @@ export function ForecastWidget({ scope }: { scope: 'all' | 'salon' | 'online' })
             <tbody className="divide-y divide-line">
               {list.map((i) => (
                 <tr key={i.key}>
-                  <td className="px-3 py-1.5 text-ink">{i.label}{i.sku && <span className="block font-mono text-[11px] text-stone">{i.sku}</span>}</td>
+                  <td className="px-3 py-1.5 text-ink">{productName(i.label, i.sku)}{i.sku && <span className="block font-mono text-[11px] text-stone">{i.sku}</span>}</td>
                   <td className="num px-2 py-1.5 text-right">{i.stock}{i.incoming ? <span className="text-stone"> +{i.incoming}</span> : ''}</td>
                   <td className="num px-2 py-1.5 text-right">{i.ratePerDay.toFixed(2)}</td>
                   <td className="num px-2 py-1.5 text-right">{i.daysOfStock ?? '—'}</td>

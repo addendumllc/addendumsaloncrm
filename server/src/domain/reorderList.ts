@@ -1,4 +1,4 @@
-import { hairLengthOf, type StockForecastDTO } from '@addendum/shared';
+import { hairLengthOf, type StockForecastDTO, hairCompareByMethod } from '@addendum/shared';
 import { db } from '../db/index.js';
 import { badRequest } from '../lib/errors.js';
 import { getKV, setKV } from '../repos/settings.js';
@@ -198,9 +198,9 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; group?: s
   }
   // Wefts first, then K-tips; in each: out of stock, then runs out before an order could arrive, then the rest —
   // soonest stock-out first, longer lead first.
-  // Lisa's sections in her order (18" / 22" / 24" Redefined Wefts, K-Tips, Tapes, Clip-Ins); in each, the most urgent first.
-  rows.sort((a, b) => groupRank(a.group, a.type) - groupRank(b.group, b.type) || a.group.localeCompare(b.group) || a.tier - b.tier
-    || (a.daysUntilStockout ?? 9999) - a.leadDays - ((b.daysUntilStockout ?? 9999) - b.leadDays) || b.leadDays - a.leadDays || a.label.localeCompare(b.label));
+  // Lisa's sections in her order (18" / 22" / 24" Redefined Wefts, K-Tips, Tapes, Clip-Ins) — method, then length; in each,
+  // by colour (urgent ones are marked, not moved).
+  rows.sort((a, b) => groupRank(a.group, a.type) - groupRank(b.group, b.type) || a.group.localeCompare(b.group) || hairCompareByMethod(a, b));
   const filtered = rows.filter((r) => (!opts.type || r.type === opts.type) && (!opts.group || r.group === opts.group) && (!opts.collection || r.collection === opts.collection) && (!opts.supplier || r.supplier === opts.supplier));
   const suppliers = await supplierRules();
   return {

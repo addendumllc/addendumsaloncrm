@@ -1,3 +1,4 @@
+import { productName } from '@addendum/shared';
 import { SectionPicker } from '../components/layout/subNav';
 import { useCanDo } from '../api/hooks';
 import { ReorderList } from '../components/domain/ReorderList';
@@ -242,7 +243,7 @@ function RunDetails({ run }: { run: InventorySyncRunDTO }) {
     <ul className="divide-y divide-line rounded-xl2 border border-line bg-white">
       {run.details.map((d, i) => (
         <li key={i} className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-[14px]">
-          <span className="min-w-0 flex-1"><span className="text-ink">{d.label}</span>{d.sku && <span className="ml-2 font-mono text-[12px] text-stone">{d.sku}</span>}<span className="block text-[12px] text-stone">{d.note}</span></span>
+          <span className="min-w-0 flex-1"><span className="text-ink">{productName(d.label, d.sku)}</span>{d.sku && <span className="ml-2 font-mono text-[12px] text-stone">{d.sku}</span>}<span className="block text-[12px] text-stone">{d.note}</span></span>
           <Badge tone={result(N)[d.result].tone}>{result(N)[d.result].label}</Badge>
         </li>
       ))}
@@ -327,7 +328,7 @@ function Links({ status }: { status?: 'problems' }) {
             <div className="flex items-start gap-3">
               {resolvable(l) && <input type="checkbox" className="mt-1 h-5 w-5 shrink-0 accent-plum" checked={picked.has(l.id)} onChange={() => toggle(l.id)} aria-label={`Select ${l.label}`} />}
               <div className="min-w-0 flex-1">
-                <p className="text-[15px] font-medium leading-snug text-ink">{l.label}</p>
+                <p className="text-[15px] font-medium leading-snug text-ink">{productName(l.label, l.sku)}</p>
                 {l.sku && <p className="font-mono text-[12px] text-stone">{l.sku}</p>}
               </div>
               {badge}
@@ -362,7 +363,7 @@ function Links({ status }: { status?: 'problems' }) {
           {shown.map((l) => (
             <tr key={l.id} className={cx(picked.has(l.id) && resolvable(l) && 'bg-mist/40')}>
               {canPick.length > 0 && <td className="w-10 pl-4 pr-0 py-2.5">{resolvable(l) && <input type="checkbox" checked={picked.has(l.id)} onChange={() => toggle(l.id)} aria-label={`Select ${l.label}`} />}</td>}
-              <td className="px-4 py-2.5"><span className="text-ink">{l.label}</span>{l.sku && <span className="ml-2 font-mono text-[12px] text-stone">{l.sku}</span>}{l.matchMethod === 'manual' && <Badge className="ml-1">Linked by hand</Badge>}
+              <td className="px-4 py-2.5"><span className="text-ink">{productName(l.label, l.sku)}</span>{l.sku && <span className="ml-2 font-mono text-[12px] text-stone">{l.sku}</span>}{l.matchMethod === 'manual' && <Badge className="ml-1">Linked by hand</Badge>}
                 {(l.issue || l.lastChange) && <span className={cx('block text-[12px]', l.issue ? 'text-rose' : 'text-stone')}>{l.issue ?? l.lastChange}</span>}</td>
               <td className="num px-3 py-2.5 text-right">{l.squareQuantity ?? '—'}</td>
               <td className="num px-3 py-2.5 text-right">{l.shopifyQuantity ?? '—'}</td>
@@ -498,7 +499,7 @@ function Unmatched({ u, separate }: { u: InventorySyncOverviewDTO['unmatched']; 
             <li key={i.id ?? n} className={cx('flex items-center gap-2 rounded-lg px-2 py-1', on ? 'bg-plum-tint ring-1 ring-plum/40' : 'hover:bg-mist/60')}>
               <button type="button" disabled={!i.id} onClick={() => setPicked(on ? null : i)} className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default">
                 <span className={cx('h-3.5 w-3.5 shrink-0 rounded-full border', on ? 'border-plum bg-plum' : 'border-line-strong')} />
-                <span className="min-w-0 flex-1 truncate">{i.label}</span>
+                <span className="min-w-0 flex-1 truncate">{productName(i.label, i.sku)}</span>
                 <span className="font-mono text-stone">{i.sku ?? 'no SKU'}</span>
               </button>
               {i.id && <Button size="sm" variant="ghost" disabled={busy} title={`Sold only in ${store === 'square' ? N.square : N.shopify} — don’t sync`} onClick={() => mark(store, [i])}>Only here</Button>}
@@ -549,7 +550,7 @@ function Unmatched({ u, separate }: { u: InventorySyncOverviewDTO['unmatched']; 
               {sep.map((x) => (
                 <li key={`${x.store}-${x.itemId}`} className="flex items-center gap-2 py-1.5">
                   <Badge>{x.store === 'square' ? `${N.square} only` : `${N.shopify} only`}</Badge>
-                  <span className="min-w-0 flex-1 truncate">{x.label}</span>
+                  <span className="min-w-0 flex-1 truncate">{productName(x.label, x.sku)}</span>
                   <span className="font-mono text-stone">{x.sku ?? 'no SKU'}</span>
                   <Button size="sm" variant="ghost" disabled={busy} onClick={() => act(() => api.del(`/inventory-sync/separate/${x.store}/${encodeURIComponent(x.itemId)}`), `${x.label} is back under Not matched`)}>Undo</Button>
                 </li>

@@ -1,3 +1,4 @@
+import { productName } from '@addendum/shared';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle } from 'lucide-react';
@@ -47,7 +48,7 @@ export function CustomersWaiting({ items }: { items: PreorderItem[] }) {
         {items.map((i) => (
           <li key={i.key} className="panel p-4">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-medium text-ink">{i.label}</span>
+              <span className="font-medium text-ink">{productName(i.label, i.sku)}</span>
               {i.sku && <span className="font-mono text-[12px] text-stone">{i.sku}</span>}
               {i.status === 'needs_order' ? <Badge tone="rose">Needs ordering</Badge> : <Badge tone="amber">On order</Badge>}
             </div>

@@ -1,3 +1,4 @@
+import { productName } from '@addendum/shared';
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ChevronDown, Download, FileText, Save } from 'lucide-react';
@@ -154,7 +155,7 @@ export function ReorderList({ onOrders }: { onOrders: () => void }) {
                         </div>
                         {expanded && (
                           <div className="space-y-1.5 bg-mist/40 px-3 pb-3 pl-11 pt-1 text-[13px]">
-                            <p className="text-stone">{r.label}{r.sku ? ` · ${r.sku}` : ''}</p>
+                            <p className="text-stone">{productName(r.label, r.sku)}{r.sku ? ` · ${r.sku}` : ''}</p>
                             {r.badges.length > 0 && <div className="flex flex-wrap gap-1">{r.badges.map((b) => <Badge key={b} tone={BADGE_TONE[b] ?? 'neutral'}>{b}</Badge>)}</div>}
                             {r.warning && <p className="text-rose">{r.warning}</p>}
                             <p className="text-ink-soft"><span className="text-stone">{r.planNote}:</span> {r.explain}</p>
@@ -218,7 +219,7 @@ function ReviewModal({ plan, review, onFix, onExclude, onClose, onDone }: {
           <div className="panel divide-y divide-line !p-0 text-[14px]">
             {s.lines.map((l) => (
               <div key={l.key} className={cx('flex items-center gap-3 px-3 py-2', bad.has(l.key) && 'opacity-50')}>
-                <span className="min-w-0 flex-1 truncate">{l.label}</span>
+                <span className="min-w-0 flex-1 truncate">{productName(l.label, l.sku)}</span>
                 <span className="num w-14 text-right font-medium">{l.qty}</span>
               </div>
             ))}

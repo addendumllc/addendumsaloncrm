@@ -1296,6 +1296,44 @@ export function hairParts(label: string): { collection: string; length: string; 
   }
   return { collection: 'Tools & accessories', length: '', color: parts[0] ?? label, detail: '' };
 }
+/**
+ * How hair products are named across the CRM: length, then colour, then method — 24" Aperol Spritz Redefined Weft — with
+ * the pack weight after it when there is one (· 25g). Lists sort the same way (hairCompare). Where a list is grouped by
+ * collection or method, the order is method → length → colour (hairCompareByMethod). Non-hair products keep their name.
+ */
+const METHOD_RE = /\b((?:redefined|signature|hand[\s-]?tied|genius|invisible|machine)\s+)?(wefts?|[ik][\s-]?tips?|tape[\s-]?ins?|tapes?|clip[\s-]?ins?|ponytails?|toppers?|bundles?)\b/i;
+const LENGTH_RE = /\b\d{2}\s*(?:"|”|″|''|inch(?:es)?\b|in\b)/gi;
+const WEIGHT_RE = /\b\d{2,3}\s?g\b/i;
+export interface HairName { length: string | null; color: string; method: string | null; weight: string | null; display: string }
+export function hairName(label: string, sku?: string | null): HairName {
+  const length = hairLengthOf(label, sku);
+  const m = label.match(METHOD_RE);
+  if (!m) return { length, color: label, method: null, weight: null, display: label };
+  const nice = (x: string) => x.replace(/\s+/g, ' ').trim().replace(/\b\w/g, (c) => c.toUpperCase()).replace(/\b([IK])[\s-]?Tip(s?)\b/g, '$1-Tip$2').replace(/\bClip[\s-]?Ins?\b/g, 'Clip-Ins').replace(/\bTape[\s-]?Ins?\b/g, 'Tape-Ins');
+  const method = nice(m[0]);
+  const weight = (sku ?? '').match(/(\d{2,3})g$/i)?.[1] ? `${(sku ?? '').match(/(\d{2,3})g$/i)![1]}g` : label.match(WEIGHT_RE)?.[0].replace(/\s/g, '') ?? null;
+  // The colour: what's left of the name once length, method, weight and separators are taken out (the first part that has any).
+  const strip = (x: string) => x.replace(LENGTH_RE, ' ').replace(new RegExp(METHOD_RE.source, 'gi'), ' ').replace(new RegExp(WEIGHT_RE.source, 'gi'), ' ').replace(/\b(extensions?|hair)\b/gi, ' ')
+    .replace(/\(\s*\)/g, ' ').replace(/\s{2,}/g, ' ').replace(/^[\s\-–·/,]+|[\s\-–·/,]+$/g, '').trim();
+  const color = label.split(/\s+[·\-–/]\s+/).map(strip).find(Boolean) ?? '';
+  const display = [[length, color, method].filter(Boolean).join(' '), weight].filter(Boolean).join(' · ');
+  return { length, color, method, weight, display: display || label };
+}
+/** The name to show for a product (hair: length, colour, method). */
+export const productName = (label: string, sku?: string | null) => hairName(label, sku).display;
+const lenNum = (l: string | null) => (l ? Number.parseInt(l, 10) : 999);
+const cmp = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+/** Length, then colour, then method (then weight) — the CRM's order for product lists. */
+export function hairCompare(a: { label: string; sku?: string | null }, b: { label: string; sku?: string | null }) {
+  const x = hairName(a.label, a.sku), y = hairName(b.label, b.sku);
+  return lenNum(x.length) - lenNum(y.length) || cmp(x.color, y.color) || cmp(x.method ?? '', y.method ?? '') || cmp(x.weight ?? '', y.weight ?? '') || cmp(a.label, b.label);
+}
+/** Within a collection or method: method, then length, then colour. */
+export function hairCompareByMethod(a: { label: string; sku?: string | null }, b: { label: string; sku?: string | null }) {
+  const x = hairName(a.label, a.sku), y = hairName(b.label, b.sku);
+  return cmp(x.method ?? '~', y.method ?? '~') || lenNum(x.length) - lenNum(y.length) || cmp(x.color, y.color) || cmp(x.weight ?? '', y.weight ?? '') || cmp(a.label, b.label);
+}
+
 /** Order Hair's list after the admin's choices: only listed (if set), listed ones in their order, the rest by name. */
 export function arrangeOrderHair<T extends { sku: string; label: string }>(items: T[], layout: Partial<OrderHairLayout> | undefined): T[] {
   const l = { ...DEFAULT_ORDER_HAIR, ...(layout ?? {}) };

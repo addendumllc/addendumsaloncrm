@@ -1,4 +1,4 @@
-import { hairLengthOf, productSearchWords } from '@addendum/shared';
+import { hairLengthOf, productSearchWords, hairCompare, hairCompareByMethod } from '@addendum/shared';
 import type {
   ProductAnalyticsDTO, PurchaseOrderDTO, PurchaseOrderStatus, SupplierDTO, StockApplyResultDTO, StockChangeInput, StockForecastDTO, StockForecastResponse, StockForecastSettings,
   StockProductDTO, StockProductStatus, StockTxnDTO, StockTxnKind, SupplierAssign, SupplierInput,
@@ -116,7 +116,7 @@ async function live(fresh = false): Promise<Live> {
       imageUrl: i.imageUrl ?? null,
     }));
   }
-  rows.sort((a, b) => a.label.localeCompare(b.label));
+  rows.sort(hairCompare); // length, colour, method
   const out: Live = { products, squareQty, sqLoc, items, shLoc, items2, sh2Loc, links, rows };
   cache = { at: Date.now(), live: out };
   return out;
@@ -807,7 +807,7 @@ export async function stockForecast(): Promise<StockForecastResponse> {
     });
   }
   const order: StockForecastDTO['status'][] = ['out', 'order_now', 'soon', 'watch', 'healthy', 'no_sales', 'discontinued'];
-  items.sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status) || (a.orderBy ?? '9').localeCompare(b.orderBy ?? '9') || a.label.localeCompare(b.label));
+  items.sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status) || (a.orderBy ?? '9').localeCompare(b.orderBy ?? '9') || hairCompare(a, b));
   await markRecounts(items, settings);
   markSuggestNow(items, today);
   const state = await getKV<{ updatedAt: string | null; note: string | null }>(SALES_KEY);
@@ -826,7 +826,8 @@ async function poDTOs(where = '', args: unknown[] = []): Promise<PurchaseOrderDT
   if (!pos.length) return [];
   const lines = await db().query<any>(`SELECT *, to_char(expected_on, 'YYYY-MM-DD') AS expected_on FROM purchase_order_lines WHERE po_id = ANY($1::uuid[]) ORDER BY label`, [pos.map((p) => p.id)]);
   return pos.map((p) => {
-    const mine = lines.filter((l) => l.po_id === p.id).map((l) => ({
+    // An order's lines by method, then length, then colour.
+    const mine = lines.filter((l) => l.po_id === p.id).sort((a, b) => hairCompareByMethod({ label: a.label, sku: a.sku }, { label: b.label, sku: b.sku })).map((l) => ({
       id: l.id, productKey: l.product_key, label: l.label, sku: l.sku, quantity: l.quantity, received: l.received, costCents: l.cost_cents,
       leadTimeDays: l.lead_time_days ?? null, expectedOn: l.expected_on ? localDateOnly(l.expected_on) : null, lotNote: l.lot_note ?? null, supplier: l.supplier ?? null,
     }));
@@ -1005,7 +1006,7 @@ export async function suggestedOrderPlan(store: 'salon' | 'shopify' | 'all', by:
   return [...groups].sort(([a], [b]) => (by === 'length' ? lengthNum(a) - lengthNum(b) : 0) || a.localeCompare(b, undefined, { numeric: true })).map(([collection, list]) => ({
     collection,
     suppliers: [...new Set(list.map((i) => i.supplier ?? fallback).filter((x): x is string => !!x))],
-    lines: [...list].sort((a, b) => lengthNum(len(a)) - lengthNum(len(b)) || a.label.localeCompare(b.label)).map((i) => ({ productKey: i.key, label: i.label, sku: i.sku, status: i.status, stock: i.stock, quantity: i.suggestedQty, costCents: i.costCents })),
+    lines: [...list].sort(hairCompareByMethod).map((i) => ({ productKey: i.key, label: i.label, sku: i.sku, status: i.status, stock: i.stock, quantity: i.suggestedQty, costCents: i.costCents })),
   }));
 }
 
@@ -1321,7 +1322,7 @@ export async function productAnalytics(period: number | 'year', store: ProductAn
     const first = complete.findIndex((x) => x !== 0);
     const counted = first < 0 ? [] : complete.slice(first);
     return { key, label: names.get(key)?.label ?? key, sku: names.get(key)?.sku ?? null, units: u, total: u.reduce((a, x) => a + x, 0), avgPerMonth: counted.length ? Math.round((counted.reduce((a, x) => a + x, 0) / counted.length) * 10) / 10 : 0 };
-  }).sort((a, b) => a.label.localeCompare(b.label));
+  }).sort(hairCompare);
 
   // Stock value now.
   let unitsOnHand = 0, atCost = 0, atRetail = 0, missingCost = 0;

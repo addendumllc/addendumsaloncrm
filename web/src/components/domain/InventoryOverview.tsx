@@ -1,3 +1,4 @@
+import { productName, hairCompare } from '@addendum/shared';
 import { ProductSettingsButton, ProductSettingsModal } from './ProductSettings';
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -88,7 +89,7 @@ export function InventoryOverview({ store, onOpenTab }: { store: Store; onOpenTa
   const rows = all
     .filter((p) => (!status || statusOf.get(p.key) === status) && (!coll || collFilter.matches(p, coll))
       && words.every((w) => `${p.label} ${p.sku ?? ''} ${p.collections.join(' ')}`.toLowerCase().includes(w)))
-    .sort((a, b) => (sort === 'stock' ? stockOf(a) - stockOf(b) : sort === 'status' ? order.indexOf(statusOf.get(a.key)!) - order.indexOf(statusOf.get(b.key)!) : 0) || a.label.localeCompare(b.label));
+    .sort((a, b) => (sort === 'stock' ? stockOf(a) - stockOf(b) : sort === 'status' ? order.indexOf(statusOf.get(a.key)!) - order.indexOf(statusOf.get(b.key)!) : 0) || hairCompare(a, b));
   const tile = (label: string, n: number, active: boolean, onClick: () => void, tone?: string) => (
     <button type="button" onClick={onClick} aria-pressed={active}
       className={cx('rounded-xl2 border bg-white px-3 py-2 text-left transition-colors', active ? 'border-plum ring-1 ring-plum/30' : 'border-line hover:border-line-strong')}>
@@ -166,7 +167,7 @@ export function InventoryOverview({ store, onOpenTab }: { store: Store; onOpenTa
                 <input type="checkbox" className="h-5 w-5 shrink-0 accent-plum" checked={picked.has(p.key)} onChange={() => togglePick(p.key)} aria-label={`Select ${p.label}`} />
                 <button type="button" onClick={() => setOpen(p.key)} className="flex w-full items-center gap-3 px-3 py-3 text-left">
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[15px] leading-snug text-ink">{p.label}</span>
+                    <span className="block text-[15px] leading-snug text-ink">{productName(p.label, p.sku)}</span>
                     <span className="block font-mono text-[11px] text-stone">{p.sku ?? 'No SKU'}</span>
                   </span>
                   <span className="flex flex-col items-end gap-1">
@@ -194,7 +195,7 @@ export function InventoryOverview({ store, onOpenTab }: { store: Store; onOpenTa
                   return (
                     <tr key={p.key} className="cursor-pointer hover:bg-mist/40" onClick={() => setOpen(p.key)}>
                       <td className="pl-3" onClick={(e) => e.stopPropagation()}><input type="checkbox" className="h-4 w-4 accent-plum" checked={picked.has(p.key)} onChange={() => togglePick(p.key)} aria-label={`Select ${p.label}`} /></td>
-                      <td className="px-3 py-2 text-ink">{p.label}<ProductSettingsButton productKey={p.key} className="ml-1 align-middle" />{p.collection && <span className="ml-2 text-[11px] text-stone">{p.collection}</span>}</td>
+                      <td className="px-3 py-2 text-ink">{productName(p.label, p.sku)}<ProductSettingsButton productKey={p.key} className="ml-1 align-middle" />{p.collection && <span className="ml-2 text-[11px] text-stone">{p.collection}</span>}</td>
                       <td className="px-2 py-2 font-mono text-[12px] text-stone">{p.sku ?? '—'}</td>
                       {salonCol && <td className="num px-2 py-2 text-right">{p.squareQty ?? '—'}</td>}
                       {onlineCol && <td className="num px-2 py-2 text-right">{p.shopifyQty ?? '—'}</td>}
@@ -233,7 +234,7 @@ function ProductPanel({ p, f, status, orders, onClose, onOpenTab }: {
   const row = (label: string, value: React.ReactNode) => <div className="flex justify-between gap-3 py-1"><dt className="text-stone">{label}</dt><dd className="text-right text-ink">{value}</dd></div>;
   const h = 'mb-1 text-[12px] font-semibold uppercase tracking-wide text-stone';
   return (
-    <Modal open side onClose={onClose} title={p.label}>
+    <Modal open side onClose={onClose} title={productName(p.label, p.sku)}>
       <div className="space-y-5 text-[14px]">
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone={SIMPLE[status].tone}>{SIMPLE[status].label}</Badge>

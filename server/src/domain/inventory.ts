@@ -1,3 +1,4 @@
+import { hairCompare } from '@addendum/shared';
 import type { InventoryRequestDTO, InventoryStatus } from '@addendum/shared';
 import { config } from '../config.js';
 import { db, type Queryable } from '../db/index.js';
@@ -484,7 +485,7 @@ export async function shopifyHairProducts(fresh = false): Promise<{ connected: b
   const items = stock.filter((e) => e.tracked && e.available != null && e.sku).map((e) => {
     const p = splitShopifyLabel(e.label);
     return { sku: e.sku, label: e.label, product: p.product, variant: p.variant, size: p.size, color: p.color, available: e.available! };
-  }).sort((a, b) => a.label.localeCompare(b.label));
+  }).sort(hairCompare);
   shopifyCache = { at: Date.now(), items };
   return { connected: true, products: items };
 }

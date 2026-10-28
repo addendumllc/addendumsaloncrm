@@ -1,3 +1,4 @@
+import { hairCompare } from '@addendum/shared';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -190,7 +191,7 @@ function Products({ d, shown }: { d: ProductAnalyticsDTO; shown: Ch[] }) {
   const rows = useMemo(() => {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
     const list = d.top.filter((t) => words.every((w) => `${t.label} ${t.sku ?? ''} ${t.alsoSkus.join(' ')}`.toLowerCase().includes(w)));
-    return [...list].sort((a, b) => sort === 'name' ? a.label.localeCompare(b.label) : sort === 'sales' ? b.salesCents - a.salesCents : b.units - a.units);
+    return [...list].sort((a, b) => sort === 'name' ? hairCompare(a, b) : sort === 'sales' ? b.salesCents - a.salesCents : b.units - a.units);
   }, [d, q, sort]);
   const max = Math.max(1, ...d.top.map((t) => t.units));
   const totalUnits = rows.reduce((a, t) => a + t.units, 0);
