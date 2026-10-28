@@ -37,6 +37,15 @@ export const SUB_NAV: Record<string, SubNav> = {
     ],
   },
   // Content Calendar's pages (Studio-only people have just Studio, so no sub-menu).
+  // My Content (each stylist's own plan): the plan, ideas to use, and the salon's posts and photos to download.
+  '/my-content': {
+    params: ['tab'],
+    items: [
+      { to: '/my-content', label: 'My plan' },
+      { to: '/my-content?tab=ideas', label: 'Ideas' },
+      { to: '/my-content?tab=downloads', label: 'Salon downloads' },
+    ],
+  },
   '/content': {
     params: ['tab'],
     items: [

@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, ChevronLeft, ChevronRight, Download, ExternalLink, Film, Link2, Search, Trash2, Upload, X } from 'lucide-react';
 import type { ContentAccountId, ContentMediaDTO } from '@addendum/shared';
 import { api } from '../../api/client';
-import { Badge, Button, EmptyState, Field, Modal, PageLoading, Segmented, buttonClass, cx, useToast } from '../../components/ui';
+import { Badge, Button, EmptyState, Field, Modal, PageLoading, Segmented, Toggle, buttonClass, cx, useToast } from '../../components/ui';
 import { AccountTag, type Basics } from './common';
 
 const useAssets = (f: { q: string; account: string; tag: string; approved: string }) => useQuery({
@@ -199,6 +199,12 @@ function SetViewer({ name, files, onClose, onRenamed, onOpenSlide, onAddPhotos, 
   const setType = async (t: string) => {
     try { for (const m of order) await api.patch(`/content/assets/${m.id}`, { postType: t || null }); onChanged(); } catch (e) { toast((e as Error).message, 'error'); }
   };
+  // Stylists see the set in My Content → Salon downloads (as a post, or a story for story sets).
+  const shared = order.some((m) => m.stylistShare);
+  const share = async (on: boolean) => {
+    const kind = (order[0]?.postType === 'story' ? 'story' : 'post') as 'post' | 'story';
+    try { for (const m of order) await api.patch(`/content/assets/${m.id}`, { stylistShare: on ? kind : null }); onChanged(); toast(on ? 'Stylists can now download this set' : 'Hidden from stylists'); } catch (e) { toast((e as Error).message, 'error'); }
+  };
   const takeOut = async (m: ContentMediaDTO) => {
     if (!window.confirm(`Take ${m.title || 'this photo'} out of the set? It stays in Assets on its own.`)) return;
     try { await api.patch(`/content/assets/${m.id}`, { group: null }); onChanged(); } catch (e) { toast((e as Error).message, 'error'); }
@@ -212,6 +218,7 @@ function SetViewer({ name, files, onClose, onRenamed, onOpenSlide, onAddPhotos, 
       <div className="mb-4 grid gap-3 sm:grid-cols-2">
         <Field label="Set name"><input className="field" value={title} onChange={(e) => setTitle(e.target.value)} onBlur={rename} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} /></Field>
         <Field label="Type of post"><select className="field" defaultValue={order[0]?.postType ?? ''} onChange={(e) => setType(e.target.value)}><option value="">—</option>{POST_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select></Field>
+        <div className="sm:col-span-2"><Toggle checked={shared} onChange={share} label="Stylists can download" description="Shows as a ready-made post in every stylist’s My Content → Salon downloads." /></div>
       </div>
       {info && (
         <div key={name} className="mb-4 grid gap-3 rounded-xl border border-line bg-mist/30 p-3 sm:grid-cols-2">
@@ -423,6 +430,8 @@ function UploadBatch({ initial, groups, existing, onClose }: { initial: { files:
   const [postType, setPostType] = useState(initial.postType || (initial.files.length > 1 ? 'carousel' : ''));
   const auto = () => `${ONE[(postType || 'carousel') as PostType]} · ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
   const [group, setGroup] = useState(initial.group);
+  // A set is for stylists to download unless turned off (photos added to an existing set follow it).
+  const [forStylists, setForStylists] = useState(existing.length ? existing.some((m) => m.stylistShare) : true);
   const [done, setDone] = useState(0);
   const [busy, setBusy] = useState(false);
   const r = useReorder(items, setItems);
@@ -434,7 +443,7 @@ function UploadBatch({ initial, groups, existing, onClose }: { initial: { files:
     for (const { f } of items) {
       try {
         const res = await api.upload<{ media: ContentMediaDTO }>('/content/media', f);
-        if (name || postType) await api.patch(`/content/assets/${res.media.id}`, { group: name || null, postType: (postType || null) as PostType | null });
+        if (name || postType || forStylists) await api.patch(`/content/assets/${res.media.id}`, { group: name || null, postType: (postType || null) as PostType | null, stylistShare: forStylists ? (postType === 'story' ? 'story' : 'post') : null });
         ids.push(res.media.id);
       } catch (e) { toast(`${f.name}: ${(e as Error).message}`, 'error'); }
       setDone((n) => n + 1);
@@ -455,6 +464,7 @@ function UploadBatch({ initial, groups, existing, onClose }: { initial: { files:
             <Field label="Type of post"><select className="field" value={postType} onChange={(e) => setPostType(e.target.value)}><option value="">—</option>{POST_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select></Field>
           </div>
         )}
+        {!existing.length && <label className="flex items-center gap-2 text-[14px]"><input type="checkbox" className="h-4 w-4 accent-plum" checked={forStylists} onChange={(e) => setForStylists(e.target.checked)} />Stylists can download it (My Content → Salon downloads)</label>}
         <datalist id="asset-groups-batch">{groups.map((g) => <option key={g} value={g} />)}</datalist>
         <div>
           <p className="label">Order <span className="font-normal text-stone">— drag to rearrange (or use the arrows)</span></p>

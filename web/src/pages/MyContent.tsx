@@ -5,6 +5,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { useCanDo } from '../api/hooks';
 import { TransformationsDue } from '../components/domain/TransformationsDue';
+import { SectionPicker } from '../components/layout/subNav';
+import { useStoreNames } from '../lib/storeNames';
 import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, Segmented, Spinner, buttonClass, chipClass, cx, useToast } from '../components/ui';
 
 type Format = 'post' | 'reel' | 'story' | 'carousel';
@@ -44,9 +46,12 @@ export function MyContentPage() {
   const { data, isLoading, error, refetch } = useMonth(month);
   const [edit, setEdit] = useState<Post | Draft | null>(null);
   const [handleOpen, setHandleOpen] = useState(false);
+  const names = useStoreNames();
+  const canDo = useCanDo();
   // ?open=<post> (e.g. "Plan a post" from a transformation): open it.
   const [params, setParams] = useSearchParams();
   const openId = params.get('open');
+  const tab = params.get('tab') === 'ideas' ? 'ideas' : params.get('tab') === 'downloads' ? 'downloads' : 'plan';
   useEffect(() => {
     if (!openId) return;
     api.get<{ post: Post }>(`/my-content/${openId}`).then((r) => setEdit(r.post)).catch(() => undefined);
@@ -80,9 +85,12 @@ export function MyContentPage() {
         <span><b className="font-medium text-ink">For planning purposes only.</b> Nothing here is posted to Instagram for you — you post it yourself. Follow the salon’s guidelines and only share clients’ photos they’ve agreed to.</span>
       </p>
 
-      <MyWork />
+      {/* Its pages: in the sidebar under My Content, as tabs on tablets and phones. */}
+      <SectionPicker path="/my-content" names={names} can={canDo} />
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      {tab === 'plan' && <MyWork />}
+
+      {tab === 'plan' && <div className="mb-4 flex flex-wrap items-center gap-2">
         {view !== 'grid' && <>
           <Button size="icon" icon={<ChevronLeft className="h-4 w-4" />} aria-label="Previous month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} />
           <span className="min-w-[9rem] text-center text-[15px] font-medium text-ink">{month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</span>
@@ -94,9 +102,9 @@ export function MyContentPage() {
           { value: 'list', label: <span className="flex items-center gap-1"><LayoutList className="h-4 w-4" /><span className="hidden sm:inline">List</span></span> },
           { value: 'grid', label: <span className="flex items-center gap-1"><Grid3x3 className="h-4 w-4" /><span className="hidden sm:inline">Grid</span></span> },
         ]} />
-      </div>
+      </div>}
 
-      {error ? <ErrorNote error={error} onRetry={() => refetch()} /> : isLoading ? <PageLoading /> : (
+      {tab === 'plan' && (error ? <ErrorNote error={error} onRetry={() => refetch()} /> : isLoading ? <PageLoading /> : (
         <>
           {view === 'month' && <MonthView month={month} posts={dated} onOpen={setEdit} onNew={(d) => setEdit({ date: d })} />}
           {view === 'list' && <ListView month={month} posts={dated} onOpen={setEdit} />}
@@ -111,12 +119,11 @@ export function MyContentPage() {
             ) : <p className="text-[13px] text-stone">Jot down post ideas here and give them a date when you’re ready.</p>}
           </section>
         </>
-      )}
+      ))}
 
-      <SalonIdeas onUse={(d) => setEdit(d)} />
-      <TeamIdeas onUse={(d) => setEdit(d)} />
+      {tab === 'ideas' && <><SalonIdeas onUse={(d) => setEdit(d)} /><TeamIdeas onUse={(d) => setEdit(d)} /></>}
 
-      <SalonDownloads />
+      {tab === 'downloads' && <SalonDownloads />}
 
       {edit && <PostEditor initial={edit} handle={handle} onClose={() => { setEdit(null); refresh(); }} />}
       {handleOpen && <HandleModal handle={handle} onClose={() => { setHandleOpen(false); refresh(); }} />}
@@ -469,7 +476,7 @@ function SalonDownloads() {
     } catch (e) { toast((e as Error).message || 'Couldn’t share it.', 'error'); }
   };
   return (
-    <section className="mt-8">
+    <section>
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <h2 className="h-display text-[20px]">Salon downloads</h2>
         <span className="text-[13px] text-stone">Posts and stories from the salon to share</span>
@@ -565,7 +572,7 @@ function SalonIdeas({ onUse }: { onUse: (d: Draft) => void }) {
   });
   if (data && !data.length) return null;
   return (
-    <section className="mt-8">
+    <section className="mb-8">
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <h2 className="h-display text-[20px]">Ideas from the salon</h2>
         <span className="text-[13px] text-stone">Use one to start a post of your own</span>
