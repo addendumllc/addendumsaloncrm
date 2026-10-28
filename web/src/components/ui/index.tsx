@@ -203,17 +203,23 @@ export function Modal({ open, onClose, title, children, footer, wide, xl, side }
   open: boolean; onClose: () => void; title: ReactNode; children: ReactNode; footer?: ReactNode; wide?: boolean; xl?: boolean; side?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  // The latest onClose, without re-running the effect: pages pass a new function on every render, and re-running it
+  // would move the cursor back to the first field while someone types.
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current();
     document.addEventListener('keydown', onKey);
     const prev = document.activeElement as HTMLElement | null;
-    setTimeout(() => ref.current?.querySelector<HTMLElement>('input,textarea,select,button[data-autofocus]')?.focus(), 30);
+    // Focus the first field once, when it opens (not if something inside already has focus).
+    const t = setTimeout(() => { if (!ref.current?.contains(document.activeElement)) ref.current?.querySelector<HTMLElement>('input,textarea,select,button[data-autofocus]')?.focus(); }, 30);
     return () => {
+      clearTimeout(t);
       document.removeEventListener('keydown', onKey);
       prev?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
   if (!open) return null;
   return createPortal(
     <div className={cx('fixed inset-0 z-50 flex bg-black/35 backdrop-blur-[2px]', side ? 'justify-end' : 'items-center justify-center p-3 sm:p-6')} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>

@@ -5,14 +5,14 @@ import { useStoreNames } from '../lib/storeNames';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowDown, ArrowUp, Camera, Play, UserCheck, Check, CheckSquare, Copy, Download, ExternalLink, FolderPlus, Grid3x3, Instagram, LayoutList, Pencil, Plus, RefreshCw, Search, Settings2, Star, Trash2, Upload, X,
+  ArrowDown, ArrowUp, Camera, Play, UserCheck, Check, CheckSquare, Download, ExternalLink, FolderPlus, Grid3x3, Instagram, LayoutList, Pencil, Plus, RefreshCw, Search, Settings2, Star, Trash2, Upload, X,
 } from 'lucide-react';
-import { CONSENT_STATUSES, EXTENSION_METHODS, EXTENSION_WORK, type TransformationDTO, type TransformationPhotoDTO, type TransformationPhotoKind } from '@addendum/shared';
+import { EXTENSION_METHODS, EXTENSION_WORK, type TransformationDTO, type TransformationPhotoDTO, type TransformationPhotoKind } from '@addendum/shared';
 import { api } from '../api/client';
 import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, Segmented, Spinner, Toggle, buttonClass, cx, useToast, chipClass } from '../components/ui';
 
 interface Options {
-  services: string[]; catalog: string[]; stylists: { id: string; name: string }[]; tags: string[]; methods: string[]; collections: { id: string; name: string; count: number }[];
+  services: string[]; catalog: string[]; shades: string[]; stylists: { id: string; name: string }[]; tags: string[]; methods: string[]; collections: { id: string; name: string; count: number }[];
   can: { create: boolean; viewAll: boolean; manage: boolean; consent: boolean; download: boolean; bulk: boolean; technical: boolean };
 }
 interface Filter { q: string; stylist: string; service: string; extensions: string; collection: string; consent: string; from: string; to: string; sort: string }
@@ -22,8 +22,6 @@ const KINDS: { value: TransformationPhotoKind; label: string }[] = [
 ];
 const isVideo = (p: { mime: string }) => p.mime.startsWith('video/');
 const kindLabel = (k: string) => KINDS.find((x) => x.value === k)?.label ?? 'Photo';
-const consentLabel = (s: string) => CONSENT_STATUSES.find((c) => c.value === s)?.label ?? s;
-const CONSENT_TONE: Record<string, 'sage' | 'amber' | 'neutral' | 'rose'> = { approved_social: 'sage', pending: 'amber', internal: 'neutral', do_not_publish: 'rose' };
 const isExt = (s: string) => /extension/i.test(s);
 const fmtDate = (d: string) => new Date(`${d}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 const qs = (o: Record<string, string | number | boolean | undefined>) => new URLSearchParams(Object.entries(o).filter(([, v]) => v !== '' && v !== undefined && v !== false).map(([k, v]) => [k, String(v)])).toString();
@@ -40,16 +38,33 @@ function useLibrary(f: Filter, ready: boolean) {
 }
 
 /** The picture a card shows: an after / finished photo first, then any photo, then the Instagram preview. */
-function Cover({ t, className, small }: { t: TransformationDTO; className?: string; small?: boolean }) {
+/** True once the element is (nearly) on screen, false again when it scrolls well away. */
+function useOnScreen<T extends Element>() {
+  const ref = useRef<T>(null);
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === 'undefined') { setOn(true); return; }
+    const io = new IntersectionObserver(([e]) => setOn(e.isIntersecting), { rootMargin: '200px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return [ref, on] as const;
+}
+
+/** `live`: may load Instagram's embed (off while a popup is open, so editing stays quick). */
+function Cover({ t, className, small, live = true }: { t: TransformationDTO; className?: string; small?: boolean; live?: boolean }) {
+  const [boxRef, onScreen] = useOnScreen<HTMLSpanElement>();
   const photo = t.photos.find((p) => p.kind === 'after' || p.kind === 'finished') ?? t.photos[0];
   const ig = t.instagram.find((i) => i.isPrimary) ?? t.instagram[0];
   const [broken, setBroken] = useState(false);
   const src = photo ? photo.thumbUrl : ig?.thumbnailUrl;
   // No photo of our own but an Instagram post: show the post's picture with Instagram's embed (shown, never copied).
+  // Each embed runs Instagram's own page, so only cards on screen show one, and none while a popup is open.
   if (!photo && ig && !(src && !broken) && !small) return (
-    <span className={cx('relative block overflow-hidden bg-mist', className)}>
-      <iframe title="Instagram post" src={`${ig.url.replace(/\/?$/, '/')}embed/`} loading="lazy" scrolling="no" tabIndex={-1}
-        className="pointer-events-none absolute inset-x-0 -top-[56px] h-[calc(100%+180px)] w-full border-0 bg-white" sandbox="allow-scripts allow-same-origin" />
+    <span ref={boxRef} className={cx('relative block overflow-hidden bg-mist', className)}>
+      {!(live && onScreen) ? <span className="flex h-full w-full flex-col items-center justify-center gap-1 text-stone"><Instagram className="h-6 w-6" /><span className="text-[11px]">Instagram post</span></span> : <iframe title="Instagram post" src={`${ig.url.replace(/\/?$/, '/')}embed/`} loading="lazy" scrolling="no" tabIndex={-1}
+        className="pointer-events-none absolute inset-x-0 -top-[56px] h-[calc(100%+180px)] w-full border-0 bg-white" sandbox="allow-scripts allow-same-origin" />}
       <Instagram className="absolute left-1.5 top-1.5 h-4 w-4 text-white drop-shadow" />
     </span>
   );
@@ -68,14 +83,12 @@ const doneOf = (t: TransformationDTO) => {
   const ext = e?.hasExtensions ? (e.parts?.length ? [...new Set(e.parts.map((x) => x.method).filter(Boolean))].join(' + ') : e.method) : null;
   return [...t.services.length ? t.services : [t.mainService], ext].filter(Boolean).join(' · ') || 'Service to be added';
 };
-const ConsentBadge = ({ t }: { t: TransformationDTO }) => <Badge tone={t.readyForSocial ? 'sage' : CONSENT_TONE[t.consent.status] === 'sage' ? 'amber' : CONSENT_TONE[t.consent.status]}>{t.readyForSocial ? 'Ready for Social' : consentLabel(t.consent.status)}</Badge>;
 
 export function TransformationsPage() {
   const opts = useOptions();
   const qc = useQueryClient();
   const toast = useToast();
   const [params] = useSearchParams();
-  const tab: 'library' | 'social' = params.get('tab') === 'social' ? 'social' : 'library';
   const names = useStoreNames();
   const canDo = useCanDo();
   const [f, setF] = useState<Filter>(EMPTY);
@@ -83,12 +96,11 @@ export function TransformationsPage() {
   useEffect(() => { const h = setTimeout(() => setF((x) => ({ ...x, q })), 300); return () => clearTimeout(h); }, [q]);
   const [view, setView] = useState<'grid' | 'list'>(() => { try { return (localStorage.getItem('tf-view') as 'grid' | 'list') || 'grid'; } catch { return 'grid'; } });
   useEffect(() => { try { localStorage.setItem('tf-view', view); } catch { /* private window */ } }, [view]);
-  const lib = useLibrary(f, tab === 'social');
+  const lib = useLibrary(f, false);
   const items = useMemo(() => lib.data?.pages.flatMap((p) => p.items) ?? [], [lib.data]);
   const total = lib.data?.pages[0]?.total ?? 0;
   const [selecting, setSelecting] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
-  useEffect(() => setSel(new Set()), [tab]);
   const [open, setOpen] = useState<string | null>(null);
   const [edit, setEdit] = useState<TransformationDTO | 'new' | null>(null);
   const [confirming, setConfirming] = useState<Appt | null>(null);
@@ -102,6 +114,7 @@ export function TransformationsPage() {
   const [settings, setSettings] = useState(false);
   const [bulkIg, setBulkIg] = useState(false);
   const [collect, setCollect] = useState(false);
+  const popupOpen = !!(open || edit || confirming || exportId || settings || bulkIg || collect);
   const refresh = () => { void qc.invalidateQueries({ queryKey: ['transformations'] }); void qc.invalidateQueries({ queryKey: ['transformation'] }); void qc.invalidateQueries({ queryKey: ['transformations-options'] }); void qc.invalidateQueries({ queryKey: ['tf-confirm'] }); };
   if (opts.isLoading) return <PageLoading />;
   if (opts.error) return <ErrorNote error={opts.error} onRetry={() => opts.refetch()} />;
@@ -118,7 +131,7 @@ export function TransformationsPage() {
 
   return (
     <div>
-      <PageHeader title="Transformations" subtitle={social ? 'The salon’s work and what was done — approve photos for social media.' : 'Your work and what was done.'}
+      <PageHeader title="Transformations" subtitle={social ? 'The salon’s work — photos and videos of what was done.' : 'Your work — photos and videos of what was done.'}
         actions={<>
           {o.can.manage && <Button icon={<Settings2 className="h-4 w-4" />} onClick={() => setSettings(true)}>Services & collections</Button>}
           {o.can.manage && <Button icon={<Instagram className="h-4 w-4" />} onClick={() => setBulkIg(true)}>Add Instagram links</Button>}
@@ -126,7 +139,7 @@ export function TransformationsPage() {
         </>} />
       <SectionPicker path="/transformations" names={names} can={canDo} />
 
-      {tab === 'library' && o.can.create && <ToConfirm onConfirm={setConfirming} onDetails={(id) => api.get<{ transformation: TransformationDTO }>(`/transformations/${id}`).then((r) => setEdit(r.transformation)).catch((e) => toast((e as Error).message, 'error'))} />}
+      {o.can.create && <ToConfirm onConfirm={setConfirming} onDetails={(id) => api.get<{ transformation: TransformationDTO }>(`/transformations/${id}`).then((r) => setEdit(r.transformation)).catch((e) => toast((e as Error).message, 'error'))} />}
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <label className="relative min-w-[12rem] flex-1 sm:max-w-sm">
@@ -140,7 +153,6 @@ export function TransformationsPage() {
           {[...new Set([...EXTENSION_METHODS.filter((m) => m !== 'Other'), ...o.methods])].map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
         {o.collections.length > 0 && <select className="field h-10 w-auto" aria-label="Collection" value={f.collection} onChange={(e) => set('collection')(e.target.value)}><option value="">All collections</option>{o.collections.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.count})</option>)}</select>}
-        {tab === 'library' && social && <select className="field h-10 w-auto" aria-label="Approval" value={f.consent} onChange={(e) => set('consent')(e.target.value)}><option value="">Any approval</option>{CONSENT_STATUSES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}</select>}
         <span className="flex items-center gap-1 text-[13px] text-stone">
           <input type="date" className="field h-10 w-auto" aria-label="From" value={f.from} onChange={(e) => set('from')(e.target.value)} />–
           <input type="date" className="field h-10 w-auto" aria-label="To" value={f.to} onChange={(e) => set('to')(e.target.value)} />
@@ -153,37 +165,35 @@ export function TransformationsPage() {
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-2 text-[13px] text-stone">
-        <span>{lib.isLoading ? 'Loading…' : `${total} transformation${total === 1 ? '' : 's'}`}{tab === 'social' && ' approved for social media'}</span>
+        <span>{lib.isLoading ? 'Loading…' : `${total} transformation${total === 1 ? '' : 's'}`}</span>
         <span className="ml-auto flex flex-wrap items-center gap-2">
           {o.can.bulk && <Button size="sm" variant={selecting ? 'primary' : 'secondary'} icon={<CheckSquare className="h-4 w-4" />} onClick={() => { setSelecting(!selecting); setSel(new Set()); }}>{selecting ? 'Done selecting' : 'Select'}</Button>}
           {selecting && <>
             <Button size="sm" onClick={() => setSel(new Set(items.map((t) => t.id)))}>Select shown ({items.length})</Button>
-            <Button size="sm" variant="primary" disabled={!sel.size} icon={<Download className="h-4 w-4" />} onClick={() => startExport({ preset: 'selected', ids: [...sel], approvedOnly: tab === 'social' })}>Download Selected ({sel.size})</Button>
+            <Button size="sm" variant="primary" disabled={!sel.size} icon={<Download className="h-4 w-4" />} onClick={() => startExport({ preset: 'selected', ids: [...sel] })}>Download Selected ({sel.size})</Button>
             {o.can.manage && <Button size="sm" disabled={!sel.size} icon={<FolderPlus className="h-4 w-4" />} onClick={() => setCollect(true)}>Add to collection</Button>}
           </>}
-          {o.can.bulk && total > 0 && <Button size="sm" icon={<Download className="h-4 w-4" />} onClick={() => startExport(tab === 'social' ? { preset: 'social', filter: filterBody } : { preset: 'filter', filter: filterBody })}>
+          {o.can.bulk && total > 0 && <Button size="sm" icon={<Download className="h-4 w-4" />} onClick={() => startExport({ preset: 'filter', filter: filterBody })}>
             Download All{filtersOn || f.q ? ' (filtered)' : ''}
           </Button>}
         </span>
       </div>
 
       {lib.error ? <ErrorNote error={lib.error} onRetry={() => lib.refetch()} /> : lib.isLoading ? <PageLoading /> : !items.length ? (
-        <div className="panel"><EmptyState icon={<Camera className="h-6 w-6" />} title={tab === 'social' ? 'Nothing approved for social media yet' : 'No transformations yet'}
-          action={o.can.create && tab === 'library' ? <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEdit('new')}>New transformation</Button> : undefined}>
-          {tab === 'social' ? 'Work shows here once the client’s consent is recorded and verified, and it’s approved for social media.' : 'Add your work with photos, the services and extension details.'}
+        <div className="panel"><EmptyState icon={<Camera className="h-6 w-6" />} title="No transformations yet"
+          action={o.can.create ? <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEdit('new')}>New transformation</Button> : undefined}>
+          Add your work with photos, the services and extension details.
         </EmptyState></div>
       ) : view === 'grid' ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {items.map((t) => (
             <div key={t.id} className={cx('panel group relative overflow-hidden !p-0', sel.has(t.id) && 'ring-2 ring-plum')}>
               <button type="button" className="block w-full text-left" onClick={() => (selecting ? toggle(t.id) : setOpen(t.id))}>
-                <Cover t={t} className="aspect-[4/5] w-full" />
+                <Cover t={t} live={!popupOpen} className="aspect-[4/5] w-full" />
                 <span className="block px-3 py-2.5">
                   <span className="block truncate text-[15px] font-medium text-ink">{t.stylistName ?? 'Stylist unknown'}</span>
                   <span className="mt-0.5 block text-[14px] leading-snug text-ink-soft">{doneOf(t)}</span>
                   <span className="mt-1 block text-[12px] text-stone">{fmtDate(t.serviceDate)}</span>
-                  {social && t.readyForSocial && <span className="mt-1.5 flex"><Badge tone="sage">Ready for Social</Badge></span>}
-                  {tab === 'social' && t.caption && <span className="mt-1.5 line-clamp-2 block text-[12px] text-ink-soft">{t.caption}</span>}
                 </span>
               </button>
               {selecting && <span className={cx('pointer-events-none absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white shadow', sel.has(t.id) ? 'bg-plum text-white' : 'bg-white/70')}>{sel.has(t.id) && <Check className="h-3.5 w-3.5" />}</span>}
@@ -201,7 +211,6 @@ export function TransformationsPage() {
                 <span className="block truncate text-[14px] text-ink-soft">{doneOf(t)}</span>
               </span>
               <span className="hidden shrink-0 text-[12px] text-stone sm:block">{fmtDate(t.serviceDate)}</span>
-              {social && t.readyForSocial && <span className="hidden shrink-0 sm:block"><Badge tone="sage">Ready for Social</Badge></span>}
               <span className="hidden w-16 shrink-0 text-right text-[12px] text-stone sm:block">{t.photos.length} photo{t.photos.length === 1 ? '' : 's'}</span>
             </button>
           ))}
@@ -209,7 +218,6 @@ export function TransformationsPage() {
       )}
       {lib.hasNextPage && <div className="mt-4 flex justify-center"><Button loading={lib.isFetchingNextPage} onClick={() => lib.fetchNextPage()}>Load more</Button></div>}
 
-      {tab === 'social' && <NeedsAttention f={f} onOpen={setOpen} />}
 
       {open && <Detail id={open} o={o} onClose={() => setOpen(null)} onEdit={(t) => { setOpen(null); setEdit(t); }} onExport={(body) => startExport(body)} onChanged={refresh} />}
       {edit && <Editor t={edit === 'new' ? null : edit} o={o} onClose={(saved) => { setEdit(null); refresh(); if (saved) setOpen(saved); }} />}
@@ -266,26 +274,6 @@ function ToConfirm({ onConfirm, onDetails }: { onConfirm: (a: Appt) => void; onD
   );
 }
 
-/** Ready for Social: what's held back and why (missing photos, details or consent). */
-function NeedsAttention({ f, onOpen }: { f: Filter; onOpen: (id: string) => void }) {
-  const { data } = useQuery({ queryKey: ['transformations', 'attention', f], queryFn: () => api.get<{ items: TransformationDTO[] }>(`/transformations?${qs({ ...f, consent: '', limit: 60 })}`) });
-  const held = (data?.items ?? []).filter((t) => !t.readyForSocial && t.consent.status !== 'do_not_publish' && t.consent.status !== 'internal');
-  if (!held.length) return null;
-  return (
-    <div className="mt-8">
-      <h2 className="h-display mb-2 text-[20px]">Not ready yet</h2>
-      <div className="panel divide-y divide-line !p-0">
-        {held.map((t) => (
-          <button key={t.id} type="button" className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-mist/60" onClick={() => onOpen(t.id)}>
-            <Cover t={t} className="h-11 w-11 shrink-0 rounded-lg" />
-            <span className="min-w-0 flex-1"><span className="block truncate text-[14px] text-ink">{t.title}</span><span className="block truncate text-[12px] text-stone">{t.stylistName} · {fmtDate(t.serviceDate)}</span></span>
-            <span className="flex flex-wrap justify-end gap-1">{t.missing.map((m) => <Badge key={m} tone="amber">{m}</Badge>)}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 // ---------------- detail ----------------
 function Section({ title, children, aside }: { title: string; children: ReactNode; aside?: ReactNode }) {
@@ -296,19 +284,16 @@ function Rows({ rows }: { rows: [string, ReactNode][] }) {
   if (!shown.length) return <p className="text-[13px] text-stone">Nothing added.</p>;
   return <dl className="grid grid-cols-[minmax(7rem,auto)_1fr] gap-x-4 gap-y-1.5 text-[14px]">{shown.map(([k, v]) => <div key={k} className="contents"><dt className="text-stone">{k}</dt><dd className="whitespace-pre-wrap text-ink">{v}</dd></div>)}</dl>;
 }
-const copy = async (text: string, toast: ReturnType<typeof useToast>) => { try { await navigator.clipboard.writeText(text); toast('Copied'); } catch { toast('Couldn’t copy — select the text instead.', 'error'); } };
 
 function Detail({ id, o, onClose, onEdit, onExport, onChanged }: { id: string; o: Options; onClose: () => void; onEdit: (t: TransformationDTO) => void; onExport: (body: object) => void; onChanged: () => void }) {
   const toast = useToast();
   const { data: me } = useMe();
   const { data: t, error, refetch } = useQuery({ queryKey: ['transformation', id], queryFn: () => api.get<{ transformation: TransformationDTO }>(`/transformations/${id}`).then((r) => r.transformation) });
   const [big, setBig] = useState<TransformationPhotoDTO | null>(null);
-  const [consent, setConsent] = useState(false);
   useEffect(() => { if (t && !big) setBig(t.photos.find((p) => p.kind === 'after' || p.kind === 'finished') ?? t.photos[0] ?? null); }, [t, big]);
   if (error) return <Modal open onClose={onClose} title="Transformation"><ErrorNote error={error} onRetry={() => refetch()} /></Modal>;
   if (!t) return <Modal open onClose={onClose} title="Transformation"><PageLoading /></Modal>;
   const e = t.extension;
-  const socialText = [t.caption, t.hashtags].filter(Boolean).join('\n\n');
   const del = async () => {
     if (!window.confirm(`Delete “${t.title}” and its photos? This can’t be undone.`)) return;
     try { await api.del(`/transformations/${t.id}`); onChanged(); onClose(); } catch (x) { toast((x as Error).message, 'error'); }
@@ -363,7 +348,7 @@ function Detail({ id, o, onClose, onEdit, onExport, onChanged }: { id: string; o
             ]} />
           </Section>
           {e?.hasExtensions && <Section title="Extensions">
-            <Rows rows={[['Method', e.method], ['Methods & colours', e.parts?.length ? e.parts.map((x) => [x.method, x.shade, x.length].filter(Boolean).join(' · ')).join('\n') : null], ['Brand / source', e.brand], ['Length', e.length], ['Shade', e.shade], ['Rows / packs', e.quantity], ['Work', e.workType],
+            <Rows rows={[['Method', e.method], [/hybrid/i.test(e.method ?? '') ? 'Methods & colours' : 'More shades', e.parts?.length ? e.parts.map((x) => (/hybrid/i.test(e.method ?? '') ? [x.method, x.shade, x.length] : [x.shade, x.length]).filter(Boolean).join(' · ')).join('\n') : null], ['Brand / source', e.brand], ['Length', e.length], ['Shade', e.shade], ['Rows / packs', e.quantity], ['Work', e.workType],
               ['Blending / cutting', e.blending ? 'Yes' : null], ['Customization', e.customization], ['Maintenance', e.maintenanceNotes], ['Next appointment', e.nextAppointment]]} />
           </Section>}
           {Object.values(t.details).some(Boolean) && <Section title="Details">
@@ -373,22 +358,8 @@ function Detail({ id, o, onClose, onEdit, onExport, onChanged }: { id: string; o
           {t.canSeeTechnical && (t.technicalNotes || t.internalNotes) && <Section title="Technical & internal (not exported to social)">
             <div className="rounded-lg border border-amber/30 bg-amber/5 p-3"><Rows rows={[['Formula / technical', t.technicalNotes], ['Internal notes', t.internalNotes]]} /></div>
           </Section>}
-          {(o.can.manage || o.can.consent) && <Section title="For social media" aside={socialText ? <Button size="sm" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copy(socialText, toast)}>Copy caption</Button> : undefined}>
-            {t.caption ? <p className="whitespace-pre-wrap text-[14px] text-ink">{t.caption}</p> : <p className="text-[13px] text-stone">No caption yet.</p>}
-            {t.hashtags && <p className="mt-1 text-[13px] text-plum">{t.hashtags}</p>}
-            <Button size="sm" variant="ghost" className="mt-1 !px-0" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copy([t.mainService, ...t.services.filter((s) => s !== t.mainService), e?.hasExtensions ? `${e.method ?? 'Extensions'}${e.length ? ` · ${e.length}` : ''}${e.shade ? ` · ${e.shade}` : ''}` : null].filter(Boolean).join(' · '), toast)}>Copy service info</Button>
-          </Section>}
-          {(o.can.manage || o.can.consent) && <Section title="Consent & publishing" aside={<Button size="sm" onClick={() => setConsent(true)}>Update</Button>}>
-            <div className="mb-2 flex flex-wrap gap-1.5"><ConsentBadge t={t} />{t.consent.verifiedAt ? <Badge tone="sage">Verified by {t.consent.verifiedBy}</Badge> : <Badge>Not verified</Badge>}</div>
-            <Rows rows={[['Client consent', { unknown: 'Not asked yet', requested: 'Requested', given: 'Given', declined: 'Declined' }[t.consent.clientConsent]],
-              ['Social media', t.consent.socialPermission ? 'Allowed' : 'Not allowed'], ['Marketing / ads', t.consent.marketingPermission ? 'Allowed' : 'Not allowed'],
-              ['Scope', t.consent.scope], ['Consent date', t.consent.consentDate && fmtDate(t.consent.consentDate)], ['Identifiable', t.consent.identifiable == null ? null : t.consent.identifiable ? 'Yes' : 'No (face not shown)'],
-              ['Restrictions', t.consent.restrictions], ['Expires', t.consent.expiresOn && fmtDate(t.consent.expiresOn)]]} />
-            {t.missing.length > 0 && <p className="mt-2 flex flex-wrap gap-1 text-[12px] text-stone">Still needed: {t.missing.map((m) => <Badge key={m} tone="amber">{m}</Badge>)}</p>}
-          </Section>}
         </div>
       </div>
-      {consent && <ConsentEditor t={t} o={o} onClose={() => { setConsent(false); void refetch(); onChanged(); }} />}
     </Modal>
   );
 }
@@ -423,52 +394,6 @@ function InstagramCard({ i, actions, defaultOpen = false }: { i: TransformationD
   );
 }
 
-function ConsentEditor({ t, o, onClose }: { t: TransformationDTO; o: Options; onClose: () => void }) {
-  const toast = useToast();
-  const c = t.consent;
-  const [d, setD] = useState({ ...c, verified: !!c.verifiedAt });
-  const [busy, setBusy] = useState(false);
-  const save = async () => {
-    setBusy(true);
-    try {
-      await api.patch(`/transformations/${t.id}/consent`, {
-        status: d.status, clientConsent: d.clientConsent, socialPermission: d.socialPermission, marketingPermission: d.marketingPermission, scope: d.scope || null,
-        consentDate: d.consentDate || null, identifiable: d.identifiable, restrictions: d.restrictions || null, expiresOn: d.expiresOn || null,
-        ...(o.can.consent && d.verified !== !!c.verifiedAt ? { verified: d.verified } : {}),
-      });
-      onClose();
-    } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
-  };
-  const statuses = CONSENT_STATUSES.filter((s) => o.can.consent || s.value !== 'approved_social' || c.status === 'approved_social');
-  return (
-    <Modal open onClose={onClose} title="Consent & publishing" footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} onClick={save}>Save</Button></>}>
-      <div className="space-y-3 text-[14px]">
-        <Field label="Client photo consent">
-          <select className="field" value={d.clientConsent} onChange={(e) => setD({ ...d, clientConsent: e.target.value as typeof d.clientConsent })}>
-            <option value="unknown">Not asked yet</option><option value="requested">Requested</option><option value="given">Given</option><option value="declined">Declined</option>
-          </select>
-        </Field>
-        <Toggle checked={d.socialPermission} onChange={(v) => setD({ ...d, socialPermission: v })} label="May be published on the salon’s social media" />
-        <Toggle checked={d.marketingPermission} onChange={(v) => setD({ ...d, marketingPermission: v })} label="May be used in marketing or advertising" />
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Consent date"><input type="date" className="field" value={d.consentDate ?? ''} onChange={(e) => setD({ ...d, consentDate: e.target.value || null })} /></Field>
-          <Field label="Expires (optional)"><input type="date" className="field" value={d.expiresOn ?? ''} onChange={(e) => setD({ ...d, expiresOn: e.target.value || null })} /></Field>
-        </div>
-        <Field label="Can the client be identified?">
-          <select className="field" value={d.identifiable == null ? '' : d.identifiable ? 'yes' : 'no'} onChange={(e) => setD({ ...d, identifiable: e.target.value === '' ? null : e.target.value === 'yes' })}>
-            <option value="">Not recorded</option><option value="yes">Yes — face or identifying features shown</option><option value="no">No — hair only</option>
-          </select>
-        </Field>
-        <Field label="Scope" hint="e.g. Instagram and website only; signed form on file"><input className="field" value={d.scope ?? ''} onChange={(e) => setD({ ...d, scope: e.target.value })} /></Field>
-        <Field label="Restrictions"><input className="field" value={d.restrictions ?? ''} onChange={(e) => setD({ ...d, restrictions: e.target.value })} placeholder="e.g. no face, don't tag the client" /></Field>
-        <Field label="Publication status" hint={!o.can.consent ? 'Approving for social media is done by someone allowed to verify consent.' : 'Approved for Social Media needs the client’s consent given, social media allowed and verified.'}>
-          <select className="field" value={d.status} onChange={(e) => setD({ ...d, status: e.target.value as typeof d.status })}>{statuses.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}</select>
-        </Field>
-        {o.can.consent && <label className="flex items-center gap-2 text-[14px]"><input type="checkbox" className="h-4 w-4 accent-plum" checked={d.verified} onChange={(e) => setD({ ...d, verified: e.target.checked })} />I’ve verified the client’s consent for these terms</label>}
-      </div>
-    </Modal>
-  );
-}
 
 // ---------------- editor ----------------
 interface Queued { key: string; file: File; preview: string; kind: TransformationPhotoKind; caption: string; progress: number; status: 'waiting' | 'uploading' | 'done' | 'failed' | 'duplicate'; error?: string }
@@ -591,9 +516,8 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
     title: d.title, serviceDate: d.serviceDate, mainService: d.mainService, services: d.services, clientId: d.clientId,
     ...(o.can.manage && d.stylistStaffId && d.stylistStaffId !== cur?.stylistStaffId ? { stylistStaffId: d.stylistStaffId } : {}),
     details: Object.fromEntries(Object.entries(d.details).map(([k, v]) => [k, v || null])),
-    ...(canTech ? { technicalNotes: d.technicalNotes || null, internalNotes: d.internalNotes || null } : {}),
-    ...(social ? { caption: d.caption || null, hashtags: d.hashtags || null, tags: d.tags.split(',').map((x) => x.trim()).filter(Boolean) } : {}),
-    extension: extRelevant ? { hasExtensions: true, ...Object.fromEntries(Object.entries(d.ext).map(([k, v]) => [k, k === 'blending' ? !!v : k === 'parts' ? (isHybrid ? v : []) : v || null])) } : null,
+    ...(canTech ? { technicalNotes: d.technicalNotes || null } : {}),
+    extension: extRelevant ? { hasExtensions: true, ...Object.fromEntries(Object.entries(d.ext).map(([k, v]) => [k, k === 'blending' ? !!v : k === 'parts' ? v : v || null])) } : null,
   });
 
   const save = async () => {
@@ -646,7 +570,6 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
     await photoAction(() => api.post(`/transformations/${cur.id}/instagram`, { url: igUrl.trim(), isPrimary: !photos.length && !cur.instagram.length }));
     setIgUrl('');
   };
-  const det = (k: string) => ({ value: d.details[k] ?? '', onChange: (e: { target: { value: string } }) => setD({ ...d, details: { ...d.details, [k]: e.target.value } }) });
   const ex = (k: string) => ({ value: d.ext[k] ?? '', onChange: (e: { target: { value: string } }) => setD({ ...d, ext: { ...d.ext, [k]: e.target.value } }) });
   const serviceOptions = [...new Set([...o.services, ...allServices.filter(Boolean)])];
 
@@ -743,25 +666,27 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
           <div className="grid gap-3 sm:grid-cols-3">
             <Field label="Extension method"><select className="field" {...ex('method')}><option value="">—</option>{[...new Set([...EXTENSION_METHODS, ...o.methods])].map((m) => <option key={m}>{m}</option>)}</select></Field>
             <Field label="Length"><input className="field" {...ex('length')} placeholder='e.g. 22"' /></Field>
-            <Field label="Shade"><input className="field" {...ex('shade')} /></Field>
+            <Field label="Shade"><input className="field" list="tf-shades" {...ex('shade')} /></Field>
           </div>
         )}
-        {extRelevant && isHybrid && (
-          <Field label="Hybrid: methods and colours used" hint="One row for each method and colour, e.g. Weft · #60 Platinum · 22″.">
-            <div className="space-y-2">
-              {parts.map((p, i) => (
-                <div key={i} className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
-                  <select className="field sm:w-40" aria-label="Method" value={p.method} onChange={(e) => setParts(parts.map((x, k) => (k === i ? { ...x, method: e.target.value } : x)))}>
+        {extRelevant && (
+          <div className="space-y-2">
+            {parts.length > 0 && <p className="label">{isHybrid ? 'Methods and colours used' : 'More shades'}</p>}
+            {parts.map((p, i) => (
+              <div key={i} className="flex items-center gap-2">
+                {isHybrid && (
+                  <select className="field w-32 shrink-0 sm:w-40" aria-label="Method" value={p.method} onChange={(e) => setParts(parts.map((x, k) => (k === i ? { ...x, method: e.target.value } : x)))}>
                     <option value="">Method…</option>{[...new Set([...EXTENSION_METHODS.filter((m) => m !== 'Hybrid'), ...o.methods.filter((m) => !/hybrid/i.test(m))])].map((m) => <option key={m}>{m}</option>)}
                   </select>
-                  <input className="field min-w-0 flex-1" aria-label="Colour" placeholder="Colour / shade" value={p.shade ?? ''} onChange={(e) => setParts(parts.map((x, k) => (k === i ? { ...x, shade: e.target.value } : x)))} />
-                  <input className="field sm:w-24" aria-label="Length" placeholder='Length' value={p.length ?? ''} onChange={(e) => setParts(parts.map((x, k) => (k === i ? { ...x, length: e.target.value } : x)))} />
-                  <button type="button" className="rounded p-1.5 text-stone hover:bg-mist hover:text-rose" aria-label="Remove" onClick={() => setParts(parts.filter((_, k) => k !== i))}><X className="h-4 w-4" /></button>
-                </div>
-              ))}
-              <Button size="sm" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setParts([...parts, { method: '', shade: null, length: null }])}>{parts.length ? 'Add another' : 'Add method & colour'}</Button>
-            </div>
-          </Field>
+                )}
+                <input className="field min-w-0 flex-1" list="tf-shades" aria-label="Shade" placeholder="Shade" value={p.shade ?? ''} onChange={(e) => setParts(parts.map((x, k) => (k === i ? { ...x, shade: e.target.value } : x)))} />
+                <input className="field w-20 shrink-0 sm:w-24" aria-label="Length" placeholder="Length" value={p.length ?? ''} onChange={(e) => setParts(parts.map((x, k) => (k === i ? { ...x, length: e.target.value } : x)))} />
+                <button type="button" className="shrink-0 rounded p-2 text-stone hover:bg-mist hover:text-rose sm:p-1.5" aria-label="Remove" onClick={() => setParts(parts.filter((_, k) => k !== i))}><X className="h-4 w-4" /></button>
+              </div>
+            ))}
+            <Button size="sm" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setParts([...parts, { method: '', shade: null, length: d.ext.length || null }])}>{isHybrid ? 'Add method & colour' : 'Add another shade'}</Button>
+            <datalist id="tf-shades">{o.shades.map((x) => <option key={x} value={x} />)}</datalist>
+          </div>
         )}
         {canTech && <Field label="Notes" hint="Formula, products, anything to remember. Private — never in captions or exports.">
           <textarea className="field min-h-[96px]" value={d.technicalNotes} onChange={(e) => setD({ ...d, technicalNotes: e.target.value })} />
@@ -772,59 +697,25 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
           <div className="mt-3 space-y-4">
             <Field label="Title" hint={`Blank = “${d.mainService || 'the service'}”`}><input className="field" value={d.title} onChange={(e) => setD({ ...d, title: e.target.value })} placeholder="e.g. Copper balayage with face-framing" /></Field>
             {!appt && !o.can.manage && <Field label="Service date"><input type="date" className="field" value={d.serviceDate} onChange={(e) => setD({ ...d, serviceDate: e.target.value })} /></Field>}
-            {!appt && <ClientPicker value={d.clientId ? { id: d.clientId, name: d.clientName } : null} onChange={(c) => setD({ ...d, clientId: c?.id ?? null, clientName: c?.name ?? '' })} />}
             {!allServices.some(isExt) && <Toggle checked={d.hasExtensions} onChange={(v) => setD({ ...d, hasExtensions: v })} label="Client has extensions" />}
             {extRelevant && (
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="Extension work"><select className="field" {...ex('workType')}><option value="">—</option>{EXTENSION_WORK.map((m) => <option key={m}>{m}</option>)}</select></Field>
                 <Field label="Brand or hair source"><input className="field" {...ex('brand')} /></Field>
                 <Field label="Rows, packs or pieces"><input className="field" {...ex('quantity')} placeholder="e.g. 2 rows" /></Field>
-                <Field label="Next appointment"><input className="field" {...ex('nextAppointment')} placeholder="e.g. Move-up in 6–8 weeks" /></Field>
                 <label className="flex items-center gap-2 text-[14px] sm:col-span-2"><input type="checkbox" className="h-4 w-4 accent-plum" checked={!!d.ext.blending} onChange={(e) => setD({ ...d, ext: { ...d.ext, blending: e.target.checked } })} />Includes blending or extension-specific cutting</label>
               </div>
             )}
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Techniques used"><input className="field" {...det('techniques')} /></Field>
-              <Field label="Products used"><input className="field" {...det('products')} /></Field>
-            </div>
-            {canTech && <Field label="Internal notes"><textarea className="field min-h-[56px]" value={d.internalNotes} onChange={(e) => setD({ ...d, internalNotes: e.target.value })} /></Field>}
             {social && <>
             <Field label={cur?.instagram.length ? 'Add another Instagram link' : 'Instagram post or Reel'} hint="Link only — nothing is copied from Instagram.">
               {cur ? <div className="flex gap-2"><input className="field" value={igUrl} onChange={(e) => setIgUrl(e.target.value)} placeholder="https://www.instagram.com/p/…" /><Button onClick={addIg} disabled={!igUrl.trim()}>Add</Button></div>
                 : <input className="field" value={d.instagramUrl} onChange={(e) => setD({ ...d, instagramUrl: e.target.value })} placeholder="https://www.instagram.com/reel/…" />}
             </Field>
-            <Field label="Suggested caption"><textarea className="field min-h-[72px]" value={d.caption} onChange={(e) => setD({ ...d, caption: e.target.value })} maxLength={2200} /></Field>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Hashtags"><input className="field" value={d.hashtags} onChange={(e) => setD({ ...d, hashtags: e.target.value })} placeholder="#addendumsalon" /></Field>
-              <Field label="Tags (searchable)">
-                <input className="field" list="tf-tags" value={d.tags} onChange={(e) => setD({ ...d, tags: e.target.value })} placeholder="copper, face-framing" />
-                <datalist id="tf-tags">{o.tags.map((x) => <option key={x} value={x} />)}</datalist>
-              </Field>
-            </div>
             </>}
-            {!cur && social && (
-              <Field label="Publication & usage" hint="Stays unpublished until the client’s consent is recorded and approved.">
-                <select className="field" value={d.consentStatus} onChange={(e) => setD({ ...d, consentStatus: e.target.value })}>
-                  <option value="pending">Pending Consent</option><option value="internal">Internal Use Only</option><option value="do_not_publish">Do Not Publish</option>
-                </select>
-              </Field>
-            )}
           </div>
         </details>
       </div>
     </Modal>
-  );
-}
-
-function ClientPicker({ value, onChange }: { value: { id: string; name: string } | null; onChange: (c: { id: string; name: string } | null) => void }) {
-  const [q, setQ] = useState('');
-  const { data } = useQuery({ queryKey: ['tf-client-search', q], enabled: q.trim().length >= 2, queryFn: () => api.get<{ clients: { id: string; name: string }[] }>(`/search?q=${encodeURIComponent(q.trim())}`).then((r) => r.clients), retry: false });
-  if (value) return <Field label="Client record (optional)"><div className="flex items-center gap-2"><span className="field flex h-10 items-center">{value.name || 'Linked client'}</span><Button size="sm" variant="ghost" onClick={() => onChange(null)}>Unlink</Button></div></Field>;
-  return (
-    <Field label="Client record (optional)" hint="Kept private: client names never go into captions or exports.">
-      <input className="field" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your clients" />
-      {!!data?.length && <ul className="mt-1 max-h-40 overflow-y-auto rounded-lg border border-line bg-white">{data.map((c) => <li key={c.id}><button type="button" className="w-full px-3 py-1.5 text-left text-[14px] hover:bg-mist" onClick={() => { onChange(c); setQ(''); }}>{c.name}</button></li>)}</ul>}
-    </Field>
   );
 }
 

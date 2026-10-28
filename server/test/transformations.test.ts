@@ -355,9 +355,12 @@ describe('Transformations Library', () => {
     expect((await jen.get('/api/transformations?q=18 ash')).body.items.map((x: any) => x.id)).toContain(t.id);
     const csv = (await jen.get(`/api/transformations/${t.id}/details.csv`)).text;
     expect(csv).toContain('Hybrid (Weft #60 Platinum 22""; K-tip #18 Ash)');
-    // Changing to a single method drops the list.
-    const one = await jen.patch(`/api/transformations/${t.id}`, { extension: { hasExtensions: true, method: 'Weft', parts: [{ method: 'K-tip', shade: 'x' }] } });
-    expect(one.body.transformation.extension.parts).toEqual([]);
+    // One method with more than one shade: the extra shades are kept, under that method.
+    const one = await jen.patch(`/api/transformations/${t.id}`, { extension: { hasExtensions: true, method: 'Weft', shade: 'Caipirinha', length: '18"',
+      parts: [{ method: 'K-tip', shade: 'Bees Knees', length: '18"' }, { method: '', shade: 'Vesper Martini' }, { method: '', shade: '' }] } });
+    expect(one.body.transformation.extension).toMatchObject({ method: 'Weft', shade: 'Caipirinha',
+      parts: [{ method: 'Weft', shade: 'Bees Knees', length: '18"' }, { method: 'Weft', shade: 'Vesper Martini', length: null }] });
+    expect((await jen.get('/api/transformations?q=vesper')).body.items.map((x: any) => x.id)).toContain(t.id);
   });
 
   it('the salon owner has every permission (so they can give any out), other admins only their role’s', async () => {

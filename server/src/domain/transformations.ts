@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { hairName } from '@addendum/shared';
 import type { CurrentUser, TransformationConsentDTO, TransformationDTO, TransformationExtensionDTO, TransformationInstagramDTO, TransformationPhotoDTO } from '@addendum/shared';
 import { can } from '../auth/permissions.js';
 import { config } from '../config.js';
@@ -326,8 +327,10 @@ async function saveExtension(q: { query: (s: string, p?: unknown[]) => Promise<u
   const needed = services.some(isExtensionService);
   if (!e || (!e.hasExtensions && !needed)) { await q.query('DELETE FROM transformation_extensions WHERE transformation_id = $1', [id]); return; }
   // Hybrid: the methods and colours used, each kept (blank rows dropped); other methods have none.
-  const parts = /hybrid/i.test(e.method ?? '') ? (e.parts ?? []).filter((x) => x.method?.trim() || x.shade?.trim())
-    .map((x) => ({ method: x.method?.trim() ?? '', shade: x.shade?.trim() || null, length: x.length?.trim() || null })).slice(0, 12) : [];
+  // More than one shade: hybrid installs list each method and colour; other methods list their extra shades.
+  const hybrid = /hybrid/i.test(e.method ?? '');
+  const parts = (e.parts ?? []).filter((x) => (hybrid && x.method?.trim()) || x.shade?.trim())
+    .map((x) => ({ method: (hybrid ? x.method?.trim() : e.method?.trim()) ?? '', shade: x.shade?.trim() || null, length: x.length?.trim() || null })).slice(0, 12);
   await q.query(`INSERT INTO transformation_extensions(transformation_id, has_extensions, method, brand, length, shade, quantity, work_type, blending, customization, maintenance_notes, next_appointment, parts)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (transformation_id) DO UPDATE SET has_extensions = $2, method = $3, brand = $4, length = $5, shade = $6,
     quantity = $7, work_type = $8, blending = $9, customization = $10, maintenance_notes = $11, next_appointment = $12, parts = $13`,
@@ -765,17 +768,31 @@ export async function setCollectionItems(cid: string, ids: string[], remove: boo
   return collections();
 }
 
+/** Addendum Hair's colour names (from the hair products), offered while typing a shade. */
+async function shadeNames() {
+  try {
+    const { stockRows } = await import('./stock.js');
+    const names = new Set<string>();
+    for (const r of await stockRows()) {
+      const n = hairName(r.label, r.sku);
+      if (n.method && n.color && !/swatch/i.test(r.label)) names.add(n.color);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b));
+  } catch { return []; }
+}
+
 export async function options(u: Who) {
-  const [services, catalog, stylists, tags, methods] = await Promise.all([
+  const [services, catalog, stylists, tags, methods, shades] = await Promise.all([
     serviceList(),
     db().query<{ name: string }>('SELECT DISTINCT name FROM services ORDER BY name LIMIT 400').catch(() => []),
     db().query<{ id: string; name: string }>(seesAll(u) || can(u, 'transformations:manage')
       ? 'SELECT id, name FROM staff WHERE active ORDER BY lower(name)' : 'SELECT id, name FROM staff WHERE id = $1', seesAll(u) || can(u, 'transformations:manage') ? [] : [u.id]),
     db().query<{ tag: string }>('SELECT DISTINCT unnest(tags) AS tag FROM transformations ORDER BY 1 LIMIT 300'),
     db().query<{ method: string }>("SELECT DISTINCT method FROM transformation_extensions WHERE method IS NOT NULL AND method <> '' ORDER BY 1"),
+    shadeNames(),
   ]);
   return {
-    services, catalog: catalog.map((c) => c.name), stylists, tags: tags.map((t) => t.tag), methods: methods.map((m) => m.method), collections: await collections(),
+    services, catalog: catalog.map((c) => c.name), shades, stylists, tags: tags.map((t) => t.tag), methods: methods.map((m) => m.method), collections: await collections(),
     can: {
       create: can(u, 'transformations:own') || can(u, 'transformations:manage'), viewAll: seesAll(u), manage: can(u, 'transformations:manage'),
       consent: can(u, 'transformations:consent'), download: can(u, 'transformations:download'), bulk: can(u, 'transformations:bulk'), technical: can(u, 'transformations:technical'),
