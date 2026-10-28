@@ -100,6 +100,7 @@ export function TransformationsPage() {
   }, [editParam]);
   const [exportId, setExportId] = useState<string | null>(null);
   const [settings, setSettings] = useState(false);
+  const [bulkIg, setBulkIg] = useState(false);
   const [collect, setCollect] = useState(false);
   const refresh = () => { void qc.invalidateQueries({ queryKey: ['transformations'] }); void qc.invalidateQueries({ queryKey: ['transformation'] }); void qc.invalidateQueries({ queryKey: ['transformations-options'] }); void qc.invalidateQueries({ queryKey: ['tf-confirm'] }); };
   if (opts.isLoading) return <PageLoading />;
@@ -120,6 +121,7 @@ export function TransformationsPage() {
       <PageHeader title="Transformations" subtitle={social ? 'The salon’s work and what was done — approve photos for social media.' : 'Your work and what was done.'}
         actions={<>
           {o.can.manage && <Button icon={<Settings2 className="h-4 w-4" />} onClick={() => setSettings(true)}>Services & collections</Button>}
+          {o.can.manage && <Button icon={<Instagram className="h-4 w-4" />} onClick={() => setBulkIg(true)}>Add Instagram links</Button>}
           {o.can.create && <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEdit('new')}>New transformation</Button>}
         </>} />
       <SectionPicker path="/transformations" names={names} can={canDo} />
@@ -214,6 +216,7 @@ export function TransformationsPage() {
       {confirming && <Editor t={null} o={o} appt={confirming} onClose={() => { setConfirming(null); refresh(); void qc.invalidateQueries({ queryKey: ['tf-confirm'] }); }} />}
       {exportId && <ExportProgress id={exportId} onClose={() => setExportId(null)} />}
       {settings && <LibrarySettings o={o} onClose={() => { setSettings(false); refresh(); }} />}
+      {bulkIg && <BulkInstagram o={o} onClose={() => { setBulkIg(false); refresh(); }} />}
       {collect && <AddToCollection o={o} ids={[...sel]} onClose={(done) => { setCollect(false); if (done) { setSelecting(false); setSel(new Set()); refresh(); } }} />}
     </div>
   );
@@ -850,6 +853,63 @@ function ExportProgress({ id, onClose }: { id: string; onClose: () => void }) {
             </div>
           )}
           <p className="text-[12px] text-stone">Instagram posts are listed as links in the manifest; their media isn’t included.</p>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// ---------------- several Instagram links at once (administrators) ----------------
+const IG_LINK = /https?:\/\/(?:www\.)?instagram\.com\/[^\s,;"'<>]+/gi;
+function BulkInstagram({ o, onClose }: { o: Options; onClose: () => void }) {
+  const toast = useToast();
+  const [text, setText] = useState('');
+  const [forAll, setForAll] = useState('');
+  const [per, setPer] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [results, setResults] = useState<{ url: string; ok: boolean; reason?: string }[] | null>(null);
+  const links = [...new Set(text.match(IG_LINK) ?? [])];
+  const stylistOf = (u: string) => per[u] ?? forAll;
+  const add = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post<{ results: { url: string; ok: boolean; reason?: string }[] }>('/transformations/instagram-links', { links: links.map((url) => ({ url, stylistStaffId: stylistOf(url) || null })) });
+      setResults(r.results);
+      const n = r.results.filter((x) => x.ok).length;
+      if (n) toast(`${n} added — ${n === 1 ? 'the stylist was' : 'stylists were'} asked to add what was done`);
+    } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
+  };
+  const short = (u: string) => u.replace(/^https?:\/\/(www\.)?instagram\.com\//, '').replace(/\?.*$/, '');
+  const stylistSelect = (value: string, onChange: (v: string) => void, label: string) => (
+    <select className="field h-10" aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Stylist unknown (any stylist can claim)</option>
+      {o.stylists.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+    </select>
+  );
+  return (
+    <Modal open wide onClose={onClose} title="Add Instagram links"
+      footer={results ? <Button variant="primary" onClick={onClose}>Done</Button> : <><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={!links.length} onClick={add}>Add {links.length || ''} transformation{links.length === 1 ? '' : 's'}</Button></>}>
+      {results ? (
+        <ul className="space-y-1 text-[14px]">{results.map((r) => (
+          <li key={r.url} className="flex items-center gap-2"><span className={r.ok ? 'text-sage' : 'text-rose'}>{r.ok ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}</span>
+            <span className="min-w-0 flex-1 truncate">{short(r.url)}</span>{!r.ok && <span className="text-[13px] text-stone">{r.reason}</span>}</li>))}</ul>
+      ) : (
+        <div className="space-y-3">
+          <Field label="Instagram links" hint="Paste as many as you like — one per line, or all together. Each becomes a transformation for the stylist to fill in.">
+            <textarea className="field min-h-[110px] font-mono text-[13px]" value={text} onChange={(e) => setText(e.target.value)} placeholder={'https://www.instagram.com/p/…\nhttps://www.instagram.com/reel/…'} autoFocus />
+          </Field>
+          {links.length > 0 && <>
+            <Field label="Stylist for all">{stylistSelect(forAll, (v) => { setForAll(v); setPer({}); }, 'Stylist for all')}</Field>
+            <div className="panel divide-y divide-line !p-0">
+              {links.map((u) => (
+                <div key={u} className="flex flex-wrap items-center gap-2 px-3 py-2 sm:flex-nowrap">
+                  <Instagram className="h-4 w-4 shrink-0 text-stone" />
+                  <a className="min-w-0 flex-1 truncate text-[13px] text-plum underline" href={u} target="_blank" rel="noreferrer noopener">{short(u)}</a>
+                  <span className="w-full sm:w-64">{stylistSelect(stylistOf(u), (v) => setPer({ ...per, [u]: v }), `Stylist for ${short(u)}`)}</span>
+                </div>
+              ))}
+            </div>
+          </>}
         </div>
       )}
     </Modal>

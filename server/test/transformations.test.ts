@@ -383,4 +383,22 @@ describe('Transformations Library', () => {
     expect([done.status, done.body.transformation.title]).toEqual([200, 'Balayage / lightening']);
     expect((await jen.get('/api/transformations/to-confirm')).body.needsDetails.map((x: any) => x.id)).not.toContain(t.id);
   });
+
+  it('administrators add several Instagram links at once (one transformation each, for the stylist to fill in)', async () => {
+    const jenId = await staffId('jennifer@addendumsalon.com');
+    expect((await jen.post('/api/transformations/instagram-links', { links: [{ url: 'https://www.instagram.com/p/AAA111/' }] })).status).toBe(403);
+    const r = (await owner.post('/api/transformations/instagram-links', { links: [
+      { url: 'https://www.instagram.com/p/BULK111/?img_index=1', stylistStaffId: jenId },
+      { url: 'https://www.instagram.com/reel/BULK222/' }, // stylist unknown
+      { url: 'https://www.instagram.com/p/BULK111/' }, // same post twice
+      { url: 'https://example.com/x' },
+    ] })).body.results;
+    expect(r.map((x: any) => [x.ok, x.reason ?? null])).toEqual([[true, null], [true, null], [false, 'Already in the library'], [false, 'Not an Instagram post or Reel link']]);
+    const a = (await owner.get(`/api/transformations/${r[0].id}`)).body.transformation;
+    expect([a.stylistName, a.mainService, a.instagram[0].url]).toEqual(['Jennifer', '', 'https://www.instagram.com/p/BULK111/']);
+    const b = (await owner.get(`/api/transformations/${r[1].id}`)).body.transformation;
+    expect(b.stylistStaffId).toBeNull();
+    expect((await mike.get(`/api/transformations/${r[1].id}`)).status).toBe(200); // unknown stylist: any stylist can see and claim it
+    expect((await jen.get('/api/transformations/to-confirm')).body.needsDetails.map((x: any) => x.id)).toContain(r[0].id);
+  });
 });

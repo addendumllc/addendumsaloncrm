@@ -304,6 +304,8 @@ export interface TransformationInput {
   caption?: string | null; hashtags?: string | null; tags?: string[]; consentStatus?: string; instagramUrl?: string | null;
   /** Confirming one of their finished appointments: date and client come from it. */
   appointmentId?: string | null;
+  /** Administrators only: no stylist yet (any stylist can see and claim it). */
+  unassigned?: boolean;
 }
 const cleanTags = (t: string[] = []) => [...new Set(t.map((x) => x.trim().replace(/^#/, '').toLowerCase()).filter(Boolean))].slice(0, 40);
 
@@ -335,7 +337,7 @@ async function saveExtension(q: { query: (s: string, p?: unknown[]) => Promise<u
 
 export async function createTransformation(b: TransformationInput, u: Who) {
   if (!can(u, 'transformations:own') && !can(u, 'transformations:manage')) throw forbidden('You can’t add transformations.');
-  let stylist = await checkStylist(b.stylistStaffId, u);
+  let stylist: string | null = b.unassigned && can(u, 'transformations:manage') ? null : await checkStylist(b.stylistStaffId, u);
   if (b.appointmentId) {
     const a = await db().one<{ staff_id: string | null; client_id: string | null; day: string }>(
       "SELECT staff_id, client_id, to_char(start_at, 'YYYY-MM-DD') AS day FROM appointments WHERE id = $1", [b.appointmentId]);
@@ -366,12 +368,33 @@ export async function createTransformation(b: TransformationInput, u: Who) {
   });
   if (b.instagramUrl && socialAdmin(u)) await addInstagram(id, b.instagramUrl, true, u);
   // Added for a stylist by someone else: let them know so they can add what was done.
-  if (stylist !== u.id) {
+  if (stylist && stylist !== u.id) {
     await db().query("INSERT INTO notifications(staff_id, kind, title, body, link) VALUES ($1,'transformation',$2,$3,$4)", [stylist,
       b.mainService.trim() ? 'A transformation was added for you' : 'Add what was done for a transformation',
       b.mainService.trim() ? `${title} — check the details and add your notes.` : 'Choose the services and add your notes.', `/transformations?open=${id}`]).catch(() => undefined);
   }
   return getTransformation(id, u);
+}
+
+/**
+ * Administrators adding several Instagram posts at once: one transformation per link, for the chosen stylist (or none
+ * yet), for the stylist to fill in what was done. Links already in the library or not Instagram posts are reported.
+ */
+export async function addInstagramLinks(links: { url: string; stylistStaffId?: string | null }[], u: Who) {
+  if (!can(u, 'transformations:manage')) throw forbidden('Adding links in bulk is for people who manage the library.');
+  const results: { url: string; ok: boolean; id?: string; reason?: string }[] = [];
+  const seen = new Set<string>();
+  for (const l of links.slice(0, 100)) {
+    const p = parseInstagramUrl(l.url);
+    if (!p) { results.push({ url: l.url, ok: false, reason: 'Not an Instagram post or Reel link' }); continue; }
+    if (seen.has(p.url) || await db().one('SELECT 1 FROM transformation_instagram WHERE url = $1', [p.url])) { results.push({ url: p.url, ok: false, reason: 'Already in the library' }); continue; }
+    seen.add(p.url);
+    try {
+      const t = await createTransformation({ mainService: '', instagramUrl: p.url, ...(l.stylistStaffId ? { stylistStaffId: l.stylistStaffId } : { unassigned: true }) }, u);
+      results.push({ url: p.url, ok: true, id: t.id });
+    } catch (e) { results.push({ url: p.url, ok: false, reason: (e as Error).message }); }
+  }
+  return results;
 }
 
 export async function updateTransformation(id: string, b: Partial<TransformationInput>, u: Who) {

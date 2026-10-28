@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { CONSENT_STATUSES } from '@addendum/shared';
 import { can } from '../auth/permissions.js';
 import {
-  addInstagram, addPhoto, createCollection, createTransformation, deleteCollection, deleteTransformation, detailsCsv, exportFile, exportStatus, getTransformation,
+  addInstagram, addInstagramLinks, addPhoto, createCollection, createTransformation, deleteCollection, deleteTransformation, detailsCsv, exportFile, exportStatus, getTransformation,
   listTransformations, options, receiveUpload, photoFile, refreshInstagram, removeInstagram, removePhoto, reorderPhotos, replacePhoto, setCollectionItems,
   setInstagramPrimary, setServiceList, setThumbnail, skipAppointment, startExport, toConfirm, needsDetails, updateConsent, updatePhoto, updateTransformation,
 } from '../domain/transformations.js';
@@ -127,6 +127,12 @@ transformationsRouter.post('/', ah(async (req, res) => {
   const t = await createTransformation(parse(createSchema, req.body), req.user!);
   await logAction(req, 'transformations.create', 'transformation', t.id, { code: t.code });
   res.status(201).json({ transformation: t });
+}));
+transformationsRouter.post('/instagram-links', ah(async (req, res) => {
+  const b = parse(z.object({ links: z.array(z.object({ url: z.string().max(500), stylistStaffId: uuid.nullable().optional() })).min(1).max(100) }), req.body);
+  const results = await addInstagramLinks(b.links, req.user!);
+  await logAction(req, 'transformations.instagram_bulk', undefined, undefined, { added: results.filter((r) => r.ok).length, skipped: results.filter((r) => !r.ok).length });
+  res.json({ results });
 }));
 transformationsRouter.get(`/:id${ID}`, ah(async (req, res) => res.json({ transformation: await getTransformation(req.params.id, req.user!) })));
 transformationsRouter.patch(`/:id${ID}`, ah(async (req, res) => {
