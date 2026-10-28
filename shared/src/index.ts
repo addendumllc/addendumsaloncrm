@@ -185,11 +185,12 @@ export const PERMISSIONS_CATALOG: PermissionDef[] = [
   { key: 'location:clients_away', category: 'Location and access', action: 'view', label: 'Away from the salon: Clients', description: 'Clients and new-client inquiries work away from the approved networks.', sensitive: true },
   { key: 'location:messages_away', category: 'Location and access', action: 'view', label: 'Away from the salon: Messages', description: 'Messages work away from the approved networks.', sensitive: true },
   { key: 'location:orders_away', category: 'Location and access', action: 'view', label: 'Away from the salon: Order Hair', description: 'Order Hair works away from the approved networks.' },
+  { key: 'location:transformations_away', category: 'Location and access', action: 'view', label: 'Away from the salon: Transformations', description: 'Transformations work away from the approved networks: their work, uploading photos and videos, and adding or editing details.' },
   { key: 'location:commission_away', category: 'Location and access', action: 'view', label: 'Away from the salon: Earnings & Goals', description: 'Their own commission works away from the approved networks.' },
 ];
 
 /** Sections that can be opened away from the approved networks, each with its own "Away from the salon" permission. */
-export type AwaySection = 'dashboard' | 'calendar' | 'tasks' | 'clients' | 'messages' | 'orders' | 'commission';
+export type AwaySection = 'dashboard' | 'calendar' | 'tasks' | 'clients' | 'messages' | 'orders' | 'commission' | 'transformations';
 export const AWAY_SECTIONS: { key: AwaySection; permission: string; label: string; paths: string[]; needsAnyOf: string[] }[] = [
   { key: 'dashboard', permission: 'location:dashboard_away', label: 'Dashboard', paths: ['/'], needsAnyOf: ['dashboard:view'] },
   { key: 'calendar', permission: 'location:calendar_away', label: 'Appointments', paths: ['/appointments', '/my-calendar'], needsAnyOf: ['appointments:read', 'appointments:read_own'] },
@@ -198,6 +199,7 @@ export const AWAY_SECTIONS: { key: AwaySection; permission: string; label: strin
   { key: 'messages', permission: 'location:messages_away', label: 'Messages', paths: ['/messages'], needsAnyOf: ['messages:read'] },
   { key: 'orders', permission: 'location:orders_away', label: 'Order Hair', paths: ['/inventory'], needsAnyOf: ['inventory:order', 'inventory:read_all', 'inventory:view', 'inventory:manage'] },
   { key: 'commission', permission: 'location:commission_away', label: 'Earnings & Goals', paths: ['/my-commission'], needsAnyOf: ['commission:own'] },
+  { key: 'transformations', permission: 'location:transformations_away', label: 'Transformations', paths: ['/transformations'], needsAnyOf: ['transformations:own', 'transformations:view_all', 'transformations:manage'] },
 ];
 
 /** The app path (e.g. "/clients/123") is part of one of these away sections. */

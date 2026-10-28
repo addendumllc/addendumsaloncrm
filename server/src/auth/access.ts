@@ -93,6 +93,8 @@ const AWAY_API: Record<AwaySection, Rule[]> = {
   messages: [under('*', 'messages'), under('GET', 'clients', 'leads', 'tags')],
   orders: [under('*', 'inventory')],
   commission: [under('GET', 'commission/me', 'commission/status', 'commission/entries')],
+  // Their work: viewing, uploading photos and videos, adding and editing details (each route still checks the record).
+  transformations: [under('*', 'transformations')],
 };
 // "Clock in from anywhere": the time clock itself works away from the approved networks, even where the rest of the
 // app doesn't (the app shell's own reads come with it). Everyone else can only clock in or out on an approved network.

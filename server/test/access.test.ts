@@ -326,4 +326,19 @@ describe('Per-person exceptions away from the salon', () => {
     expect((await home.get('/api/inventory-sync')).status).toBe(403);
     await owner.put(`/api/admin/users/${jenId}/access`, { overrides: { 'location:orders_away': null, 'location:commission_away': null, 'location:messages_away': null } });
   });
+
+  it('Transformations can be opened away from the salon: viewing, uploading and editing their own work', async () => {
+    const jenId = (await db().one<any>("SELECT id FROM staff WHERE email = 'jennifer@addendumsalon.com'")).id;
+    await restrict();
+    const owner = await browser('owner@addendumsalon.com', SALON);
+    expect((await owner.put(`/api/admin/users/${jenId}/access`, { overrides: { 'location:transformations_away': true }, confirm: true })).status).toBe(200);
+    const home = await browser('jennifer@addendumsalon.com', '198.51.100.7');
+    expect((await home.get('/api/access/status')).body.status).toMatchObject({ limited: ['transformations'] });
+    expect((await home.get('/api/transformations')).status).toBe(200);
+    const t = await home.post('/api/transformations', { mainService: 'Haircut', technicalNotes: 'from home' });
+    expect(t.status).toBe(201);
+    expect((await home.patch(`/api/transformations/${t.body.transformation.id}`, { technicalNotes: 'edited from home' })).status).toBe(200);
+    expect((await home.get('/api/clients')).body.error.code).toBe('network_restricted'); // nothing else
+    await owner.put(`/api/admin/users/${jenId}/access`, { overrides: { 'location:transformations_away': null } });
+  });
 });
