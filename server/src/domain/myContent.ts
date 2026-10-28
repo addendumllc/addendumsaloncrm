@@ -151,7 +151,7 @@ export async function myTransformationPhotos(u: Who) {
 const handleKey = (id: string) => `mycontent.instagram.${id}`;
 export const getHandle = async (u: Who) => (await getKV<string>(handleKey(u.id))) ?? null;
 export async function setHandle(u: Who, raw: string | null) {
-  const h = (raw ?? '').trim().replace(/^https?:\/\/(www\.)?instagram\.com\//i, '').replace(/^@/, '').replace(/[/?#].*$/, '');
+  const h = (raw ?? '').trim().replace(/^https?:\/\/(www\.)?instagram\.com\//i, '').replace(/^@/, '').replace(/[/?#].*$/, '').toLowerCase();
   if (h && !/^[A-Za-z0-9._]{1,30}$/.test(h)) throw badRequest('Enter your Instagram username, e.g. @yourname.');
   await setKV(handleKey(u.id), h || null);
   return h || null;

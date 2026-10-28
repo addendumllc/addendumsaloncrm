@@ -382,7 +382,7 @@ function HandleModal({ handle, onClose }: { handle: string | null; onClose: () =
   const save = async () => { try { await api.put('/my-content/instagram', { handle: v || null }); onClose(); } catch (e) { toast((e as Error).message, 'error'); } };
   return (
     <Modal open onClose={onClose} title="Your Instagram" footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" onClick={save}>Save</Button></>}>
-      <Field label="Instagram username or link" hint="e.g. @gaby.addendum or https://www.instagram.com/gaby.addendum">
+      <Field label="Instagram username or link" hint="e.g. @addendum.salon or https://www.instagram.com/addendum.salon">
         <input className="field" value={v} onChange={(e) => setV(e.target.value)} placeholder="@yourname" autoFocus />
       </Field>
     </Modal>
