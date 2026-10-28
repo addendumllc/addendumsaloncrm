@@ -6,7 +6,7 @@ import {
   accountsFor, addComment, analytics, campaignTimeline, companionBlog, createLaunch, crossPost, comments, contentAccounts, contentSettings, createPosts, deleteAsset, deleteCampaign, deleteIdea, deletePost, favoriteIdea, generate,
   getPost, importMetrics, keepIdea, suggestIdeas, linkOptions, listAssets, listCampaigns, listIdeas, listPosts, MEDIA_LIMITS, planning, readMedia, repurpose, reschedule, saveCampaign,
   saveContentAccounts, saveContentSettings, saveIdea, saveMedia, setMetrics, transition, updateAsset, updatePost,
-  assetGroupZip, orderAssets,
+  assetGroupZip, orderAssets, renameSet, saveSetInfo, setInfo,
 } from '../domain/content.js';
 import { can } from '../auth/permissions.js';
 import { forbidden, notFound } from '../lib/errors.js';
@@ -173,6 +173,13 @@ contentRouter.get('/assets', ah(async (req, res) => {
 // Links as assets (Canva designs and templates…), organised like files; shared with stylists unless turned off.
 const linkBody = z.object({ title: z.string().max(120).optional(), postType: z.enum(['post', 'story', 'reel', 'carousel']).nullable().optional(), group: z.string().max(80).nullable().optional(), stylists: z.boolean().optional() });
 // A whole asset group as a ZIP (photos and videos, plus its links in Links.txt).
+// Sets as post ideas: the caption, hashtags and notes that go with a set's photos; renaming a set.
+contentRouter.get('/asset-sets', ah(async (req, res) => res.json({ set: await setInfo(String(req.query.name ?? '').slice(0, 80)) })));
+contentRouter.put('/asset-sets', ah(async (req, res) => {
+  const b = parse(z.object({ name: z.string().min(1).max(80), caption: z.string().max(2200).nullable().optional(), hashtags: z.string().max(1000).nullable().optional(), notes: z.string().max(2000).nullable().optional() }), req.body);
+  res.json({ set: await saveSetInfo(b.name, b) });
+}));
+contentRouter.post('/asset-sets/rename', ah(async (req, res) => { const b = parse(z.object({ from: z.string().min(1).max(80), to: z.string().max(80) }), req.body); await renameSet(b.from, b.to); res.json({ ok: true }); }));
 contentRouter.post('/assets/order', ah(async (req, res) => { await orderAssets(parse(z.object({ ids: z.array(z.string().uuid()).min(1).max(200) }), req.body).ids); res.json({ ok: true }); }));
 contentRouter.get('/assets/group-download', ah(async (req, res) => {
   const z1 = await assetGroupZip(String(req.query.group ?? '').slice(0, 80));

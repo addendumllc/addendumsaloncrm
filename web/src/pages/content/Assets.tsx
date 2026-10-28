@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle2, ChevronLeft, ChevronRight, Download, ExternalLink, Film, Link2, Search, Trash2, Upload } from 'lucide-react';
+import { CheckCircle2, ChevronLeft, ChevronRight, Download, ExternalLink, Film, Link2, Search, Trash2, Upload, X } from 'lucide-react';
 import type { ContentAccountId, ContentMediaDTO } from '@addendum/shared';
 import { api } from '../../api/client';
 import { Badge, Button, EmptyState, Field, Modal, PageLoading, Segmented, buttonClass, cx, useToast } from '../../components/ui';
@@ -15,9 +15,6 @@ const POST_TYPES: { value: PostType; label: string }[] = [{ value: 'post', label
 interface AssetLink { id: string; title: string; url: string; kind: 'post' | 'story' | 'both'; postType?: PostType | null; group?: string | null; stylists?: boolean; addedAt: string }
 const isCanva = (url: string) => { try { return /(^|\.)canva\.(com|link)$/i.test(new URL(url).hostname); } catch { return false; } };
 /** One section of the grid: files and links of a type of post or a group. */
-type Item = { kind: 'file'; m: ContentMediaDTO } | { kind: 'link'; l: AssetLink };
-const typeOf = (x: Item) => (x.kind === 'file' ? x.m.postType : x.l.postType) ?? null;
-const groupOf = (x: Item) => (x.kind === 'file' ? x.m.group : x.l.group) ?? null;
 const Thumb = ({ m }: { m: ContentMediaDTO }) => (
   <span className="relative block aspect-square overflow-hidden rounded-lg border border-line bg-mist">
     {m.mime.startsWith('video/') ? <video src={m.url} className="h-full w-full object-cover" muted /> : <img src={m.url} alt="" className="h-full w-full object-cover" loading="lazy" />}
@@ -27,54 +24,73 @@ const Thumb = ({ m }: { m: ContentMediaDTO }) => (
   </span>
 );
 
-/** Assets: every uploaded photo and video — search, tags, which account it belongs to, and approved for reuse. */
+/** Drag to reorder (desktop), with arrows for phones: returns the props for item i. */
+function useReorder<T>(list: T[], onChange: (next: T[]) => void) {
+  const [dragging, setDragging] = useState<number | null>(null);
+  const [over, setOver] = useState<number | null>(null);
+  const move = (from: number, to: number) => {
+    if (from === to || to < 0 || to >= list.length) return;
+    const n = [...list];
+    const [x] = n.splice(from, 1);
+    n.splice(to, 0, x);
+    onChange(n);
+  };
+  const props = (i: number) => ({
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => { setDragging(i); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/x-slide', String(i)); },
+    onDragOver: (e: React.DragEvent) => { e.preventDefault(); if (over !== i) setOver(i); },
+    onDragLeave: () => setOver((o) => (o === i ? null : o)),
+    onDrop: (e: React.DragEvent) => { e.preventDefault(); const from = dragging ?? Number(e.dataTransfer.getData('text/x-slide')); setDragging(null); setOver(null); if (Number.isFinite(from)) move(from, i); },
+    onDragEnd: () => { setDragging(null); setOver(null); },
+  });
+  return { props, move, dragging, over };
+}
+
+/** Assets: a gallery of the salon's photos and videos (sets — a carousel's slides, a story set — as one tile), and Canva links. */
 export function AssetsTab({ b }: { b: Basics }) {
   const toast = useToast();
   const qc = useQueryClient();
   const [f, setF] = useState({ q: '', account: '', tag: '', approved: '' });
   const { data, isLoading } = useAssets(f);
   const [open, setOpen] = useState<{ list: ContentMediaDTO[]; id: string } | null>(null);
+  const [setOpenName, setSetOpenName] = useState<string | null>(null);
   const [uploading, setUploading] = useState(0);
   const file = useRef<HTMLInputElement>(null);
   const tags = [...new Set((data ?? []).flatMap((m) => m.tags ?? []))].sort();
   const { data: links } = useQuery({ queryKey: ['content-asset-links'], queryFn: () => api.get<{ links: AssetLink[] }>('/content/asset-links').then((r) => r.links) });
-  const [groupBy, setGroupBy] = useState<'type' | 'group' | 'none'>(() => { try { return (localStorage.getItem('assets-group') as 'type' | 'group' | 'none') || 'type'; } catch { return 'type'; } });
-  const setGroup = (v: typeof groupBy) => { setGroupBy(v); try { localStorage.setItem('assets-group', v); } catch { /* private window */ } };
+  const [view, setView] = useState<'type' | 'none'>(() => { try { return localStorage.getItem('assets-group') === 'none' ? 'none' : 'type'; } catch { return 'type'; } });
+  const setViewSaved = (v: typeof view) => { setView(v); try { localStorage.setItem('assets-group', v); } catch { /* private window */ } };
   const [linkOpen, setLinkOpen] = useState<AssetLink | 'new' | null>(null);
+  const refresh = () => void qc.invalidateQueries({ queryKey: ['content-assets'] });
   const words = f.q.toLowerCase().split(/\s+/).filter(Boolean);
-  const items: Item[] = [
-    ...(data ?? []).map((m) => ({ kind: 'file' as const, m })),
+  const files = data ?? [];
+  // Sets: files sharing a group, in their order (the server sends them ordered).
+  const setNames = [...new Set(files.map((m) => m.group).filter((x): x is string => !!x))];
+  const setsByName = new Map(setNames.map((n) => [n, files.filter((m) => m.group === n)]));
+  const entries: Entry[] = [
+    ...setNames.map((n) => ({ kind: 'set' as const, name: n, files: setsByName.get(n)! })),
+    ...files.filter((m) => !m.group).map((m) => ({ kind: 'file' as const, m })),
     // Links follow the search (title or group); the account / tag / approved filters are for files.
     ...(f.account || f.tag || f.approved ? [] : (links ?? []).filter((l) => words.every((w) => `${l.title} ${l.group ?? ''}`.toLowerCase().includes(w))).map((l) => ({ kind: 'link' as const, l }))),
   ];
-  const groupNames = [...new Set([...(data ?? []).map((m) => m.group), ...(links ?? []).map((l) => l.group)].filter((x): x is string => !!x))].sort();
-  // In a group (a carousel set…), the order matters: slides are numbered and can be moved; downloads follow it.
-  const ordered = (sec: { title: string }) => groupBy === 'group' && groupNames.includes(sec.title);
-  const move = async (sec: { items: Item[] }, id: string, d: -1 | 1) => {
-    const ids = sec.items.flatMap((y) => (y.kind === 'file' ? [y.m.id] : []));
-    const i = ids.indexOf(id), j = i + d;
-    if (j < 0 || j >= ids.length) return;
-    [ids[i], ids[j]] = [ids[j], ids[i]];
-    try { await api.post('/content/assets/order', { ids }); void qc.invalidateQueries({ queryKey: ['content-assets'] }); } catch (e) { toast((e as Error).message, 'error'); }
-  };
-  const sections: { title: string; items: Item[] }[] = groupBy === 'none' ? [{ title: '', items }]
-    : groupBy === 'type' ? [...POST_TYPES.map((t) => ({ title: t.label, items: items.filter((x) => typeOf(x) === t.value) })), { title: 'No type yet', items: items.filter((x) => !typeOf(x)) }]
-      : [...groupNames.map((g) => ({ title: g, items: items.filter((x) => groupOf(x) === g) })), { title: 'Not in a group', items: items.filter((x) => !groupOf(x)) }];
-  // One photo uploads straight away; several open the upload window (order, group, type of post) — or into a group.
+  const groupNames = [...new Set([...setNames, ...(links ?? []).map((l) => l.group)].filter((x): x is string => !!x))].sort();
+  const sections: { title: string; items: Entry[] }[] = view === 'none' ? [{ title: '', items: entries }]
+    : [...POST_TYPES.map((t) => ({ title: t.label, items: entries.filter((x) => entryType(x) === t.value) })), { title: 'No type yet', items: entries.filter((x) => !entryType(x)) }];
+  // One photo uploads straight away; several become a set (named, in the order you arrange) — or more photos for a set.
   const [batch, setBatch] = useState<{ files: File[]; group: string; postType: string } | null>(null);
   const pickInto = useRef<{ group: string; postType: string } | null>(null);
-  const upload = async (files: FileList | null) => {
-    const list = [...(files ?? [])];
+  const upload = async (picked: FileList | null) => {
+    const list = [...(picked ?? [])];
     const into = pickInto.current;
     pickInto.current = null;
     if (!list.length) return;
     if (list.length > 1 || into) { setBatch({ files: list, group: into?.group ?? '', postType: into?.postType ?? '' }); return; }
     setUploading((n) => n + 1);
     try { await api.upload('/content/media', list[0]); } catch (e) { toast(`${list[0].name}: ${(e as Error).message}`, 'error'); } finally { setUploading((n) => n - 1); }
-    void qc.invalidateQueries({ queryKey: ['content-assets'] });
+    refresh();
   };
-  /** Add photos into a group (e.g. more slides for a carousel): they go after the ones already there, in order. */
   const addInto = (group: string, postType: string) => { pickInto.current = { group, postType }; file.current?.click(); };
+  const openSet = setOpenName ? setsByName.get(setOpenName) ?? null : null;
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -82,35 +98,30 @@ export function AssetsTab({ b }: { b: Basics }) {
         <select className="field h-10 w-auto" value={f.account} onChange={(e) => setF({ ...f, account: e.target.value })} aria-label="Account"><option value="">All accounts</option>{b.mine.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
         <select className="field h-10 w-auto" value={f.tag} onChange={(e) => setF({ ...f, tag: e.target.value })} aria-label="Tag"><option value="">All tags</option>{tags.map((t) => <option key={t}>{t}</option>)}</select>
         <select className="field h-10 w-auto" value={f.approved} onChange={(e) => setF({ ...f, approved: e.target.value })} aria-label="Approved"><option value="">Any</option><option value="true">Approved to reuse</option><option value="false">Not approved</option></select>
-        <Segmented size="sm" value={groupBy} onChange={setGroup} options={[{ value: 'type', label: 'By type' }, { value: 'group', label: 'By group' }, { value: 'none', label: 'All' }]} />
+        <Segmented size="sm" value={view} onChange={setViewSaved} options={[{ value: 'type', label: 'By type' }, { value: 'none', label: 'All' }]} />
         <Button className="ml-auto" icon={<Link2 className="h-4 w-4" />} onClick={() => setLinkOpen('new')}>Add Canva link</Button>
         <Button variant="primary" icon={<Upload className="h-4 w-4" />} loading={uploading > 0} onClick={() => { pickInto.current = null; file.current?.click(); }}>Upload</Button>
         <input ref={file} type="file" multiple accept="image/jpeg,image/png,image/webp,image/heic,video/mp4,video/quicktime" className="hidden" onChange={(e) => { void upload(e.target.files); e.target.value = ''; }} />
       </div>
-      {isLoading ? <PageLoading /> : !items.length ? <div className="panel"><EmptyState title="No assets yet">Upload photos and videos, or add a Canva link.</EmptyState></div> : (
+      {isLoading ? <PageLoading /> : !entries.length ? <div className="panel"><EmptyState title="No assets yet">Upload photos and videos (several at once make a set), or add a Canva link.</EmptyState></div> : (
         <div className="space-y-6">
           {sections.filter((sec) => sec.items.length).map((sec) => (
             <section key={sec.title || 'all'}>
-              {sec.title && <div className="mb-2 flex items-center gap-2">
-                <h3 className="text-[13px] font-semibold uppercase tracking-wide text-stone">{sec.title} <span className="font-normal">({sec.items.length})</span></h3>
-                {groupBy === 'group' && groupNames.includes(sec.title) && <Button size="sm" className="ml-auto" icon={<Upload className="h-3.5 w-3.5" />} onClick={() => addInto(sec.title, typeOf(sec.items[0]) ?? '')}>Add photos</Button>}
-                {/* A whole group at once: its photos and videos in a ZIP, with its links listed. */}
-                {groupBy === 'group' && groupNames.includes(sec.title) && <a className={buttonClass('secondary', 'sm')} href={`/api/content/assets/group-download?group=${encodeURIComponent(sec.title)}`}><Download className="h-3.5 w-3.5" /><span className="btn-label">{sec.items.some((x) => typeOf(x) === 'carousel') ? 'Download carousel (in order)' : 'Download group'}</span></a>}
-              </div>}
+              {sec.title && <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-wide text-stone">{sec.title} <span className="font-normal">({sec.items.length})</span></h3>}
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                {sec.items.map((x) => x.kind === 'file' ? (
-                  <Tile key={x.m.id} m={x.m} slide={ordered(sec) ? sec.items.filter((y) => y.kind === 'file').indexOf(x) + 1 : null}
-                    onOpen={() => setOpen({ list: sec.items.flatMap((y) => (y.kind === 'file' ? [y.m] : [])), id: x.m.id })}
-                    onMove={ordered(sec) ? (d) => move(sec, x.m.id, d) : undefined} />
+                {sec.items.map((x) => x.kind === 'set' ? (
+                  <SetTile key={`set-${x.name}`} name={x.name} files={x.files} onOpen={() => setSetOpenName(x.name)} />
+                ) : x.kind === 'file' ? (
+                  <Tile key={x.m.id} m={x.m} slide={null} onOpen={() => setOpen({ list: sec.items.flatMap((y) => (y.kind === 'file' ? [y.m] : [])), id: x.m.id })} />
                 ) : (
                   <button key={x.l.id} type="button" className="text-left" onClick={() => setLinkOpen(x.l)}>
-                    <span className={cx('relative flex aspect-[4/5] flex-col items-center justify-center gap-1 overflow-hidden rounded-lg border border-line', isCanva(x.l.url) ? 'bg-[#7d2ae8] text-white' : 'bg-mist text-stone')}>
+                    <span className={cx('relative flex aspect-[4/5] flex-col items-center justify-center gap-1 overflow-hidden rounded-xl border border-line', isCanva(x.l.url) ? 'bg-[#7d2ae8] text-white' : 'bg-mist text-stone')}>
                       {isCanva(x.l.url) ? <span className="text-[26px] font-semibold leading-none">C</span> : <Link2 className="h-6 w-6" />}
                       <span className="text-[11px]">{isCanva(x.l.url) ? 'Canva' : 'Link'}</span>
                       {x.l.stylists !== false && <span className="absolute bottom-1 left-1 rounded bg-black/55 px-1 text-[10px] text-white">Stylists</span>}
                     </span>
-                    <span className="mt-1 block truncate text-[12px] text-ink">{x.l.title}</span>
-                    <span className="block truncate text-[11px] text-stone">{[groupBy !== 'group' && x.l.group, 'Link'].filter(Boolean).join(' · ')}</span>
+                    <span className="mt-1 block truncate text-[13px] font-medium text-ink">{x.l.title}</span>
+                    <span className="block truncate text-[12px] text-stone">{[x.l.group, 'Link'].filter(Boolean).join(' · ')}</span>
                   </button>
                 ))}
               </div>
@@ -120,14 +131,117 @@ export function AssetsTab({ b }: { b: Basics }) {
       )}
       <datalist id="asset-groups">{groupNames.map((g) => <option key={g} value={g} />)}</datalist>
       {linkOpen && <LinkEditor link={linkOpen === 'new' ? null : linkOpen} onClose={() => { setLinkOpen(null); void qc.invalidateQueries({ queryKey: ['content-asset-links'] }); }} />}
-      {open && <AssetViewer list={open.list} startId={open.id} b={b} onClose={() => { setOpen(null); void qc.invalidateQueries({ queryKey: ['content-assets'] }); }}
-        onAddPhotos={(group, postType) => { setOpen(null); void qc.invalidateQueries({ queryKey: ['content-assets'] }); addInto(group, postType); }} />}
-      {batch && <UploadBatch initial={batch} groups={groupNames} existing={(data ?? []).filter((m) => batch.group && m.group === batch.group)} onClose={() => { setBatch(null); void qc.invalidateQueries({ queryKey: ['content-assets'] }); }} />}
+      {openSet && setOpenName && <SetViewer name={setOpenName} files={openSet} onClose={() => { setSetOpenName(null); refresh(); }} onRenamed={(n) => setSetOpenName(n)}
+        onOpenSlide={(id) => setOpen({ list: openSet, id })} onAddPhotos={() => addInto(setOpenName, openSet[0]?.postType ?? '')} onChanged={refresh} />}
+      {open && <AssetViewer list={open.list} startId={open.id} b={b} onClose={() => { setOpen(null); refresh(); }}
+        onAddPhotos={(group, postType) => { setOpen(null); refresh(); addInto(group, postType); }} />}
+      {batch && <UploadBatch initial={batch} groups={groupNames} existing={files.filter((m) => batch.group && m.group === batch.group)} onClose={(made) => { setBatch(null); refresh(); if (made) setSetOpenName(made); }} />}
     </div>
   );
 }
 
-const typeLabel = (t: PostType | null | undefined) => POST_TYPES.find((x) => x.value === t)?.label.replace(/s$/, '') ?? null;
+type Entry = { kind: 'set'; name: string; files: ContentMediaDTO[] } | { kind: 'file'; m: ContentMediaDTO } | { kind: 'link'; l: AssetLink };
+const entryType = (x: Entry) => (x.kind === 'set' ? x.files[0]?.postType : x.kind === 'file' ? x.m.postType : x.l.postType) ?? null;
+
+/** A set (a carousel, a story set…) as one tile: its cover, how many, and a download of the whole set in order. */
+function SetTile({ name, files, onOpen }: { name: string; files: ContentMediaDTO[]; onOpen: () => void }) {
+  const cover = files[0];
+  const video = cover?.mime.startsWith('video/');
+  return (
+    <div className="group relative">
+      <button type="button" className="block w-full text-left" onClick={onOpen}>
+        <span className="relative block">
+          {/* The stack behind the cover: it's a set. */}
+          {files.length > 1 && <span className="absolute inset-0 translate-x-1.5 -translate-y-1.5 rounded-xl border border-line bg-mist" />}
+          {files.length > 2 && <span className="absolute inset-0 translate-x-3 -translate-y-3 rounded-xl border border-line bg-mist/70" />}
+          <span className="relative block aspect-[4/5] overflow-hidden rounded-xl border border-line bg-mist">
+            {cover && (video ? <video src={cover.url} muted playsInline preload="metadata" className="h-full w-full object-cover" /> : <img src={cover.url} alt={name} loading="lazy" className="h-full w-full object-cover" />)}
+            <span className="absolute left-2 top-2 flex flex-wrap gap-1">
+              {cover?.postType && <span className="rounded-full bg-white/90 px-2 py-0.5 text-[11px] font-medium text-ink">{typeLabel(cover.postType)}</span>}
+              <span className="rounded-full bg-ink/80 px-2 py-0.5 text-[11px] font-medium text-white">{files.length} {files.length === 1 ? 'photo' : 'photos'}</span>
+            </span>
+          </span>
+        </span>
+        <span className="block px-0.5 pt-1.5">
+          <span className="block truncate text-[13px] font-medium text-ink">{name}</span>
+          <span className="line-clamp-2 block text-[12px] leading-snug text-stone">{cover?.description || 'A set — open it to arrange the order'}</span>
+        </span>
+      </button>
+      <a href={`/api/content/assets/group-download?group=${encodeURIComponent(name)}`} className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-ink shadow-sm hover:bg-white" aria-label={`Download ${name} in order`} title="Download the set (in order)"><Download className="h-4 w-4" /></a>
+    </div>
+  );
+}
+
+/** A set's slides in order: drag (or the arrows) to rearrange, rename it, its type for all, add photos, download in order. */
+function SetViewer({ name, files, onClose, onRenamed, onOpenSlide, onAddPhotos, onChanged }: {
+  name: string; files: ContentMediaDTO[]; onClose: () => void; onRenamed: (n: string) => void; onOpenSlide: (id: string) => void; onAddPhotos: () => void; onChanged: () => void;
+}) {
+  const toast = useToast();
+  const [order, setOrder] = useState(files);
+  useEffect(() => setOrder(files), [files]);
+  const [title, setTitle] = useState(name);
+  // The post that goes with these photos: caption, hashtags and how to use it (stylists get it with the download).
+  const { data: info } = useQuery({ queryKey: ['asset-set', name], queryFn: () => api.get<{ set: { caption: string | null; hashtags: string | null; notes: string | null } }>(`/content/asset-sets?name=${encodeURIComponent(name)}`).then((r) => r.set) });
+  const saveInfo = async (k: 'caption' | 'hashtags' | 'notes', v: string) => {
+    if ((info?.[k] ?? '') === v.trim()) return;
+    try { await api.put('/content/asset-sets', { name, [k]: v }); } catch (e) { toast((e as Error).message, 'error'); }
+  };
+  const saveOrder = async (next: ContentMediaDTO[]) => {
+    setOrder(next);
+    try { await api.post('/content/assets/order', { ids: next.map((m) => m.id) }); onChanged(); } catch (e) { toast((e as Error).message, 'error'); }
+  };
+  const r = useReorder(order, (n) => void saveOrder(n));
+  const rename = async () => {
+    const n = title.trim();
+    if (!n || n === name) { setTitle(name); return; }
+    try { await api.post('/content/asset-sets/rename', { from: name, to: n }); onRenamed(n); onChanged(); } catch (e) { toast((e as Error).message, 'error'); setTitle(name); }
+  };
+  const setType = async (t: string) => {
+    try { for (const m of order) await api.patch(`/content/assets/${m.id}`, { postType: t || null }); onChanged(); } catch (e) { toast((e as Error).message, 'error'); }
+  };
+  const takeOut = async (m: ContentMediaDTO) => {
+    if (!window.confirm(`Take ${m.title || 'this photo'} out of the set? It stays in Assets on its own.`)) return;
+    try { await api.patch(`/content/assets/${m.id}`, { group: null }); onChanged(); } catch (e) { toast((e as Error).message, 'error'); }
+  };
+  return (
+    <Modal open xl onClose={onClose} title={name} footer={<>
+      <Button className="mr-auto" icon={<Upload className="h-4 w-4" />} onClick={onAddPhotos}>Add photos</Button>
+      <a className={buttonClass('secondary')} href={`/api/content/assets/group-download?group=${encodeURIComponent(name)}`}><Download className="h-4 w-4" /><span className="btn-label">Download in order</span></a>
+      <Button variant="primary" onClick={onClose}>Done</Button>
+    </>}>
+      <div className="mb-4 grid gap-3 sm:grid-cols-2">
+        <Field label="Set name"><input className="field" value={title} onChange={(e) => setTitle(e.target.value)} onBlur={rename} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} /></Field>
+        <Field label="Type of post"><select className="field" defaultValue={order[0]?.postType ?? ''} onChange={(e) => setType(e.target.value)}><option value="">—</option>{POST_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select></Field>
+      </div>
+      {info && (
+        <div key={name} className="mb-4 grid gap-3 rounded-xl border border-line bg-mist/30 p-3 sm:grid-cols-2">
+          <Field label="Caption" className="sm:col-span-2"><textarea className="field min-h-[90px]" maxLength={2200} defaultValue={info.caption ?? ''} onBlur={(e) => saveInfo('caption', e.target.value)} placeholder="The caption stylists post with it" /></Field>
+          <Field label="Hashtags"><input className="field" defaultValue={info.hashtags ?? ''} onBlur={(e) => saveInfo('hashtags', e.target.value)} placeholder="#addendumsalon" /></Field>
+          <Field label="How to use it"><input className="field" defaultValue={info.notes ?? ''} onBlur={(e) => saveInfo('notes', e.target.value)} placeholder="e.g. Post Fri–Sun, tag @addendum.salon" /></Field>
+        </div>
+      )}
+      <p className="mb-2 text-[13px] text-stone">Drag to rearrange (or use the arrows) — downloads and stylists’ copies follow this order. Tap a photo for its details.</p>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
+        {order.map((m, i) => (
+          <div key={m.id} {...r.props(i)} className={cx('relative cursor-grab overflow-hidden rounded-xl border bg-white active:cursor-grabbing', r.over === i && r.dragging !== i ? 'border-plum ring-2 ring-plum/40' : 'border-line', r.dragging === i && 'opacity-40')}>
+            <button type="button" className="block w-full" onClick={() => onOpenSlide(m.id)}>
+              {m.mime.startsWith('video/') ? <video src={m.url} muted playsInline preload="metadata" className="pointer-events-none aspect-[4/5] w-full object-cover" /> : <img src={m.url} alt="" draggable={false} className="pointer-events-none aspect-[4/5] w-full object-cover" />}
+            </button>
+            <span className="absolute left-2 top-2 rounded-full bg-ink/80 px-2 py-0.5 text-[11px] font-medium text-white">{i + 1}</span>
+            <span className="absolute inset-x-2 bottom-2 flex items-center justify-between">
+              <button type="button" disabled={i === 0} onClick={() => r.move(i, i - 1)} className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 shadow disabled:opacity-30" aria-label="Earlier"><ChevronLeft className="h-4 w-4" /></button>
+              <button type="button" onClick={() => takeOut(m)} className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 shadow" aria-label="Take out of the set" title="Take out of the set"><X className="h-4 w-4" /></button>
+              <button type="button" disabled={i === order.length - 1} onClick={() => r.move(i, i + 1)} className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 shadow disabled:opacity-30" aria-label="Later"><ChevronRight className="h-4 w-4" /></button>
+            </span>
+          </div>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+const ONE: Record<PostType, string> = { post: 'Post', carousel: 'Carousel', reel: 'Reel', story: 'Story' };
+const typeLabel = (t: PostType | null | undefined) => (t ? ONE[t] : null);
 
 /** A gallery tile: the photo or video, its type, title and description, and a download button. */
 function Tile({ m, slide, onOpen, onMove }: { m: ContentMediaDTO; slide: number | null; onOpen: () => void; onMove?: (d: -1 | 1) => void }) {
@@ -217,7 +331,7 @@ function AssetDetails({ m, b, onClose, onAddPhotos, nav }: { m: ContentMediaDTO;
           <Field label="Title"><input className="field" value={d.title} onChange={(e) => setD({ ...d, title: e.target.value })} /></Field>
           <Field label="Description" hint="What it is and how to use it — e.g. “Slide 2 of the holiday carousel: before & after.”"><textarea className="field min-h-[80px]" value={d.description} onChange={(e) => setD({ ...d, description: e.target.value })} /></Field>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Type of post"><select className="field" value={d.postType} onChange={(e) => setD({ ...d, postType: e.target.value })}><option value="">—</option>{POST_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label.replace(/s$/, '')}</option>)}</select></Field>
+            <Field label="Type of post"><select className="field" value={d.postType} onChange={(e) => setD({ ...d, postType: e.target.value })}><option value="">—</option>{POST_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select></Field>
             <Field label="Group" hint="A carousel set or campaign"><input className="field" list="asset-groups" value={d.group} onChange={(e) => setD({ ...d, group: e.target.value })} placeholder="e.g. Holiday 2026" /></Field>
           </div>
           <Field label="Stylists can download" hint="Shows in every stylist’s My Content → Salon downloads.">
@@ -290,7 +404,7 @@ function LinkEditor({ link, onClose }: { link: AssetLink | null; onClose: () => 
         )}
         <Field label="Name"><input className="field" value={d.title} onChange={(e) => setD({ ...d, title: e.target.value })} placeholder="e.g. Holiday story templates" /></Field>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Type of post"><select className="field" value={d.postType} onChange={(e) => setD({ ...d, postType: e.target.value })}><option value="">—</option>{POST_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label.replace(/s$/, '')}</option>)}</select></Field>
+          <Field label="Type of post"><select className="field" value={d.postType} onChange={(e) => setD({ ...d, postType: e.target.value })}><option value="">—</option>{POST_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select></Field>
           <Field label="Group"><input className="field" list="asset-groups" value={d.group} onChange={(e) => setD({ ...d, group: e.target.value })} placeholder="e.g. Holiday 2026" /></Field>
         </div>
         <label className="flex items-center gap-2 text-[14px]"><input type="checkbox" className="h-4 w-4 accent-plum" checked={d.stylists} onChange={(e) => setD({ ...d, stylists: e.target.checked })} />Stylists can open it (My Content → Salon downloads)</label>
@@ -299,55 +413,61 @@ function LinkEditor({ link, onClose }: { link: AssetLink | null; onClose: () => 
   );
 }
 
-/** Several photos at once: put them in order (a carousel's slides), then give them a group and type of post. */
-function UploadBatch({ initial, groups, existing, onClose }: { initial: { files: File[]; group: string; postType: string }; groups: string[]; existing: ContentMediaDTO[]; onClose: () => void }) {
+/** Several photos at once become a set (a carousel, a story set…): name it, arrange the order (drag or arrows), upload. */
+function UploadBatch({ initial, groups, existing, onClose }: { initial: { files: File[]; group: string; postType: string }; groups: string[]; existing: ContentMediaDTO[]; onClose: (madeSet?: string) => void }) {
   const toast = useToast();
-  const [files, setFiles] = useState(initial.files);
-  const [group, setGroup] = useState(initial.group);
+  // Each file with its preview, made once (and released when the window closes).
+  const [items, setItems] = useState(() => initial.files.map((f) => ({ f, url: URL.createObjectURL(f) })));
+  const urls = useRef(items.map((x) => x.url));
+  useEffect(() => () => urls.current.forEach((u) => URL.revokeObjectURL(u)), []);
   const [postType, setPostType] = useState(initial.postType || (initial.files.length > 1 ? 'carousel' : ''));
+  const auto = () => `${ONE[(postType || 'carousel') as PostType]} · ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+  const [group, setGroup] = useState(initial.group);
   const [done, setDone] = useState(0);
   const [busy, setBusy] = useState(false);
-  const previews = useMemo(() => files.map((f) => ({ f, url: URL.createObjectURL(f) })), [files]);
-  useEffect(() => () => previews.forEach((p) => URL.revokeObjectURL(p.url)), [previews]);
-  const move = (i: number, d: -1 | 1) => { const n = [...files]; const j = i + d; if (j < 0 || j >= n.length) return; [n[i], n[j]] = [n[j], n[i]]; setFiles(n); };
+  const r = useReorder(items, setItems);
   const go = async () => {
+    // Several photos are always a set — named by you, or after the type and day.
+    const name = (group.trim() || (items.length > 1 ? auto() : '')).slice(0, 80);
     setBusy(true);
     const ids: string[] = [];
-    for (const f of files) {
+    for (const { f } of items) {
       try {
-        const r = await api.upload<{ media: ContentMediaDTO }>('/content/media', f);
-        if (group.trim() || postType) await api.patch(`/content/assets/${r.media.id}`, { group: group.trim() || null, postType: (postType || null) as PostType | null });
-        ids.push(r.media.id);
+        const res = await api.upload<{ media: ContentMediaDTO }>('/content/media', f);
+        if (name || postType) await api.patch(`/content/assets/${res.media.id}`, { group: name || null, postType: (postType || null) as PostType | null });
+        ids.push(res.media.id);
       } catch (e) { toast(`${f.name}: ${(e as Error).message}`, 'error'); }
       setDone((n) => n + 1);
     }
-    // The order: what was already in the group, then these as picked.
-    if (group.trim() && ids.length) await api.post('/content/assets/order', { ids: [...existing.map((m) => m.id), ...ids] }).catch(() => undefined);
-    toast(`${ids.length} uploaded${group.trim() ? ` to ${group.trim()}` : ''}`);
-    onClose();
+    if (name && ids.length) await api.post('/content/assets/order', { ids: [...existing.map((m) => m.id), ...ids] }).catch(() => undefined);
+    toast(`${ids.length} uploaded${name ? ` to ${name}` : ''}`);
+    onClose(name || undefined);
   };
   return (
-    <Modal open wide onClose={() => !busy && onClose()} title={`Upload ${files.length} photo${files.length === 1 ? '' : 's'}`} footer={<>
-      <Button variant="ghost" disabled={busy} onClick={onClose}>Cancel</Button>
-      <Button variant="primary" loading={busy} disabled={!files.length} onClick={go}>{busy ? `${done} of ${files.length}…` : 'Upload'}</Button>
+    <Modal open wide onClose={() => !busy && onClose()} title={existing.length ? `Add ${items.length} to ${initial.group}` : `Upload ${items.length} photo${items.length === 1 ? '' : 's'}`} footer={<>
+      <Button variant="ghost" disabled={busy} onClick={() => onClose()}>Cancel</Button>
+      <Button variant="primary" loading={busy} disabled={!items.length} onClick={go}>{busy ? `${done} of ${items.length}…` : items.length > 1 && !existing.length ? 'Upload as a set' : 'Upload'}</Button>
     </>}>
       <div className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Group" hint={existing.length ? `Added after the ${existing.length} already in it` : 'Optional — a carousel set or campaign'}><input className="field" list="asset-groups" value={group} onChange={(e) => setGroup(e.target.value)} placeholder="e.g. Holiday carousel" /></Field>
-          <Field label="Type of post"><select className="field" value={postType} onChange={(e) => setPostType(e.target.value)}><option value="">—</option>{POST_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label.replace(/s$/, '')}</option>)}</select></Field>
-        </div>
+        {!existing.length && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Set name" hint={items.length > 1 ? 'They stay together as one set, in this order' : 'Optional'}><input className="field" list="asset-groups" value={group} onChange={(e) => setGroup(e.target.value)} placeholder={items.length > 1 ? auto() : 'e.g. Holiday carousel'} /></Field>
+            <Field label="Type of post"><select className="field" value={postType} onChange={(e) => setPostType(e.target.value)}><option value="">—</option>{POST_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</select></Field>
+          </div>
+        )}
         <datalist id="asset-groups-batch">{groups.map((g) => <option key={g} value={g} />)}</datalist>
         <div>
-          <p className="label">Order {files.length > 1 && <span className="font-normal text-stone">— the carousel’s slide order; downloads follow it</span>}</p>
+          <p className="label">Order <span className="font-normal text-stone">— drag to rearrange (or use the arrows)</span></p>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-            {previews.map((p, i) => (
-              <div key={p.url} className="relative overflow-hidden rounded-lg border border-line">
-                {p.f.type.startsWith('video/') ? <video src={p.url} muted className="aspect-[4/5] w-full object-cover" /> : <img src={p.url} alt="" className="aspect-[4/5] w-full object-cover" />}
+            {items.map((p, i) => (
+              <div key={p.url} {...(busy ? {} : r.props(i))} className={cx('relative cursor-grab overflow-hidden rounded-lg border bg-mist active:cursor-grabbing', r.over === i && r.dragging !== i ? 'border-plum ring-2 ring-plum/40' : 'border-line', r.dragging === i && 'opacity-40')}>
+                {p.f.type.startsWith('video/') ? <video src={p.url} muted playsInline preload="metadata" className="pointer-events-none aspect-[4/5] w-full object-cover" />
+                  : <img src={p.url} alt="" draggable={false} className="pointer-events-none aspect-[4/5] w-full object-cover" />}
                 <span className="absolute left-1 top-1 rounded-full bg-ink/80 px-1.5 text-[11px] text-white">{existing.length + i + 1}</span>
                 <span className="absolute inset-x-1 bottom-1 flex justify-between">
-                  <button type="button" disabled={busy || i === 0} onClick={() => move(i, -1)} className="flex h-7 w-7 items-center justify-center rounded-full bg-white/90 shadow disabled:opacity-30" aria-label="Earlier"><ChevronLeft className="h-4 w-4" /></button>
-                  <button type="button" disabled={busy} onClick={() => setFiles(files.filter((_, k) => k !== i))} className="flex h-7 w-7 items-center justify-center rounded-full bg-white/90 shadow" aria-label="Leave out"><Trash2 className="h-3.5 w-3.5" /></button>
-                  <button type="button" disabled={busy || i === files.length - 1} onClick={() => move(i, 1)} className="flex h-7 w-7 items-center justify-center rounded-full bg-white/90 shadow disabled:opacity-30" aria-label="Later"><ChevronRight className="h-4 w-4" /></button>
+                  <button type="button" disabled={busy || i === 0} onClick={() => r.move(i, i - 1)} className="flex h-7 w-7 items-center justify-center rounded-full bg-white/90 shadow disabled:opacity-30" aria-label="Earlier"><ChevronLeft className="h-4 w-4" /></button>
+                  <button type="button" disabled={busy} onClick={() => setItems(items.filter((_, k) => k !== i))} className="flex h-7 w-7 items-center justify-center rounded-full bg-white/90 shadow" aria-label="Leave out"><Trash2 className="h-3.5 w-3.5" /></button>
+                  <button type="button" disabled={busy || i === items.length - 1} onClick={() => r.move(i, i + 1)} className="flex h-7 w-7 items-center justify-center rounded-full bg-white/90 shadow disabled:opacity-30" aria-label="Later"><ChevronRight className="h-4 w-4" /></button>
                 </span>
               </div>
             ))}

@@ -163,7 +163,7 @@ export async function setHandle(u: Who, raw: string | null) {
 // ---------------- salon downloads ----------------
 /** Posts and stories the salon shares with stylists (Content Calendar → Assets → "Stylists can download"). */
 export async function salonDownloads() {
-  const rows = await db().query<any>(`SELECT id, mime, name, size, title, tags, stylist_share, group_name, description, created_at FROM content_media WHERE stylist_share IS NOT NULL ORDER BY group_name NULLS LAST, position NULLS LAST, created_at LIMIT 300`);
+  const rows = await db().query<any>(`SELECT id, mime, name, size, title, tags, stylist_share, group_name, description, created_at FROM content_media WHERE stylist_share IS NOT NULL AND group_name IS NULL ORDER BY created_at DESC LIMIT 300`);
   return rows.map((m) => ({ id: m.id as string, kind: m.stylist_share as 'post' | 'story', title: (m.title ?? m.name ?? null) as string | null, mime: m.mime as string, size: m.size as number,
     group: (m.group_name ?? null) as string | null, description: (m.description ?? null) as string | null, url: `/api/my-content/downloads/${m.id}`, createdAt: new Date(m.created_at).toISOString() }));
 }
@@ -249,4 +249,38 @@ export async function teamIdeas(u: Who) {
     WHERE p.shared_at IS NOT NULL ORDER BY p.shared_at DESC LIMIT 200`);
   return rows.map((r) => ({ id: r.id as string, title: r.title as string, format: r.format as (typeof FORMATS)[number], caption: r.caption, hashtags: r.hashtags, notes: r.notes,
     author: (r.name as string).split(/\s+/)[0], mine: r.staff_id === u.id, sharedAt: new Date(r.shared_at).toISOString() }));
+}
+
+/**
+ * The salon's ready-made posts for stylists: each shared set with its photos in order, caption, hashtags and notes.
+ * (Photos not in a set are listed with the downloads.)
+ */
+export async function salonPosts() {
+  const files = await db().query<any>(`SELECT id, mime, title, group_name, stylist_share, post_type FROM content_media WHERE stylist_share IS NOT NULL AND group_name IS NOT NULL
+    ORDER BY group_name, position NULLS LAST, created_at`);
+  const names = [...new Set(files.map((f) => f.group_name as string))];
+  const info = new Map((await db().query<any>('SELECT * FROM content_asset_sets WHERE name = ANY($1)', [names])).map((r) => [r.name as string, r]));
+  return names.map((n) => {
+    const list = files.filter((f) => f.group_name === n);
+    const i = info.get(n);
+    return {
+      name: n, kind: (list[0].stylist_share === 'story' ? 'story' : 'post') as 'post' | 'story', postType: (list[0].post_type ?? null) as string | null,
+      caption: (i?.caption ?? null) as string | null, hashtags: (i?.hashtags ?? null) as string | null, notes: (i?.notes ?? null) as string | null,
+      files: list.map((f) => ({ id: f.id as string, mime: f.mime as string, url: `/api/my-content/downloads/${f.id}` })),
+    };
+  });
+}
+/** "Plan this post": a salon set becomes a post in their plan — its caption and photos (copied into their own storage). */
+export async function planSalonPost(name: string, u: Who) {
+  const p = (await salonPosts()).find((x) => x.name === name);
+  if (!p) throw notFound('That post');
+  const format = p.kind === 'story' ? 'story' : p.postType === 'reel' ? 'reel' : p.files.length > 1 ? 'carousel' : 'post';
+  const post = await createPost({ title: name, format, caption: p.caption, hashtags: p.hashtags, notes: p.notes }, u);
+  const { Readable } = await import('node:stream');
+  const { receiveUpload } = await import('./transformations.js');
+  for (const f of p.files) {
+    const m = await db().one<{ bytes: Buffer }>('SELECT bytes FROM content_media WHERE id = $1', [f.id]);
+    if (m) await addUpload(post.id, () => receiveUpload(Readable.from([Buffer.from(m.bytes)])), u);
+  }
+  return getPost(post.id, u);
 }

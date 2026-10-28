@@ -1,7 +1,7 @@
 import express, { Router } from 'express';
 import { z } from 'zod';
 import {
-  addFromTransformation, addUpload, addSharedLink, postFromTransformation, teamIdeas, removeSharedLink, salonDownload, salonDownloads, salonIdeas, stylistLinks, createPost, deletePost, FORMATS, getHandle, getPost, listPosts, mediaFile, myTransformationPhotos, removeMedia, setHandle, setThumb, STATUSES, updatePost,
+  addFromTransformation, addUpload, addSharedLink, planSalonPost, postFromTransformation, salonPosts, teamIdeas, removeSharedLink, salonDownload, salonDownloads, salonIdeas, stylistLinks, createPost, deletePost, FORMATS, getHandle, getPost, listPosts, mediaFile, myTransformationPhotos, removeMedia, setHandle, setThumb, STATUSES, updatePost,
 } from '../domain/myContent.js';
 import { receiveUpload } from '../domain/transformations.js';
 import { can } from '../auth/permissions.js';
@@ -39,6 +39,8 @@ myContentRouter.delete(`/links/:lid${ID}`, ah(async (req, res) => {
 }));
 myContentRouter.get('/downloads', ah(async (_req, res) => res.json({ downloads: await salonDownloads() })));
 // A shared group (e.g. a carousel) as a ZIP, in the salon's order — only what's shared with stylists.
+myContentRouter.get('/salon-posts', ah(async (_req, res) => res.json({ posts: await salonPosts() })));
+myContentRouter.post('/salon-posts/plan', ah(async (req, res) => res.status(201).json({ post: await planSalonPost(parse(z.object({ name: z.string().min(1).max(80) }), req.body).name, req.user!) })));
 myContentRouter.get('/downloads/group', ah(async (req, res) => {
   const { assetGroupZip } = await import('../domain/content.js');
   const z1 = await assetGroupZip(String(req.query.group ?? '').slice(0, 80), true);

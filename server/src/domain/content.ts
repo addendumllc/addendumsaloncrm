@@ -841,6 +841,8 @@ export async function assetGroupZip(group: string, onlyShared = false) {
       used.add(name);
       await zip.add(name, Buffer.from(r.bytes));
     }
+    const info = await setInfo(group);
+    if (captionText(info)) await zip.add(`${folder}/Caption.txt`, Buffer.from(captionText(info).replace(/\n/g, '\r\n'), 'utf8'));
     if (links.length) await zip.add(`${folder}/Links.txt`, Buffer.from(links.map((l) => `${l.title}\r\n${l.url}\r\n`).join('\r\n'), 'utf8'));
     await zip.close();
   } catch (e) { await zip.abort(); throw e; }
@@ -850,4 +852,34 @@ export async function assetGroupZip(group: string, onlyShared = false) {
 /** The order of assets in a group (a carousel's slides): ids in order. */
 export async function orderAssets(ids: string[]) {
   await db().tx(async (q) => { for (const [i, id] of ids.entries()) await q.query('UPDATE content_media SET position = $2 WHERE id = $1', [id, i + 1]); });
+}
+
+// ---------------- sets as post ideas ----------------
+export interface AssetSetInfo { name: string; caption: string | null; hashtags: string | null; notes: string | null }
+export async function setInfo(name: string): Promise<AssetSetInfo> {
+  const r = await db().one<any>('SELECT * FROM content_asset_sets WHERE name = $1', [name]);
+  return { name, caption: r?.caption ?? null, hashtags: r?.hashtags ?? null, notes: r?.notes ?? null };
+}
+export async function saveSetInfo(name: string, b: { caption?: string | null; hashtags?: string | null; notes?: string | null }) {
+  const cur = await setInfo(name);
+  const pick = (v: string | null | undefined, old: string | null) => (v === undefined ? old : v?.trim() || null);
+  await db().query(`INSERT INTO content_asset_sets(name, caption, hashtags, notes) VALUES ($1,$2,$3,$4)
+    ON CONFLICT (name) DO UPDATE SET caption = $2, hashtags = $3, notes = $4, updated_at = now()`, [name, pick(b.caption, cur.caption), pick(b.hashtags, cur.hashtags), pick(b.notes, cur.notes)]);
+  return setInfo(name);
+}
+/** Renames a set: its photos, its caption and notes. */
+export async function renameSet(from: string, to: string) {
+  const n = to.trim().slice(0, 80);
+  if (!n) throw badRequest('Name the set.');
+  if (n === from) return;
+  if (await db().one('SELECT 1 FROM content_media WHERE group_name = $1 LIMIT 1', [n])) throw badRequest('There’s already a set with that name.');
+  await db().tx(async (q) => {
+    await q.query('UPDATE content_media SET group_name = $2 WHERE group_name = $1', [from, n]);
+    await q.query('DELETE FROM content_asset_sets WHERE name = $1', [n]);
+    await q.query('UPDATE content_asset_sets SET name = $2 WHERE name = $1', [from, n]);
+  });
+}
+/** Caption.txt for a set's download: the caption, hashtags and how to use it. */
+export function captionText(i: AssetSetInfo) {
+  return [i.caption, i.hashtags, i.notes && `---\nHow to use it: ${i.notes}`].filter(Boolean).join('\n\n');
 }

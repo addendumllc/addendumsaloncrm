@@ -440,6 +440,17 @@ function SalonDownloads() {
   const { data } = useQuery({ queryKey: ['my-content-downloads'], queryFn: () => api.get<{ downloads: SalonFile[] }>('/my-content/downloads').then((r) => r.downloads), staleTime: 5 * 60_000 });
   const [kind, setKind] = useState<'post' | 'story'>('post');
   const list = (data ?? []).filter((x) => x.kind === kind);
+  // Ready-made posts (the salon's sets): photos in order with a caption, to download, copy or plan.
+  const { data: posts } = useQuery({ queryKey: ['my-content-salon-posts'], queryFn: () => api.get<{ posts: SalonPost[] }>('/my-content/salon-posts').then((r) => r.posts), staleTime: 5 * 60_000 });
+  const shownPosts = (posts ?? []).filter((p) => p.kind === kind);
+  const go = useNavigate();
+  const [planning, setPlanning] = useState<string | null>(null);
+  const plan = async (p: SalonPost) => {
+    setPlanning(p.name);
+    try { const r = await api.post<{ post: { id: string } }>('/my-content/salon-posts/plan', { name: p.name }); go(`/my-content?open=${r.post.id}`); toast('Added to your plan'); }
+    catch (e) { toast((e as Error).message, 'error'); } finally { setPlanning(null); }
+  };
+  const copyCaption = async (p: SalonPost) => { try { await navigator.clipboard.writeText([p.caption, p.hashtags].filter(Boolean).join('\n\n')); toast('Caption copied'); } catch { toast('Couldn’t copy.', 'error'); } };
   const qc = useQueryClient();
   const canManage = useCanDo()('content:manage');
   const { data: links } = useQuery({ queryKey: ['my-content-links'], queryFn: () => api.get<{ links: SharedLink[] }>('/my-content/links').then((r) => r.links), staleTime: 5 * 60_000 });
@@ -478,8 +489,36 @@ function SalonDownloads() {
           {canManage && <Button size="sm" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setAdding(true)}>Add a Canva link</Button>}
         </div>
       )}
+      {shownPosts.length > 0 && (
+        <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {shownPosts.map((p) => (
+            <article key={p.name} className="panel overflow-hidden !p-0">
+              <div className="flex gap-0.5 overflow-x-auto bg-mist scrollbar-none">
+                {p.files.map((f, i) => (
+                  <span key={f.id} className="relative w-[46%] shrink-0">
+                    {f.mime.startsWith('video/') ? <video src={f.url} muted playsInline preload="metadata" className={cx('w-full object-cover', p.kind === 'story' ? 'aspect-[9/16]' : 'aspect-[4/5]')} />
+                      : <img src={f.url} alt="" loading="lazy" className={cx('w-full object-cover', p.kind === 'story' ? 'aspect-[9/16]' : 'aspect-[4/5]')} />}
+                    {p.files.length > 1 && <span className="absolute left-1.5 top-1.5 rounded-full bg-ink/80 px-1.5 text-[11px] text-white">{i + 1}</span>}
+                  </span>
+                ))}
+              </div>
+              <div className="space-y-2 p-3">
+                <p className="text-[15px] font-medium text-ink">{p.name} <span className="text-[12px] font-normal text-stone">· {p.files.length} {p.files.length === 1 ? 'photo' : 'photos'}</span></p>
+                {p.caption && <p className="line-clamp-3 whitespace-pre-wrap text-[13px] text-ink-soft">{p.caption}</p>}
+                {p.hashtags && <p className="truncate text-[12px] text-plum">{p.hashtags}</p>}
+                {p.notes && <p className="text-[12px] text-stone">{p.notes}</p>}
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  <a className={buttonClass('secondary', 'sm')} href={`/api/my-content/downloads/group?group=${encodeURIComponent(p.name)}`}><Download className="h-3.5 w-3.5" /><span className="btn-label">Download post</span></a>
+                  {(p.caption || p.hashtags) && <Button size="sm" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copyCaption(p)}>Copy caption</Button>}
+                  <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} loading={planning === p.name} onClick={() => plan(p)}>Plan this post</Button>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
       {adding && <AddLink kind={kind} onClose={() => { setAdding(false); void qc.invalidateQueries({ queryKey: ['my-content-links'] }); }} />}
-      {!data ? <PageLoading /> : !list.length ? (!shownLinks.length && <p className="text-[13px] text-stone">Nothing here yet — the salon adds {kind === 'post' ? 'posts' : 'stories'} for you to share.</p>) : (
+      {!data ? <PageLoading /> : !list.length ? (!shownLinks.length && !shownPosts.length && <p className="text-[13px] text-stone">Nothing here yet — the salon adds {kind === 'post' ? 'posts' : 'stories'} for you to share.</p>) : (
         <div className="space-y-4">{[...new Set(list.map((x) => x.group ?? ''))].map((g) => (
           <div key={g || 'other'}>
             {g && <div className="mb-1.5 flex items-center gap-2"><h3 className="text-[13px] font-semibold text-ink">{g}</h3>
@@ -628,3 +667,5 @@ function TeamIdeas({ onUse }: { onUse: (d: Draft) => void }) {
     </section>
   );
 }
+
+interface SalonPost { name: string; kind: 'post' | 'story'; postType: string | null; caption: string | null; hashtags: string | null; notes: string | null; files: { id: string; mime: string; url: string }[] }

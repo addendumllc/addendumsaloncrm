@@ -57,7 +57,9 @@ export function createApp() {
           'script-src': ["'self'"],
           'style-src': ["'self'", "'unsafe-inline'"],
           // Product photos from the listings: Shopify's CDN and Square's catalog image storage.
-          'img-src': ["'self'", 'data:', 'https://cdn.shopify.com', 'https://items-images-production.s3.us-west-2.amazonaws.com', 'https://items-images-sandbox.s3.us-west-2.amazonaws.com',
+          // blob: previews of photos picked for upload (shown before they're sent).
+          'media-src': ["'self'", 'blob:'],
+          'img-src': ["'self'", 'data:', 'blob:', 'https://cdn.shopify.com', 'https://items-images-production.s3.us-west-2.amazonaws.com', 'https://items-images-sandbox.s3.us-west-2.amazonaws.com',
             // Instagram preview thumbnails returned by Meta's oEmbed (shown from Instagram, never copied).
             'https://*.cdninstagram.com', 'https://*.fbcdn.net'],
           'font-src': ["'self'", 'data:'],

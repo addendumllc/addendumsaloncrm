@@ -140,7 +140,7 @@ describe('My Content (a stylist’s own Instagram plan)', () => {
     const forStylists = (await jen.get('/api/my-content/links')).body.links.map((l: any) => [l.title, l.kind]);
     expect(forStylists).toContainEqual(['Holiday story template', 'story']);
     expect(forStylists.map((x: any) => x[0])).not.toContain('Internal only');
-    expect((await jen.get('/api/my-content/downloads')).body.downloads.filter((d: any) => d.group === 'Holiday 2026')).toHaveLength(2);
+    expect((await jen.get('/api/my-content/salon-posts')).body.posts.find((p: any) => p.name === 'Holiday 2026').files).toHaveLength(2);
     // The group as a ZIP: both files and the links.
     const zip = await owner.file(`/api/content/assets/group-download?group=${encodeURIComponent('Holiday 2026')}`);
     expect(zip.status).toBe(200);
@@ -185,7 +185,21 @@ describe('My Content (a stylist’s own Instagram plan)', () => {
     expect(zip.indexOf('02_First.png')).toBeLessThan(zip.indexOf('03_Second.png'));
     const forJen = (await jen.file(`/api/my-content/downloads/group?group=${encodeURIComponent('Spring carousel')}`)).body.toString('latin1');
     expect(forJen).toContain('01_Third.png');
-    expect((await jen.get('/api/my-content/downloads')).body.downloads.filter((d: any) => d.group === 'Spring carousel').map((d: any) => d.title)).toEqual(['Third', 'First', 'Second']);
+    const post = (await jen.get('/api/my-content/salon-posts')).body.posts.find((p: any) => p.name === 'Spring carousel');
+    expect(post.files.map((f: any) => f.id)).toEqual([c.id, a.id, b.id]);
+    // A ready-made post: its caption travels with the download, and Plan this post puts it in her plan with the photos.
+    await owner.put('/api/content/asset-sets', { name: 'Spring carousel', caption: 'Spring is here', hashtags: '#spring', notes: 'Post on a Friday' });
+    expect((await jen.get('/api/my-content/salon-posts')).body.posts.find((p: any) => p.name === 'Spring carousel')).toMatchObject({ caption: 'Spring is here', hashtags: '#spring', notes: 'Post on a Friday' });
+    expect((await jen.file(`/api/my-content/downloads/group?group=${encodeURIComponent('Spring carousel')}`)).body.toString('latin1')).toContain('Caption.txt');
+    const planned = await jen.post('/api/my-content/salon-posts/plan', { name: 'Spring carousel' });
+    expect(planned.status).toBe(201);
+    expect(planned.body.post).toMatchObject({ format: 'carousel', caption: 'Spring is here', hashtags: '#spring' });
+    expect(planned.body.post.media).toHaveLength(3);
+    expect((await jen.file(planned.body.post.media[0].originalUrl)).body.equals(png(5))).toBe(true); // Third first
+    // Renaming the set keeps its photos and caption together.
+    expect((await owner.post('/api/content/asset-sets/rename', { from: 'Spring carousel', to: 'Spring 2027' })).status).toBe(200);
+    expect((await owner.get(`/api/content/asset-sets?name=${encodeURIComponent('Spring 2027')}`)).body.set.caption).toBe('Spring is here');
+    expect((await jen.put('/api/content/asset-sets', { name: 'x', caption: 'y' })).status).toBe(403);
     const one = await owner.file(`/api/content/media/${a.id}?download`);
     expect(one.headers['content-disposition']).toContain('First.png');
   });
