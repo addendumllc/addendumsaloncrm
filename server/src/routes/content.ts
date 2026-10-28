@@ -164,7 +164,7 @@ contentRouter.get('/assets', ah(async (req, res) => {
   res.json({ assets: await listAssets(who(req), { ...q, approved: q.approved == null ? undefined : q.approved === 'true' }) });
 }));
 contentRouter.patch('/assets/:id', ah(async (req, res) => {
-  await updateAsset(who(req), req.params.id, parse(z.object({ title: text(200).optional(), tags: z.array(z.string().max(40)).max(30).optional(), account: account.nullable().optional(), approved: z.boolean().optional() }), req.body) as any);
+  await updateAsset(who(req), req.params.id, parse(z.object({ title: text(200).optional(), tags: z.array(z.string().max(40)).max(30).optional(), account: account.nullable().optional(), approved: z.boolean().optional(), stylistShare: z.enum(['post', 'story']).nullable().optional() }), req.body) as any);
   res.json({ ok: true });
 }));
 contentRouter.delete('/assets/:id', ah(async (req, res) => { await deleteAsset(req.params.id); res.json({ ok: true }); }));

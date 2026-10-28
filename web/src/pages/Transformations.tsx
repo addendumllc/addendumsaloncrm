@@ -102,6 +102,9 @@ export function TransformationsPage() {
   const [confirming, setConfirming] = useState<Appt | null>(null);
   const openParam = params.get('open');
   useEffect(() => { if (openParam) setOpen(openParam); }, [openParam]);
+  // ?new=1 (e.g. from My Content): start a new one.
+  const newParam = params.get('new');
+  useEffect(() => { if (newParam) setEdit('new'); }, [newParam]);
   const editParam = params.get('edit');
   useEffect(() => {
     if (editParam) api.get<{ transformation: TransformationDTO }>(`/transformations/${editParam}`).then((r) => setEdit(r.transformation)).catch(() => undefined);

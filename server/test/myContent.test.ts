@@ -19,6 +19,7 @@ async function as(email: string) {
     post: (u: string, b: object = {}) => agent.post(u).set(H).send(b), patch: (u: string, b: object = {}) => agent.patch(u).set(H).send(b),
     put: (u: string, b: object = {}) => agent.put(u).set(H).send(b), del: (u: string) => agent.delete(u).set(H),
     upload: (u: string, bytes: Buffer) => agent.post(u).set(H).set('Content-Type', 'image/jpeg').send(bytes),
+    raw: agent,
   };
 }
 let jen: Awaited<ReturnType<typeof as>>, mike: typeof jen, owner: typeof jen, desk: typeof jen;
@@ -78,5 +79,23 @@ describe('My Content (a stylist’s own Instagram plan)', () => {
     expect((await jen.get('/api/my-content?from=2026-11-01&to=2026-11-30')).body.instagram).toBe('jenstyles');
     expect((await mike.get('/api/my-content?from=2026-11-01&to=2026-11-30')).body.instagram).toBeNull();
     expect((await jen.put('/api/my-content/instagram', { handle: 'not a name!' })).status).toBe(400);
+  });
+
+  it('salon downloads: posts and stories the salon shares, for every stylist to download', async () => {
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(100, 1)]);
+    const up = async (name: string) => (await (owner as any).raw.post('/api/content/media').set(H).set('content-type', 'image/png').set('x-file-name', name).send(png)).body.media;
+    const a = await up('Fall promo.png');
+    const b = await up('Story - holiday.png');
+    const hidden = await up('Not shared.png');
+    expect((await owner.patch(`/api/content/assets/${a.id}`, { stylistShare: 'post' })).status).toBe(200);
+    await owner.patch(`/api/content/assets/${b.id}`, { stylistShare: 'story' });
+    expect((await jen.patch(`/api/content/assets/${a.id}`, { stylistShare: null })).status).toBe(403); // stylists can't share or unshare
+    const d = (await jen.get('/api/my-content/downloads')).body.downloads;
+    expect(d.map((x: any) => [x.title, x.kind])).toEqual(expect.arrayContaining([['Fall promo', 'post'], ['Story - holiday', 'story']]));
+    expect(d.map((x: any) => x.id)).not.toContain(hidden.id);
+    const f = await jen.file(`/api/my-content/downloads/${a.id}?download`);
+    expect([f.status, f.headers['content-disposition']]).toEqual([200, expect.stringContaining('attachment')]);
+    expect((await jen.get(`/api/my-content/downloads/${hidden.id}`)).status).toBe(404); // only shared ones
+    expect((await desk.get('/api/my-content/downloads')).status).toBe(403);
   });
 });

@@ -156,3 +156,18 @@ export async function setHandle(u: Who, raw: string | null) {
   await setKV(handleKey(u.id), h || null);
   return h || null;
 }
+
+// ---------------- salon downloads ----------------
+/** Posts and stories the salon shares with stylists (Content Calendar → Assets → "Stylists can download"). */
+export async function salonDownloads() {
+  const rows = await db().query<any>(`SELECT id, mime, name, size, title, tags, stylist_share, created_at FROM content_media WHERE stylist_share IS NOT NULL ORDER BY created_at DESC LIMIT 300`);
+  return rows.map((m) => ({ id: m.id as string, kind: m.stylist_share as 'post' | 'story', title: (m.title ?? m.name ?? null) as string | null, mime: m.mime as string, size: m.size as number,
+    url: `/api/my-content/downloads/${m.id}`, createdAt: new Date(m.created_at).toISOString() }));
+}
+/** A shared file (only ones the salon has shared). */
+export async function salonDownload(id: string) {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw notFound('That download');
+  const m = await db().one<{ mime: string; bytes: Buffer; name: string | null; title: string | null }>('SELECT mime, bytes, name, title FROM content_media WHERE id = $1 AND stylist_share IS NOT NULL', [id]);
+  if (!m) throw notFound('That download');
+  return m;
+}

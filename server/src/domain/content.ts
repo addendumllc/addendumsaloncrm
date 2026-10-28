@@ -90,13 +90,13 @@ export async function checkMediaSignature(id: string, sig: string) {
   const want = sign(await mediaSecret(), id);
   return sig.length === want.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want));
 }
-const mediaDTO = (m: any): ContentMediaDTO => ({ id: m.id, mime: m.mime, name: m.name, size: m.size, url: `/api/content/media/${m.id}`, title: m.title ?? null, tags: m.tags ?? [], account: m.account ?? null, approved: !!m.approved, createdAt: iso(m.created_at) ?? undefined });
+const mediaDTO = (m: any): ContentMediaDTO => ({ id: m.id, mime: m.mime, name: m.name, size: m.size, url: `/api/content/media/${m.id}`, title: m.title ?? null, tags: m.tags ?? [], account: m.account ?? null, approved: !!m.approved, createdAt: iso(m.created_at) ?? undefined, stylistShare: m.stylist_share ?? null });
 export async function saveMedia(bytes: Buffer, mime: string, name: string | null, staffId: string | null, account: string | null = null): Promise<ContentMediaDTO> {
   const type = mime.toLowerCase().split(';')[0].trim();
   if (!MEDIA_TYPES.test(type)) throw badRequest('Photos (JPG, PNG, WebP, HEIC) or videos (MP4, MOV) only.');
   if (!bytes.length) throw badRequest('That file is empty.');
   if (bytes.length > (type.startsWith('video/') ? MEDIA_LIMITS.video : MEDIA_LIMITS.image)) throw badRequest(`Too big — ${type.startsWith('video/') ? 'videos up to 100 MB' : 'photos up to 15 MB'}.`);
-  const r = (await db().one<any>('INSERT INTO content_media(mime, name, bytes, size, created_by_staff_id, account, title) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, mime, name, size, title, tags, account, approved, created_at',
+  const r = (await db().one<any>('INSERT INTO content_media(mime, name, bytes, size, created_by_staff_id, account, title) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, mime, name, size, title, tags, account, approved, stylist_share, created_at',
     [type, name?.slice(0, 200) ?? null, bytes, bytes.length, staffId, ACCOUNT_IDS.includes(account as ContentAccountId) ? account : null, name ? name.replace(/\.[a-z0-9]+$/i, '').slice(0, 120) : null]))!;
   return mediaDTO(r);
 }
@@ -104,17 +104,18 @@ export async function readMedia(id: string) { return db().one<{ mime: string; by
 /** The asset library: files the person's accounts may use (an account's own, or shared), newest first. */
 export async function listAssets(u: Who, f: { q?: string; account?: string; tag?: string; approved?: boolean }) {
   const mine = await accountsFor(u);
-  const rows = await db().query<any>(`SELECT id, mime, name, size, title, tags, account, approved, created_at FROM content_media
+  const rows = await db().query<any>(`SELECT id, mime, name, size, title, tags, account, approved, stylist_share, created_at FROM content_media
      WHERE (account IS NULL OR account = ANY($1::text[])) ORDER BY created_at DESC LIMIT 500`, [mine]);
   const words = (f.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
   return rows.filter((m) => (!f.account || m.account === f.account || (f.account && !m.account)) && (!f.tag || (m.tags ?? []).includes(f.tag)) && (f.approved == null || m.approved === f.approved)
     && words.every((w) => `${m.title ?? ''} ${m.name ?? ''} ${(m.tags ?? []).join(' ')}`.toLowerCase().includes(w))).map(mediaDTO);
 }
-export async function updateAsset(u: Who, id: string, p: { title?: string | null; tags?: string[]; account?: ContentAccountId | null; approved?: boolean }) {
+export async function updateAsset(u: Who, id: string, p: { title?: string | null; tags?: string[]; account?: ContentAccountId | null; approved?: boolean; stylistShare?: 'post' | 'story' | null }) {
   if (p.approved !== undefined && !has(u, 'content:approve')) throw forbidden('Only people who approve content can mark assets approved.');
   if (p.account) await assertAccount(u, p.account);
   await db().query(`UPDATE content_media SET title = COALESCE($2, title), tags = COALESCE($3, tags), account = CASE WHEN $4 THEN $5 ELSE account END, approved = COALESCE($6, approved) WHERE id = $1`,
     [id, p.title ?? null, p.tags ? [...new Set(p.tags.map((t) => t.trim().toLowerCase()).filter(Boolean))] : null, p.account !== undefined, p.account ?? null, p.approved ?? null]);
+  if (p.stylistShare !== undefined) await db().query('UPDATE content_media SET stylist_share = $2 WHERE id = $1', [id, p.stylistShare]);
 }
 export async function deleteAsset(id: string) {
   const used = await db().one('SELECT 1 FROM content_posts WHERE $1 = ANY(media_ids) LIMIT 1', [id]);

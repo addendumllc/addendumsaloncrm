@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarDays, ChevronLeft, ChevronRight, Copy, Film, Grid3x3, ImagePlus, Instagram, LayoutList, Lock, Play, Plus, Send, Trash2, Upload, X } from 'lucide-react';
+import { Camera, Download, Info, Share2, CalendarDays, ChevronLeft, ChevronRight, Copy, Film, Grid3x3, ImagePlus, Instagram, LayoutList, Lock, Play, Plus, Send, Trash2, Upload, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import { TransformationsDue } from '../components/domain/TransformationsDue';
 import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, Segmented, Spinner, buttonClass, chipClass, cx, useToast } from '../components/ui';
 
 type Format = 'post' | 'reel' | 'story' | 'carousel';
@@ -62,6 +64,13 @@ export function MyContentPage() {
           <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEdit({ date: null })}>New post</Button>
         </>} />
 
+      <p className="mb-5 flex items-start gap-2 rounded-xl2 border border-line bg-mist/50 px-4 py-3 text-[13px] text-ink-soft">
+        <Info className="mt-0.5 h-4 w-4 shrink-0 text-stone" />
+        <span><b className="font-medium text-ink">For planning purposes only.</b> Nothing here is posted to Instagram for you — you post it yourself. Follow the salon’s guidelines and only share clients’ photos they’ve agreed to.</span>
+      </p>
+
+      <MyWork />
+
       <div className="mb-4 flex flex-wrap items-center gap-2">
         {view !== 'grid' && <>
           <Button size="icon" icon={<ChevronLeft className="h-4 w-4" />} aria-label="Previous month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} />
@@ -92,6 +101,8 @@ export function MyContentPage() {
           </section>
         </>
       )}
+
+      <SalonDownloads />
 
       {edit && <PostEditor initial={edit} handle={handle} onClose={() => { setEdit(null); refresh(); }} />}
       {handleOpen && <HandleModal handle={handle} onClose={() => { setHandleOpen(false); refresh(); }} />}
@@ -386,5 +397,66 @@ function HandleModal({ handle, onClose }: { handle: string | null; onClose: () =
         <input className="field" value={v} onChange={(e) => setV(e.target.value)} placeholder="@yourname" autoFocus />
       </Field>
     </Modal>
+  );
+}
+
+/** Their transformations: what still needs their details, and adding one — from here. */
+function MyWork() {
+  const go = useNavigate();
+  return (
+    <section className="mb-6">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <h2 className="h-display text-[20px]">My transformations</h2>
+        <span className="ml-auto flex gap-2">
+          <Button size="sm" onClick={() => go('/transformations')}>Open</Button>
+          <Button size="sm" variant="primary" icon={<Camera className="h-3.5 w-3.5" />} onClick={() => go('/transformations?new=1')}>Add a transformation</Button>
+        </span>
+      </div>
+      <TransformationsDue className="!mb-0" />
+    </section>
+  );
+}
+
+interface SalonFile { id: string; kind: 'post' | 'story'; title: string | null; mime: string; size: number; url: string; createdAt: string }
+/** Posts and stories the salon provides, to download (or share straight to Instagram from a phone). */
+function SalonDownloads() {
+  const toast = useToast();
+  const { data } = useQuery({ queryKey: ['my-content-downloads'], queryFn: () => api.get<{ downloads: SalonFile[] }>('/my-content/downloads').then((r) => r.downloads), staleTime: 5 * 60_000 });
+  const [kind, setKind] = useState<'post' | 'story'>('post');
+  const list = (data ?? []).filter((x) => x.kind === kind);
+  const share = async (f: SalonFile) => {
+    try {
+      const b = await (await fetch(f.url, { credentials: 'same-origin' })).blob();
+      const file = new File([b], `${(f.title || 'addendum').replace(/[^A-Za-z0-9 _-]+/g, '').trim() || 'addendum'}.${(b.type.split('/')[1] ?? 'jpg').replace('jpeg', 'jpg').replace('quicktime', 'mov')}`, { type: b.type });
+      if (navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file] }).catch((e) => { if ((e as Error).name !== 'AbortError') throw e; });
+      else window.location.href = `${f.url}?download`;
+    } catch (e) { toast((e as Error).message || 'Couldn’t share it.', 'error'); }
+  };
+  return (
+    <section className="mt-8">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <h2 className="h-display text-[20px]">Salon downloads</h2>
+        <span className="text-[13px] text-stone">Posts and stories from the salon to share</span>
+        <Segmented size="sm" className="ml-auto" value={kind} onChange={setKind} options={[{ value: 'post', label: `Posts (${(data ?? []).filter((x) => x.kind === 'post').length})` }, { value: 'story', label: `Stories (${(data ?? []).filter((x) => x.kind === 'story').length})` }]} />
+      </div>
+      {!data ? <PageLoading /> : !list.length ? <p className="text-[13px] text-stone">Nothing here yet — the salon adds {kind === 'post' ? 'posts' : 'stories'} for you to share.</p> : (
+        <div className={cx('grid gap-3', kind === 'story' ? 'grid-cols-3 sm:grid-cols-5 lg:grid-cols-6' : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-5')}>
+          {list.map((f) => (
+            <div key={f.id} className="panel overflow-hidden !p-0">
+              {f.mime.startsWith('video/')
+                ? <video src={f.url} muted playsInline preload="metadata" controls className={cx('w-full bg-black object-cover', kind === 'story' ? 'aspect-[9/16]' : 'aspect-[4/5]')} />
+                : <img src={f.url} alt={f.title ?? ''} loading="lazy" className={cx('w-full bg-mist object-cover', kind === 'story' ? 'aspect-[9/16]' : 'aspect-[4/5]')} />}
+              <div className="space-y-1.5 p-2">
+                {f.title && <p className="truncate text-[13px] text-ink">{f.title}</p>}
+                <div className="flex gap-1.5">
+                  <a className={buttonClass('secondary', 'sm', 'flex-1')} href={`${f.url}?download`}><Download className="h-3.5 w-3.5" /><span className="btn-label">Download</span></a>
+                  <Button size="sm" icon={<Share2 className="h-3.5 w-3.5" />} aria-label="Share" onClick={() => share(f)} />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }

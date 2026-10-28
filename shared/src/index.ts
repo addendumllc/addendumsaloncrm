@@ -2534,7 +2534,9 @@ export const CONTENT_STATUSES: { value: ContentStatus; label: string }[] = [
   { value: 'idea', label: 'Idea' }, { value: 'draft', label: 'Draft' }, { value: 'in_review', label: 'In review' }, { value: 'changes_requested', label: 'Changes requested' },
   { value: 'approved', label: 'Approved' }, { value: 'scheduled', label: 'Scheduled' }, { value: 'publishing', label: 'Publishing…' }, { value: 'published', label: 'Published' }, { value: 'failed', label: 'Failed' },
 ];
-export interface ContentMediaDTO { id: string; mime: string; name: string | null; size: number; url: string; title?: string | null; tags?: string[]; account?: ContentAccountId | null; approved?: boolean; createdAt?: string }
+export interface ContentMediaDTO { id: string; mime: string; name: string | null; size: number; url: string; title?: string | null; tags?: string[]; account?: ContentAccountId | null; approved?: boolean; createdAt?: string;
+  /** Shared with stylists to download (My Content → Salon downloads), as a post or a story. */
+  stylistShare?: 'post' | 'story' | null }
 /** Reach, views… — imported from the platform, or entered by hand (metricsSource says which). */
 export interface ContentMetrics { reach?: number; impressions?: number; views?: number; likes?: number; comments?: number; saves?: number; shares?: number; clicks?: number; bookingInquiries?: number; productClicks?: number; salesCents?: number;
   /** Email (from Flodesk's report, entered by hand): recipients, delivered, opens, unsubscribes, bounces; clicks and salesCents as above. */

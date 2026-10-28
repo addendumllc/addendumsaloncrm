@@ -15,6 +15,7 @@ const Thumb = ({ m }: { m: ContentMediaDTO }) => (
     {m.mime.startsWith('video/') ? <video src={m.url} className="h-full w-full object-cover" muted /> : <img src={m.url} alt="" className="h-full w-full object-cover" loading="lazy" />}
     {m.mime.startsWith('video/') && <Film className="absolute left-1.5 top-1.5 h-4 w-4 text-white drop-shadow" />}
     {m.approved && <CheckCircle2 className="absolute right-1.5 top-1.5 h-4 w-4 text-white drop-shadow" />}
+    {m.stylistShare && <span className="absolute bottom-1 left-1 rounded bg-black/55 px-1 text-[10px] text-white">Stylists · {m.stylistShare === 'story' ? 'Story' : 'Post'}</span>}
   </span>
 );
 
@@ -63,10 +64,10 @@ export function AssetsTab({ b }: { b: Basics }) {
 
 function AssetEditor({ m, b, onClose }: { m: ContentMediaDTO; b: Basics; onClose: () => void }) {
   const toast = useToast();
-  const [d, setD] = useState({ title: m.title ?? '', tags: (m.tags ?? []).join(', '), account: m.account ?? '', approved: !!m.approved });
+  const [d, setD] = useState({ title: m.title ?? '', tags: (m.tags ?? []).join(', '), account: m.account ?? '', approved: !!m.approved, share: m.stylistShare ?? '' });
   const save = async () => {
     try {
-      await api.patch(`/content/assets/${m.id}`, { title: d.title || null, tags: d.tags.split(',').map((t) => t.trim()).filter(Boolean), account: (d.account || null) as ContentAccountId | null, ...(b.canApprove ? { approved: d.approved } : {}) });
+      await api.patch(`/content/assets/${m.id}`, { title: d.title || null, tags: d.tags.split(',').map((t) => t.trim()).filter(Boolean), account: (d.account || null) as ContentAccountId | null, stylistShare: (d.share || null) as 'post' | 'story' | null, ...(b.canApprove ? { approved: d.approved } : {}) });
       onClose();
     } catch (e) { toast((e as Error).message, 'error'); }
   };
@@ -79,6 +80,9 @@ function AssetEditor({ m, b, onClose }: { m: ContentMediaDTO; b: Basics; onClose
           <Field label="Title"><input className="field" value={d.title} onChange={(e) => setD({ ...d, title: e.target.value })} /></Field>
           <Field label="Tags" hint="Separate with commas, e.g. balayage, before-after"><input className="field" value={d.tags} onChange={(e) => setD({ ...d, tags: e.target.value })} /></Field>
           <Field label="Account" hint="Restrict it to one account, or share it with all."><select className="field" value={d.account} onChange={(e) => setD({ ...d, account: e.target.value })}><option value="">All accounts</option>{b.mine.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field>
+          <Field label="Stylists can download" hint="Shows in every stylist’s My Content → Salon downloads.">
+            <select className="field" value={d.share} onChange={(e) => setD({ ...d, share: e.target.value })}><option value="">No</option><option value="post">Yes — as a post</option><option value="story">Yes — as a story</option></select>
+          </Field>
           <label className={cx('flex items-center gap-2 text-[13px]', !b.canApprove && 'opacity-60')}><input type="checkbox" className="h-4 w-4 accent-plum" disabled={!b.canApprove} checked={d.approved} onChange={(e) => setD({ ...d, approved: e.target.checked })} />Approved to reuse{!b.canApprove && ' (approvers only)'}</label>
           <p className="text-[12px] text-stone">{m.mime} · {(m.size / 1024 / 1024).toFixed(1)} MB</p>
         </div>
