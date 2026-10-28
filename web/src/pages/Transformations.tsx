@@ -348,8 +348,8 @@ function Detail({ id, o, onClose, onEdit, onExport, onChanged }: { id: string; o
             </button>))}</div>}
           {t.photos.length > 0 && <p className="mt-2 text-[12px] text-stone">{t.photos.length} photo{t.photos.length === 1 ? '' : 's'} / video{t.photos.length === 1 ? '' : 's'}, originals kept in the CRM{t.canDownload ? ' — full quality when downloaded.' : '.'}</p>}
 
-          {t.instagram.length > 0 && <Section title="On Instagram (external)">
-            <div className="space-y-2">{t.instagram.map((i, k) => <InstagramCard key={i.id} i={i} defaultOpen={k === 0 && !t.photos.length} />)}</div>
+          {(o.can.manage || o.can.consent) && t.instagram.length > 0 && <Section title="On Instagram (external)">
+            <div className="space-y-2">{t.instagram.map((i) => <InstagramCard key={i.id} i={i} />)}</div>
             <p className="mt-1.5 text-[12px] text-stone">Instagram content stays on Instagram — it isn’t copied into the CRM and may not be downloadable. A public post isn’t consent for other marketing.</p>
           </Section>}
         </div>
@@ -366,10 +366,10 @@ function Detail({ id, o, onClose, onEdit, onExport, onChanged }: { id: string; o
             <Rows rows={[['Method', e.method], ['Methods & colours', e.parts?.length ? e.parts.map((x) => [x.method, x.shade, x.length].filter(Boolean).join(' · ')).join('\n') : null], ['Brand / source', e.brand], ['Length', e.length], ['Shade', e.shade], ['Rows / packs', e.quantity], ['Work', e.workType],
               ['Blending / cutting', e.blending ? 'Yes' : null], ['Customization', e.customization], ['Maintenance', e.maintenanceNotes], ['Next appointment', e.nextAppointment]]} />
           </Section>}
-          <Section title="Details">
+          {Object.values(t.details).some(Boolean) && <Section title="Details">
             <Rows rows={[['Starting condition', t.details.startingCondition], ['Desired result', t.details.desiredResult], ['Techniques', t.details.techniques], ['Products', t.details.products],
               ['Length & texture', t.details.lengthTexture], ['Styling & finish', t.details.styling], ['Aftercare', t.details.aftercare]]} />
-          </Section>
+          </Section>}
           {t.canSeeTechnical && (t.technicalNotes || t.internalNotes) && <Section title="Technical & internal (not exported to social)">
             <div className="rounded-lg border border-amber/30 bg-amber/5 p-3"><Rows rows={[['Formula / technical', t.technicalNotes], ['Internal notes', t.internalNotes]]} /></div>
           </Section>}
@@ -719,6 +719,15 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
             <input ref={file} type="file" multiple accept={ACCEPT} className="hidden" onChange={(e) => { add(e.target.files); e.target.value = ''; }} />
           </div>
         </Field>
+        {cur && cur.instagram.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-[12px] font-semibold uppercase tracking-wide text-stone">Original</p>
+            {cur.instagram.map((i) => <InstagramCard key={i.id} i={i} actions={social ? <span className="flex shrink-0">
+              {!i.isPrimary && <button type="button" className="rounded p-2 text-stone hover:bg-mist sm:p-1" title="Use as the main reference" onClick={() => photoAction(() => api.patch(`/transformations/instagram/${i.id}`, { isPrimary: true }))}><Star className="h-4 w-4" /></button>}
+              <button type="button" className="rounded p-2 text-stone hover:bg-mist hover:text-rose sm:p-1" title="Remove link" onClick={() => photoAction(() => api.del(`/transformations/instagram/${i.id}`))}><Trash2 className="h-4 w-4" /></button>
+            </span> : undefined} />)}
+          </div>
+        )}
         {photoList}
 
         <Field label="What was done" hint="Tap every service done in this visit.">
@@ -779,17 +788,9 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
             </div>
             {canTech && <Field label="Internal notes"><textarea className="field min-h-[56px]" value={d.internalNotes} onChange={(e) => setD({ ...d, internalNotes: e.target.value })} /></Field>}
             {social && <>
-            <Field label="Instagram post or Reel" hint="Link only — nothing is copied from Instagram.">
-              {cur ? (
-                <div className="space-y-2">
-                  {cur.instagram.map((i) => <InstagramCard key={i.id} i={i} actions={<span className="flex shrink-0 flex-col">
-                    {!i.isPrimary && <button type="button" className="rounded p-2 text-stone hover:bg-mist sm:p-1" title="Use as the main reference" onClick={() => photoAction(() => api.patch(`/transformations/instagram/${i.id}`, { isPrimary: true }))}><Star className="h-4 w-4" /></button>}
-                    {i.previewStatus !== 'ok' && <button type="button" className="rounded p-2 text-stone hover:bg-mist sm:p-1" title="Try the preview again" onClick={() => photoAction(() => api.post(`/transformations/instagram/${i.id}/refresh`))}><RefreshCw className="h-4 w-4" /></button>}
-                    <button type="button" className="rounded p-2 text-stone hover:bg-mist sm:p-1 hover:text-rose" title="Remove link" onClick={() => photoAction(() => api.del(`/transformations/instagram/${i.id}`))}><Trash2 className="h-4 w-4" /></button>
-                  </span>} />)}
-                  <div className="flex gap-2"><input className="field" value={igUrl} onChange={(e) => setIgUrl(e.target.value)} placeholder="https://www.instagram.com/p/…" /><Button onClick={addIg} disabled={!igUrl.trim()}>Add</Button></div>
-                </div>
-              ) : <input className="field" value={d.instagramUrl} onChange={(e) => setD({ ...d, instagramUrl: e.target.value })} placeholder="https://www.instagram.com/reel/…" />}
+            <Field label={cur?.instagram.length ? 'Add another Instagram link' : 'Instagram post or Reel'} hint="Link only — nothing is copied from Instagram.">
+              {cur ? <div className="flex gap-2"><input className="field" value={igUrl} onChange={(e) => setIgUrl(e.target.value)} placeholder="https://www.instagram.com/p/…" /><Button onClick={addIg} disabled={!igUrl.trim()}>Add</Button></div>
+                : <input className="field" value={d.instagramUrl} onChange={(e) => setD({ ...d, instagramUrl: e.target.value })} placeholder="https://www.instagram.com/reel/…" />}
             </Field>
             <Field label="Suggested caption"><textarea className="field min-h-[72px]" value={d.caption} onChange={(e) => setD({ ...d, caption: e.target.value })} maxLength={2200} /></Field>
             <div className="grid gap-3 sm:grid-cols-2">
