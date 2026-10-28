@@ -98,10 +98,12 @@ function LoginCard({ editable }: { editable: boolean }) {
   };
   const upload = async (f: File | undefined) => {
     if (!f) return;
-    if (f.size > LOGIN_IMAGE_MAX_BYTES) return toast('The photo must be 1.5 MB or smaller — export it at about 1600px wide.', 'error');
     setBusy(true);
     try {
-      const dataUrl = await new Promise<string>((ok, fail) => { const r = new FileReader(); r.onload = () => ok(String(r.result)); r.onerror = fail; r.readAsDataURL(f); });
+      // Any photo works: larger ones are resized here first (about 1600px wide, JPEG), so they fit the 1.5 MB limit.
+      const dataUrl = f.size <= LOGIN_IMAGE_MAX_BYTES && /^image\/(jpeg|png|webp)$/.test(f.type)
+        ? await new Promise<string>((ok, fail) => { const r = new FileReader(); r.onload = () => ok(String(r.result)); r.onerror = fail; r.readAsDataURL(f); })
+        : await shrinkPhoto(f, LOGIN_IMAGE_MAX_BYTES);
       after(await api.put<{ settings: AppSettings }>('/settings/login-image', { dataUrl }));
       toast('Photo saved');
     } catch (e) {
@@ -128,7 +130,7 @@ function LoginCard({ editable }: { editable: boolean }) {
             <Button size="sm" icon={<Upload className="h-4 w-4" />} loading={busy} disabled={!editable} onClick={() => file.current?.click()}>{d.imageVersion ? 'Replace photo' : 'Upload photo'}</Button>
             {d.imageVersion && <Button size="sm" variant="ghost" icon={<Trash2 className="h-4 w-4" />} disabled={!editable || busy} onClick={remove}>Remove photo</Button>}
           </div>
-          <p className="text-[12px] text-stone">An editorial photo beside the form (JPG, PNG or WebP, up to 1.5 MB). Without one, a quiet typographic panel is shown.</p>
+          <p className="text-[12px] text-stone">An editorial photo beside the form (any size — large photos are resized for you). Without one, a quiet typographic panel is shown.</p>
         </div>
         <div className="flex aspect-[4/5] items-end overflow-hidden border border-line bg-[#14110E] p-4 text-[#F3EEE7]" style={d.imageVersion ? { backgroundImage: `url(/brand/login-image?v=${d.imageVersion})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}>
           {!d.imageVersion && <ImageIcon className="mb-auto h-5 w-5 opacity-40" />}
@@ -137,4 +139,23 @@ function LoginCard({ editable }: { editable: boolean }) {
       </div>
     </Card>
   );
+}
+
+/** A photo resized in the browser (longest side about 1600px, then smaller if needed) as a JPEG data URL under `maxBytes`. */
+async function shrinkPhoto(f: File, maxBytes: number): Promise<string> {
+  let bmp: ImageBitmap;
+  try { bmp = await createImageBitmap(f); } catch { throw new Error('That photo couldn’t be read — save it as a JPG or PNG and try again.'); }
+  try {
+    for (const side of [1600, 1400, 1200, 1000]) {
+      const scale = Math.min(1, side / Math.max(bmp.width, bmp.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+      c.getContext('2d')!.drawImage(bmp, 0, 0, c.width, c.height);
+      for (const q of [0.86, 0.78, 0.7]) {
+        const url = c.toDataURL('image/jpeg', q);
+        if ((url.length - url.indexOf(',') - 1) * 0.75 <= maxBytes) return url;
+      }
+    }
+  } finally { bmp.close(); }
+  throw new Error('That photo is too large even after resizing — try a smaller one.');
 }
