@@ -114,4 +114,15 @@ describe('My Content (a stylist’s own Instagram plan)', () => {
     expect(ideas.find((i: any) => i.title === 'Everyone idea').format).toBe('post');
     expect((await desk.get('/api/my-content/ideas')).status).toBe(403);
   });
+
+  it('Canva links the salon shares: added and removed by Content Calendar managers, seen by stylists', async () => {
+    expect((await jen.post('/api/my-content/links', { title: 'x', url: 'https://www.canva.com/design/abc/view', kind: 'story' })).status).toBe(403);
+    expect((await owner.post('/api/my-content/links', { title: 'x', url: 'javascript:alert(1)' })).status).toBe(400);
+    const r = await owner.post('/api/my-content/links', { title: 'Holiday stories', url: 'https://www.canva.com/design/DAF123/view?utm_content=x', kind: 'story' });
+    expect(r.status).toBe(201);
+    const links = (await jen.get('/api/my-content/links')).body.links;
+    expect(links[0]).toMatchObject({ title: 'Holiday stories', kind: 'story', url: 'https://www.canva.com/design/DAF123/view?utm_content=x' });
+    expect((await jen.del(`/api/my-content/links/${links[0].id}`)).status).toBe(403);
+    expect((await owner.del(`/api/my-content/links/${links[0].id}`)).body.links).toEqual([]);
+  });
 });

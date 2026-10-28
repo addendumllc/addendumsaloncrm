@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Camera, Download, Info, Share2, CalendarDays, ChevronLeft, ChevronRight, Copy, Film, Grid3x3, ImagePlus, Instagram, LayoutList, Lock, Play, Plus, Send, Trash2, Upload, X } from 'lucide-react';
+import { Camera, Download, ExternalLink, Info, Link2, Share2, CalendarDays, ChevronLeft, ChevronRight, Copy, Film, Grid3x3, ImagePlus, Instagram, LayoutList, Lock, Play, Plus, Send, Trash2, Upload, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import { useCanDo } from '../api/hooks';
 import { TransformationsDue } from '../components/domain/TransformationsDue';
 import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, Segmented, Spinner, buttonClass, chipClass, cx, useToast } from '../components/ui';
 
@@ -428,6 +429,15 @@ function SalonDownloads() {
   const { data } = useQuery({ queryKey: ['my-content-downloads'], queryFn: () => api.get<{ downloads: SalonFile[] }>('/my-content/downloads').then((r) => r.downloads), staleTime: 5 * 60_000 });
   const [kind, setKind] = useState<'post' | 'story'>('post');
   const list = (data ?? []).filter((x) => x.kind === kind);
+  const qc = useQueryClient();
+  const canManage = useCanDo()('content:manage');
+  const { data: links } = useQuery({ queryKey: ['my-content-links'], queryFn: () => api.get<{ links: SharedLink[] }>('/my-content/links').then((r) => r.links), staleTime: 5 * 60_000 });
+  const shownLinks = (links ?? []).filter((l) => l.kind === 'both' || l.kind === kind);
+  const [adding, setAdding] = useState(false);
+  const removeLink = async (l: SharedLink) => {
+    if (!window.confirm(`Remove “${l.title}” for every stylist?`)) return;
+    try { await api.del(`/my-content/links/${l.id}`); void qc.invalidateQueries({ queryKey: ['my-content-links'] }); } catch (e) { toast((e as Error).message, 'error'); }
+  };
   const share = async (f: SalonFile) => {
     try {
       const b = await (await fetch(f.url, { credentials: 'same-origin' })).blob();
@@ -443,7 +453,22 @@ function SalonDownloads() {
         <span className="text-[13px] text-stone">Posts and stories from the salon to share</span>
         <Segmented size="sm" className="ml-auto" value={kind} onChange={setKind} options={[{ value: 'post', label: `Posts (${(data ?? []).filter((x) => x.kind === 'post').length})` }, { value: 'story', label: `Stories (${(data ?? []).filter((x) => x.kind === 'story').length})` }]} />
       </div>
-      {!data ? <PageLoading /> : !list.length ? <p className="text-[13px] text-stone">Nothing here yet — the salon adds {kind === 'post' ? 'posts' : 'stories'} for you to share.</p> : (
+      {/* Links the salon shares — Canva designs and templates to open, edit and download there. */}
+      {(shownLinks.length > 0 || canManage) && (
+        <div className="mb-3 space-y-2">
+          {shownLinks.map((l) => (
+            <div key={l.id} className="panel flex items-center gap-3 px-3 py-2.5">
+              <span className={cx('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[12px] font-semibold', isCanva(l.url) ? 'bg-[#7d2ae8] text-white' : 'bg-mist text-stone')}>{isCanva(l.url) ? 'C' : <Link2 className="h-4 w-4" />}</span>
+              <span className="min-w-0 flex-1"><span className="block truncate text-[14px] text-ink">{l.title}</span><span className="block truncate text-[12px] text-stone">{isCanva(l.url) ? 'Canva' : new URL(l.url).hostname} · {l.kind === 'both' ? 'Posts & stories' : l.kind === 'story' ? 'Stories' : 'Posts'}</span></span>
+              <a className={buttonClass('secondary', 'sm')} href={l.url} target="_blank" rel="noreferrer noopener"><ExternalLink className="h-3.5 w-3.5" /><span className="btn-label">{isCanva(l.url) ? 'Open in Canva' : 'Open'}</span></a>
+              {canManage && <button type="button" className="rounded p-2 text-stone hover:bg-mist hover:text-rose sm:p-1.5" aria-label={`Remove ${l.title}`} onClick={() => removeLink(l)}><Trash2 className="h-4 w-4" /></button>}
+            </div>
+          ))}
+          {canManage && <Button size="sm" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setAdding(true)}>Add a Canva link</Button>}
+        </div>
+      )}
+      {adding && <AddLink kind={kind} onClose={() => { setAdding(false); void qc.invalidateQueries({ queryKey: ['my-content-links'] }); }} />}
+      {!data ? <PageLoading /> : !list.length ? (!shownLinks.length && <p className="text-[13px] text-stone">Nothing here yet — the salon adds {kind === 'post' ? 'posts' : 'stories'} for you to share.</p>) : (
         <div className={cx('grid gap-3', kind === 'story' ? 'grid-cols-3 sm:grid-cols-5 lg:grid-cols-6' : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-5')}>
           {list.map((f) => (
             <div key={f.id} className="panel overflow-hidden !p-0">
@@ -520,5 +545,32 @@ function SalonIdeas({ onUse }: { onUse: (d: Draft) => void }) {
       )}
       {list.length > 12 && !all && <div className="mt-2 flex justify-center"><Button size="sm" onClick={() => setAll(true)}>Show all {list.length}</Button></div>}
     </section>
+  );
+}
+
+interface SharedLink { id: string; title: string; url: string; kind: 'post' | 'story' | 'both'; addedAt: string }
+const isCanva = (url: string) => { try { return /(^|\.)canva\.(com|link)$/i.test(new URL(url).hostname); } catch { return false; } };
+
+/** Content Calendar managers: share a link (a Canva design or template) with every stylist. */
+function AddLink({ kind, onClose }: { kind: 'post' | 'story'; onClose: () => void }) {
+  const toast = useToast();
+  const [d, setD] = useState({ title: '', url: '', kind: kind as 'post' | 'story' | 'both' });
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try { await api.post('/my-content/links', d); onClose(); } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
+  };
+  return (
+    <Modal open onClose={onClose} title="Share a Canva link" footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={!d.url.trim()} onClick={save}>Share with stylists</Button></>}>
+      <div className="space-y-3">
+        <Field label="Link" hint="In Canva: Share → copy the link (set it so anyone with the link can view, or use a template link).">
+          <input className="field" value={d.url} onChange={(e) => setD({ ...d, url: e.target.value })} placeholder="https://www.canva.com/design/…" autoFocus />
+        </Field>
+        <Field label="Name"><input className="field" value={d.title} onChange={(e) => setD({ ...d, title: e.target.value })} placeholder="e.g. Holiday story templates" /></Field>
+        <Field label="Show under">
+          <select className="field" value={d.kind} onChange={(e) => setD({ ...d, kind: e.target.value as typeof d.kind })}><option value="both">Posts and Stories</option><option value="post">Posts</option><option value="story">Stories</option></select>
+        </Field>
+      </div>
+    </Modal>
   );
 }

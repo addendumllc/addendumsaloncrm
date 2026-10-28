@@ -187,3 +187,22 @@ export async function salonIdeas() {
     hook: r.hook, visual: r.visual, shotList: r.shot_list, caption: r.caption, cta: r.cta, hashtags: r.hashtags, alsoStory: !!r.also_story, effort: r.effort,
   }));
 }
+
+// ---------------- shared links (e.g. Canva templates) ----------------
+export interface SharedLink { id: string; title: string; url: string; kind: 'post' | 'story' | 'both'; addedAt: string }
+const LINKS_KEY = 'mycontent.links';
+export const sharedLinks = async () => (await getKV<SharedLink[]>(LINKS_KEY)) ?? [];
+/** A link the salon shares with stylists (Canva designs and templates, a Drive folder…). */
+export async function addSharedLink(b: { title: string; url: string; kind: SharedLink['kind'] }) {
+  let u: URL;
+  try { u = new URL(b.url.trim()); } catch { throw badRequest('Paste the full link, starting with https://'); }
+  if (u.protocol !== 'https:') throw badRequest('Use an https:// link.');
+  const list = await sharedLinks();
+  const link: SharedLink = { id: crypto.randomUUID(), title: b.title.trim() || (/canva\.com$/i.test(u.hostname.replace(/^www\./, '')) ? 'Canva design' : u.hostname), url: u.toString(), kind: b.kind, addedAt: new Date().toISOString() };
+  await setKV(LINKS_KEY, [link, ...list].slice(0, 200));
+  return sharedLinks();
+}
+export async function removeSharedLink(id: string) {
+  await setKV(LINKS_KEY, (await sharedLinks()).filter((l) => l.id !== id));
+  return sharedLinks();
+}
