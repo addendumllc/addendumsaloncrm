@@ -1,11 +1,11 @@
 import { useSearchParams } from 'react-router-dom';
 import { SectionPicker } from '../components/layout/subNav';
-import { useCanDo } from '../api/hooks';
+import { useCanDo, useMe } from '../api/hooks';
 import { useStoreNames } from '../lib/storeNames';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowDown, ArrowUp, Camera, Check, CheckSquare, Copy, Download, ExternalLink, FolderPlus, Grid3x3, Instagram, LayoutList, Pencil, Plus, RefreshCw, Search, Settings2, Star, Trash2, Upload, X,
+  ArrowDown, ArrowUp, Camera, Play, UserCheck, Check, CheckSquare, Copy, Download, ExternalLink, FolderPlus, Grid3x3, Instagram, LayoutList, Pencil, Plus, RefreshCw, Search, Settings2, Star, Trash2, Upload, X,
 } from 'lucide-react';
 import { CONSENT_STATUSES, EXTENSION_METHODS, EXTENSION_WORK, type TransformationDTO, type TransformationPhotoDTO, type TransformationPhotoKind } from '@addendum/shared';
 import { api } from '../api/client';
@@ -20,6 +20,7 @@ const EMPTY: Filter = { q: '', stylist: '', service: '', extensions: '', collect
 const KINDS: { value: TransformationPhotoKind; label: string }[] = [
   { value: 'before', label: 'Before' }, { value: 'after', label: 'After' }, { value: 'finished', label: 'Finished look' }, { value: 'detail', label: 'Detail' }, { value: 'other', label: 'Other' },
 ];
+const isVideo = (p: { mime: string }) => p.mime.startsWith('video/');
 const kindLabel = (k: string) => KINDS.find((x) => x.value === k)?.label ?? 'Photo';
 const consentLabel = (s: string) => CONSENT_STATUSES.find((c) => c.value === s)?.label ?? s;
 const CONSENT_TONE: Record<string, 'sage' | 'amber' | 'neutral' | 'rose'> = { approved_social: 'sage', pending: 'amber', internal: 'neutral', do_not_publish: 'rose' };
@@ -49,6 +50,7 @@ function Cover({ t, className }: { t: TransformationDTO; className?: string }) {
       {src && !broken ? <img src={src} alt="" loading="lazy" className="h-full w-full object-cover" onError={() => setBroken(true)} />
         : <span className="flex h-full w-full flex-col items-center justify-center gap-1 text-stone">{ig ? <Instagram className="h-6 w-6" /> : <Camera className="h-6 w-6" />}<span className="text-[11px]">{ig ? 'Instagram' : photo ? 'Preview unavailable' : 'No photo yet'}</span></span>}
       {!photo && ig && src && !broken && <Instagram className="absolute left-1.5 top-1.5 h-4 w-4 text-white drop-shadow" />}
+      {photo && isVideo(photo) && <Play className="absolute left-1.5 top-1.5 h-4 w-4 fill-white text-white drop-shadow" />}
     </span>
   );
 }
@@ -75,6 +77,7 @@ export function TransformationsPage() {
   useEffect(() => setSel(new Set()), [tab]);
   const [open, setOpen] = useState<string | null>(null);
   const [edit, setEdit] = useState<TransformationDTO | 'new' | null>(null);
+  const [confirming, setConfirming] = useState<Appt | null>(null);
   const [exportId, setExportId] = useState<string | null>(null);
   const [settings, setSettings] = useState(false);
   const [collect, setCollect] = useState(false);
@@ -98,6 +101,8 @@ export function TransformationsPage() {
           {o.can.create && <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEdit('new')}>New transformation</Button>}
         </>} />
       <SectionPicker path="/transformations" names={names} can={canDo} />
+
+      {tab === 'library' && o.can.create && <ToConfirm onConfirm={setConfirming} />}
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <label className="relative min-w-[12rem] flex-1 sm:max-w-sm">
@@ -182,10 +187,37 @@ export function TransformationsPage() {
 
       {open && <Detail id={open} o={o} onClose={() => setOpen(null)} onEdit={(t) => { setOpen(null); setEdit(t); }} onExport={(body) => startExport(body)} onChanged={refresh} />}
       {edit && <Editor t={edit === 'new' ? null : edit} o={o} onClose={(saved) => { setEdit(null); refresh(); if (saved) setOpen(saved); }} />}
+      {confirming && <Editor t={null} o={o} appt={confirming} onClose={() => { setConfirming(null); refresh(); void qc.invalidateQueries({ queryKey: ['tf-confirm'] }); }} />}
       {exportId && <ExportProgress id={exportId} onClose={() => setExportId(null)} />}
       {settings && <LibrarySettings o={o} onClose={() => { setSettings(false); refresh(); }} />}
       {collect && <AddToCollection o={o} ids={[...sel]} onClose={(done) => { setCollect(false); if (done) { setSelecting(false); setSel(new Set()); refresh(); } }} />}
     </div>
+  );
+}
+
+/** Their finished appointments without a transformation yet: confirm one (photos + notes), or say there are no photos. */
+function ToConfirm({ onConfirm }: { onConfirm: (a: Appt) => void }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { data } = useQuery({ queryKey: ['tf-confirm'], queryFn: () => api.get<{ items: Appt[] }>('/transformations/to-confirm').then((r) => r.items) });
+  if (!data?.length) return null;
+  const skip = async (a: Appt) => {
+    try { await api.post(`/transformations/to-confirm/${a.appointmentId}/skip`); void qc.invalidateQueries({ queryKey: ['tf-confirm'] }); } catch (e) { toast((e as Error).message, 'error'); }
+  };
+  return (
+    <section className="mb-6">
+      <h2 className="h-display mb-2 text-[20px]">To confirm <span className="font-sans text-[14px] text-stone">({data.length})</span></h2>
+      <p className="mb-2 text-[13px] text-stone">Your appointments from the last two weeks. Add the photos and a note, or mark ones without photos.</p>
+      <div className="panel divide-y divide-line !p-0">
+        {data.map((a) => (
+          <div key={a.appointmentId} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
+            <span className="min-w-0 flex-1 text-[14px]"><span className="text-ink">{fmtDate(a.date)}{a.clientName ? ` · ${a.clientName}` : ''}</span><span className="block truncate text-[12px] text-stone">{a.services.join(', ') || 'Appointment'}</span></span>
+            <Button size="sm" variant="ghost" onClick={() => skip(a)}>No photos</Button>
+            <Button size="sm" variant="primary" icon={<Camera className="h-3.5 w-3.5" />} onClick={() => onConfirm(a)}>Add photos & notes</Button>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -223,6 +255,7 @@ const copy = async (text: string, toast: ReturnType<typeof useToast>) => { try {
 
 function Detail({ id, o, onClose, onEdit, onExport, onChanged }: { id: string; o: Options; onClose: () => void; onEdit: (t: TransformationDTO) => void; onExport: (body: object) => void; onChanged: () => void }) {
   const toast = useToast();
+  const { data: me } = useMe();
   const { data: t, error, refetch } = useQuery({ queryKey: ['transformation', id], queryFn: () => api.get<{ transformation: TransformationDTO }>(`/transformations/${id}`).then((r) => r.transformation) });
   const [big, setBig] = useState<TransformationPhotoDTO | null>(null);
   const [consent, setConsent] = useState(false);
@@ -241,13 +274,17 @@ function Detail({ id, o, onClose, onEdit, onExport, onChanged }: { id: string; o
         {t.canEdit && <Button variant="ghost" className="mr-auto" icon={<Trash2 className="h-4 w-4" />} onClick={del}>Delete</Button>}
         {t.canDownload && <a className={buttonClass('secondary')} href={`/api/transformations/${t.id}/details.csv`}><Download className="h-4 w-4" /><span className="btn-label">Details (CSV)</span></a>}
         {t.canDownload && t.photos.length > 0 && <Button icon={<Download className="h-4 w-4" />} onClick={() => onExport({ preset: 'one', ids: [t.id] })}>Download all photos (ZIP)</Button>}
+        {t.canEdit && !t.stylistStaffId && me && <Button icon={<UserCheck className="h-4 w-4" />} onClick={() => api.patch(`/transformations/${t.id}`, { stylistStaffId: me.id }).then(() => { void refetch(); onChanged(); toast('Now in your work'); }).catch((x) => toast((x as Error).message, 'error'))}>This is my work</Button>}
         {t.canEdit && <Button variant="primary" icon={<Pencil className="h-4 w-4" />} onClick={() => onEdit(t)}>Edit</Button>}
       </>}>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
         <div>
           {big ? (
             <div className="overflow-hidden rounded-xl border border-line bg-mist">
-              <img src={big.thumbUrl} alt={big.caption ?? kindLabel(big.kind)} className="max-h-[60vh] w-full object-contain" />
+              {isVideo(big)
+                ? (t.canDownload ? <video key={big.id} src={big.originalUrl} poster={big.thumbUrl} controls playsInline preload="metadata" className="max-h-[60vh] w-full bg-black object-contain" />
+                  : <div className="flex aspect-video w-full items-center justify-center text-[13px] text-stone"><Play className="mr-1.5 h-4 w-4" />Video — playing it needs download permission</div>)
+                : <img src={big.thumbUrl} alt={big.caption ?? kindLabel(big.kind)} className="max-h-[60vh] w-full object-contain" />}
               <div className="flex flex-wrap items-center gap-2 border-t border-line bg-white px-3 py-2 text-[12px] text-stone">
                 <Badge>{kindLabel(big.kind)}</Badge><span className="min-w-0 flex-1 truncate">{big.caption}</span>
                 <span>Uploaded{big.uploadedBy ? ` by ${big.uploadedBy}` : ''} {new Date(big.uploadedAt).toLocaleDateString()}</span>
@@ -260,9 +297,11 @@ function Detail({ id, o, onClose, onEdit, onExport, onChanged }: { id: string; o
           ) : <Cover t={t} className="aspect-[4/5] w-full rounded-xl" />}
           {t.photos.length > 1 && <div className="mt-2 grid grid-cols-5 gap-2">{t.photos.map((p) => (
             <button key={p.id} type="button" onClick={() => setBig(p)} className={cx('relative overflow-hidden rounded-lg border', big?.id === p.id ? 'border-plum ring-1 ring-plum' : 'border-line')}>
-              <img src={p.thumbUrl} alt="" loading="lazy" className="aspect-square w-full object-cover" /><span className="absolute inset-x-0 bottom-0 bg-black/45 px-1 text-[10px] text-white">{kindLabel(p.kind)}</span>
+              <img src={p.thumbUrl} alt="" loading="lazy" className="aspect-square w-full bg-mist object-cover" onError={(e) => { (e.target as HTMLImageElement).style.visibility = 'hidden'; }} />
+              {isVideo(p) && <Play className="absolute left-1 top-1 h-3.5 w-3.5 fill-white text-white drop-shadow" />}
+              <span className="absolute inset-x-0 bottom-0 bg-black/45 px-1 text-[10px] text-white">{kindLabel(p.kind)}</span>
             </button>))}</div>}
-          {t.photos.length > 0 && <p className="mt-2 text-[12px] text-stone">Uploaded originals stored in the CRM{t.canDownload ? ' — full quality when downloaded.' : '.'}</p>}
+          {t.photos.length > 0 && <p className="mt-2 text-[12px] text-stone">{t.photos.length} photo{t.photos.length === 1 ? '' : 's'} / video{t.photos.length === 1 ? '' : 's'}, originals kept in the CRM{t.canDownload ? ' — full quality when downloaded.' : '.'}</p>}
 
           {t.instagram.length > 0 && <Section title="On Instagram (external)">
             <div className="space-y-2">{t.instagram.map((i) => <InstagramCard key={i.id} i={i} />)}</div>
@@ -390,7 +429,7 @@ function uploadWithProgress(url: string, file: Blob, onProgress: (p: number) => 
       let data: any = {};
       try { data = JSON.parse(x.responseText); } catch { /* not JSON */ }
       if (x.status >= 200 && x.status < 300) resolve(data);
-      else reject(new Error(data?.error?.message ?? (x.status === 413 ? 'That photo is too large (25 MB max).' : 'The upload didn’t go through.')));
+      else reject(new Error(data?.error?.message ?? (x.status === 413 ? 'That file is too large (photos 25 MB, videos 500 MB).' : 'The upload didn’t go through.')));
     };
     x.onerror = () => reject(new Error('Couldn’t reach the server. Check the connection and retry.'));
     x.send(file);
@@ -398,6 +437,7 @@ function uploadWithProgress(url: string, file: Blob, onProgress: (p: number) => 
 }
 /** A ~800px JPEG for browsing, made in the browser; the original is uploaded untouched. Null when the browser can't read it (e.g. HEIC outside Safari). */
 async function makeThumb(file: File): Promise<Blob | null> {
+  if (file.type.startsWith('video/') || /\.(mov|mp4|m4v|webm)$/i.test(file.name)) return videoPoster(file);
   try {
     const bmp = await createImageBitmap(file);
     const scale = Math.min(1, 800 / Math.max(bmp.width, bmp.height));
@@ -408,15 +448,41 @@ async function makeThumb(file: File): Promise<Blob | null> {
     return await new Promise((r) => c.toBlob((b) => r(b), 'image/jpeg', 0.82));
   } catch { return null; }
 }
-const ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,.heic,.heif';
+/** A still from about a second into a video, for the gallery (the video itself is uploaded untouched). */
+function videoPoster(file: File): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    const done = (b: Blob | null) => { URL.revokeObjectURL(url); resolve(b); };
+    const timer = setTimeout(() => done(null), 15_000);
+    v.muted = true; v.playsInline = true; v.preload = 'auto';
+    v.onloadedmetadata = () => { v.currentTime = Math.min(1, (v.duration || 2) / 2); };
+    v.onseeked = () => {
+      clearTimeout(timer);
+      try {
+        const scale = Math.min(1, 800 / Math.max(v.videoWidth, v.videoHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.round(v.videoWidth * scale); c.height = Math.round(v.videoHeight * scale);
+        c.getContext('2d')!.drawImage(v, 0, 0, c.width, c.height);
+        c.toBlob((b) => done(b), 'image/jpeg', 0.82);
+      } catch { done(null); }
+    };
+    v.onerror = () => { clearTimeout(timer); done(null); };
+    v.src = url;
+  });
+}
+const ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif,image/avif,.heic,.heif,video/mp4,video/quicktime,video/webm,.mov,.mp4,.m4v';
 const guessKind = (name: string, i: number, existing: number): TransformationPhotoKind => /before/i.test(name) ? 'before' : /detail/i.test(name) ? 'detail' : existing + i === 0 ? 'before' : 'after';
 
-function Editor({ t, o, onClose }: { t: TransformationDTO | null; o: Options; onClose: (savedId?: string) => void }) {
+export interface Appt { appointmentId: string; date: string; clientId: string | null; clientName: string | null; services: string[] }
+
+function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Options; appt?: Appt | null; onClose: (savedId?: string) => void }) {
   const toast = useToast();
   const [cur, setCur] = useState<TransformationDTO | null>(t);
   const [d, setD] = useState(() => ({
-    title: t?.title ?? '', stylistStaffId: t?.stylistStaffId ?? '', serviceDate: t?.serviceDate ?? new Date().toISOString().slice(0, 10),
-    clientId: t?.clientId ?? null as string | null, clientName: t?.clientName ?? '', mainService: t?.mainService ?? '', services: t?.services.filter((s) => s !== t.mainService) ?? [] as string[],
+    title: t?.title ?? '', stylistStaffId: t?.stylistStaffId ?? '', serviceDate: t?.serviceDate ?? appt?.date ?? new Date().toISOString().slice(0, 10),
+    clientId: t?.clientId ?? appt?.clientId ?? null as string | null, clientName: t?.clientName ?? appt?.clientName ?? '', mainService: t?.mainService ?? appt?.services[0] ?? '',
+    services: t?.services.filter((s) => s !== t.mainService) ?? appt?.services.slice(1) ?? [] as string[],
     details: { ...(t?.details ?? {}) } as Record<string, string | null | undefined>, technicalNotes: t?.technicalNotes ?? '', internalNotes: t?.internalNotes ?? '',
     caption: t?.caption ?? '', hashtags: t?.hashtags ?? '', tags: (t?.tags ?? []).join(', '), consentStatus: 'pending', instagramUrl: '',
     hasExtensions: !!t?.extension?.hasExtensions, ext: { method: '', brand: '', length: '', shade: '', quantity: '', workType: '', blending: false, customization: '', maintenanceNotes: '', nextAppointment: '', ...Object.fromEntries(Object.entries(t?.extension ?? {}).map(([k, v]) => [k, v ?? ''])) } as Record<string, any>,
@@ -433,7 +499,7 @@ function Editor({ t, o, onClose }: { t: TransformationDTO | null; o: Options; on
   const photos = cur?.photos ?? [];
 
   const add = (files: FileList | File[] | null) => {
-    const list = [...(files ?? [])].filter((f) => f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name));
+    const list = [...(files ?? [])].filter((f) => f.type.startsWith('image/') || f.type.startsWith('video/') || /\.(heic|heif|mov|mp4|m4v)$/i.test(f.name));
     if (!list.length) return;
     // The same file picked twice is queued once (the server also keeps one copy).
     const have = new Set(queue.map((q) => `${q.file.name}|${q.file.size}|${q.file.lastModified}`));
@@ -468,15 +534,14 @@ function Editor({ t, o, onClose }: { t: TransformationDTO | null; o: Options; on
   });
 
   const save = async () => {
-    if (!d.title.trim()) return toast('Add a title.', 'error');
-    if (!d.mainService) return toast('Choose the main service.', 'error');
+    if (!d.mainService) return toast('Choose the service.', 'error');
     const pending = queue.filter((q) => q.status === 'waiting' || q.status === 'failed');
     if (!photos.length && !pending.length && !(cur?.instagram.length) && !d.instagramUrl.trim()) return toast('Add at least one photo or an Instagram link.', 'error');
     setBusy(true);
     try {
       let rec = cur;
       if (!rec) {
-        rec = (await api.post<{ transformation: TransformationDTO }>('/transformations', { ...body(), consentStatus: d.consentStatus, instagramUrl: d.instagramUrl.trim() || null })).transformation;
+        rec = (await api.post<{ transformation: TransformationDTO }>('/transformations', { ...body(), consentStatus: d.consentStatus, instagramUrl: d.instagramUrl.trim() || null, appointmentId: appt?.appointmentId ?? null })).transformation;
         setCur(rec);
       } else {
         rec = (await api.patch<{ transformation: TransformationDTO }>(`/transformations/${rec.id}`, body())).transformation;
@@ -521,155 +586,143 @@ function Editor({ t, o, onClose }: { t: TransformationDTO | null; o: Options; on
   const ex = (k: string) => ({ value: d.ext[k] ?? '', onChange: (e: { target: { value: string } }) => setD({ ...d, ext: { ...d.ext, [k]: e.target.value } }) });
   const serviceOptions = [...new Set([...o.services, ...allServices.filter(Boolean)])];
 
-  return (
-    <Modal open xl onClose={() => onClose(cur?.id)} title={cur ? `Edit ${cur.code}` : 'New transformation'}
-      footer={<><Button variant="ghost" onClick={() => onClose(cur?.id)}>Cancel</Button><Button variant="primary" loading={busy} onClick={save}>{cur ? 'Save' : 'Save transformation'}</Button></>}>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="space-y-4">
-          <Field label="Title or short description"><input className="field" value={d.title} onChange={(e) => setD({ ...d, title: e.target.value })} placeholder="e.g. Copper balayage with face-framing" /></Field>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Stylist">
-              {o.can.manage ? (
-                <select className="field" value={d.stylistStaffId} onChange={(e) => setD({ ...d, stylistStaffId: e.target.value })}>
-                  {!cur && <option value="">Me</option>}
-                  {o.stylists.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              ) : <span className="field flex h-10 items-center text-ink-soft">{cur?.stylistName ?? 'Me'}</span>}
-            </Field>
-            <Field label="Service date"><input type="date" className="field" value={d.serviceDate} onChange={(e) => setD({ ...d, serviceDate: e.target.value })} /></Field>
+  // The few things a stylist fills in, then everything else folded away under "More details".
+  const photoList = (photos.length > 0 || queue.length > 0) && (
+    <ul className="space-y-2">
+      {photos.map((p, i) => (
+        <li key={p.id} className="flex items-center gap-2 rounded-lg border border-line p-2">
+          <img src={p.thumbUrl} alt="" className="h-14 w-14 shrink-0 rounded object-cover" />
+          <div className="grid min-w-0 flex-1 gap-1">
+            <select className="field h-9 text-[13px]" value={p.kind} onChange={(e) => photoAction(() => api.patch(`/transformations/photos/${p.id}`, { kind: e.target.value }))}>{KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}</select>
+            <input className="field h-9 text-[13px]" defaultValue={p.caption ?? ''} placeholder="Photo caption (optional)" onBlur={(e) => e.target.value !== (p.caption ?? '') && photoAction(() => api.patch(`/transformations/photos/${p.id}`, { caption: e.target.value || null }))} />
           </div>
-          <Field label="Main service"><select className="field" value={d.mainService} onChange={(e) => setD({ ...d, mainService: e.target.value, services: d.services.filter((s) => s !== e.target.value) })}><option value="">Choose…</option>{serviceOptions.map((s) => <option key={s}>{s}</option>)}</select></Field>
-          <Field label="Also performed">
-            <div className="flex flex-wrap gap-1.5">{serviceOptions.filter((s) => s !== d.mainService).map((s) => {
-              const on = d.services.includes(s);
-              return <button key={s} type="button" onClick={() => setD({ ...d, services: on ? d.services.filter((x) => x !== s) : [...d.services, s] })} className={chipClass(on)}>{on && <Check className="mr-1 inline h-3 w-3" />}{s}</button>;
-            })}</div>
-          </Field>
-          <ClientPicker value={d.clientId ? { id: d.clientId, name: d.clientName } : null} onChange={(c) => setD({ ...d, clientId: c?.id ?? null, clientName: c?.name ?? '' })} />
+          <div className="flex shrink-0 flex-col">
+            <button type="button" className="rounded p-1 text-stone hover:bg-mist disabled:opacity-30" disabled={i === 0} onClick={() => move(i, -1)} aria-label="Move up"><ArrowUp className="h-4 w-4" /></button>
+            <button type="button" className="rounded p-1 text-stone hover:bg-mist disabled:opacity-30" disabled={i === photos.length - 1} onClick={() => move(i, 1)} aria-label="Move down"><ArrowDown className="h-4 w-4" /></button>
+          </div>
+          <div className="flex shrink-0 flex-col">
+            <button type="button" className="rounded p-1 text-stone hover:bg-mist" onClick={() => replace(p)} aria-label="Replace" title="Replace"><RefreshCw className="h-4 w-4" /></button>
+            <button type="button" className="rounded p-1 text-stone hover:bg-mist hover:text-rose" onClick={() => window.confirm('Remove this photo?') && photoAction(() => api.del(`/transformations/photos/${p.id}`))} aria-label="Remove" title="Remove"><Trash2 className="h-4 w-4" /></button>
+          </div>
+        </li>
+      ))}
+      {queue.filter((q) => q.status !== 'done' && q.status !== 'duplicate').map((q) => (
+        <li key={q.key} className={cx('flex items-center gap-2 rounded-lg border p-2', q.status === 'failed' ? 'border-rose/50' : 'border-dashed border-line')}>
+          {q.file.type.startsWith('video/') ? <video src={q.preview} muted playsInline preload="metadata" className="h-14 w-14 shrink-0 rounded bg-mist object-cover" />
+            : <img src={q.preview} alt="" className="h-14 w-14 shrink-0 rounded bg-mist object-cover" onError={(e) => { (e.target as HTMLImageElement).style.visibility = 'hidden'; }} />}
+          <div className="grid min-w-0 flex-1 gap-1">
+            <select className="field h-9 text-[13px]" value={q.kind} disabled={q.status === 'uploading'} onChange={(e) => patchQ(q.key, { kind: e.target.value as TransformationPhotoKind })}>{KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}</select>
+            {q.status === 'uploading' && <span className="h-1.5 overflow-hidden rounded-full bg-mist"><span className="block h-full bg-plum transition-all" style={{ width: `${Math.round(q.progress * 100)}%` }} /></span>}
+            {q.status === 'failed' && <span className="text-[12px] text-rose">{q.error}</span>}
+            {q.status === 'waiting' && <span className="truncate text-[11px] text-stone">{q.file.name} · uploads when you save</span>}
+          </div>
+          <div className="flex shrink-0 flex-col items-center gap-1">
+            {q.status === 'failed' && cur && <Button size="sm" onClick={() => uploadOne(cur.id, q).then(async (ok) => { if (ok) setCur((await api.get<{ transformation: TransformationDTO }>(`/transformations/${cur.id}`)).transformation); })}>Retry</Button>}
+            {q.status !== 'uploading' && <button type="button" className="rounded p-1 text-stone hover:bg-mist" onClick={() => { URL.revokeObjectURL(q.preview); setQueue((x) => x.filter((y) => y.key !== q.key)); }} aria-label="Remove"><X className="h-4 w-4" /></button>}
+            {q.status === 'uploading' && <Spinner />}
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
 
-          {!allServices.some(isExt) && <Toggle checked={d.hasExtensions} onChange={(v) => setD({ ...d, hasExtensions: v })} label="Client has extensions" description="Shows the extension details." />}
-          {extRelevant && (
-            <fieldset className="rounded-xl border border-line p-3">
-              <legend className="px-1 text-[12px] font-semibold uppercase tracking-wide text-stone">Extensions (all optional)</legend>
+  return (
+    <Modal open wide onClose={() => onClose(cur?.id)} title={cur ? `Edit ${cur.code}` : appt ? 'Confirm transformation' : 'New transformation'}
+      footer={<><Button variant="ghost" onClick={() => onClose(cur?.id)}>Cancel</Button><Button variant="primary" loading={busy} onClick={save}>{cur ? 'Save' : appt ? 'Confirm' : 'Save'}</Button></>}>
+      <div className="space-y-4">
+        {appt && <p className="rounded-lg bg-mist px-3 py-2 text-[14px] text-ink-soft">{fmtDate(appt.date)}{appt.clientName ? ` · ${appt.clientName}` : ''} · {appt.services.join(', ') || 'Appointment'}</p>}
+
+        <Field label="Photos & videos">
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
+            onDrop={(e) => { e.preventDefault(); setDrag(false); add(e.dataTransfer.files); }}
+            className={cx('flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-5 text-center text-[13px] text-stone', drag ? 'border-plum bg-plum-tint' : 'border-line')}>
+            <Upload className="h-5 w-5" />
+            <span><span className="hidden sm:inline">Drag photos or videos here, or </span><button type="button" className="text-plum underline" onClick={() => file.current?.click()}>choose photos & videos</button></span>
+            <span className="text-[12px]">Pick as many as you like for this transformation — before, after and detail shots.</span>
+            <input ref={file} type="file" multiple accept={ACCEPT} className="hidden" onChange={(e) => { add(e.target.files); e.target.value = ''; }} />
+          </div>
+        </Field>
+        {photoList}
+
+        <Field label="Service"><select className="field" value={d.mainService} onChange={(e) => setD({ ...d, mainService: e.target.value, services: d.services.filter((s) => s !== e.target.value) })}><option value="">Choose…</option>{serviceOptions.map((s) => <option key={s}>{s}</option>)}</select></Field>
+        {extRelevant && (
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field label="Extension method"><select className="field" {...ex('method')}><option value="">—</option>{[...new Set([...EXTENSION_METHODS, ...o.methods])].map((m) => <option key={m}>{m}</option>)}</select></Field>
+            <Field label="Length"><input className="field" {...ex('length')} placeholder='e.g. 22"' /></Field>
+            <Field label="Shade"><input className="field" {...ex('shade')} /></Field>
+          </div>
+        )}
+        {canTech && <Field label="Notes" hint="Formula, products, anything to remember. Private — never in captions or exports.">
+          <textarea className="field min-h-[96px]" value={d.technicalNotes} onChange={(e) => setD({ ...d, technicalNotes: e.target.value })} />
+        </Field>}
+
+        <details className="rounded-xl border border-line p-3">
+          <summary className="cursor-pointer text-[13px] font-medium text-ink">More details (optional)</summary>
+          <div className="mt-3 space-y-4">
+            <Field label="Title" hint={`Blank = “${d.mainService || 'the service'}”`}><input className="field" value={d.title} onChange={(e) => setD({ ...d, title: e.target.value })} placeholder="e.g. Copper balayage with face-framing" /></Field>
+            {!appt && <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Stylist">
+                {o.can.manage ? (
+                  <select className="field" value={d.stylistStaffId} onChange={(e) => setD({ ...d, stylistStaffId: e.target.value })}>
+                    {!cur && <option value="">Me</option>}
+                    {o.stylists.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                ) : <span className="field flex h-10 items-center text-ink-soft">{cur?.stylistName ?? 'Me'}</span>}
+              </Field>
+              <Field label="Service date"><input type="date" className="field" value={d.serviceDate} onChange={(e) => setD({ ...d, serviceDate: e.target.value })} /></Field>
+            </div>}
+            <Field label="Also performed">
+              <div className="flex flex-wrap gap-1.5">{serviceOptions.filter((s) => s !== d.mainService).map((s) => {
+                const on = d.services.includes(s);
+                return <button key={s} type="button" onClick={() => setD({ ...d, services: on ? d.services.filter((x) => x !== s) : [...d.services, s] })} className={chipClass(on)}>{on && <Check className="h-3 w-3" />}{s}</button>;
+              })}</div>
+            </Field>
+            {!appt && <ClientPicker value={d.clientId ? { id: d.clientId, name: d.clientName } : null} onChange={(c) => setD({ ...d, clientId: c?.id ?? null, clientName: c?.name ?? '' })} />}
+            {!allServices.some(isExt) && <Toggle checked={d.hasExtensions} onChange={(v) => setD({ ...d, hasExtensions: v })} label="Client has extensions" />}
+            {extRelevant && (
               <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Method"><select className="field" {...ex('method')}><option value="">—</option>{[...new Set([...EXTENSION_METHODS, ...o.methods])].map((m) => <option key={m}>{m}</option>)}</select></Field>
-                <Field label="Work"><select className="field" {...ex('workType')}><option value="">—</option>{EXTENSION_WORK.map((m) => <option key={m}>{m}</option>)}</select></Field>
+                <Field label="Extension work"><select className="field" {...ex('workType')}><option value="">—</option>{EXTENSION_WORK.map((m) => <option key={m}>{m}</option>)}</select></Field>
                 <Field label="Brand or hair source"><input className="field" {...ex('brand')} /></Field>
-                <Field label="Length"><input className="field" {...ex('length')} placeholder='e.g. 22"' /></Field>
-                <Field label="Shade or colour"><input className="field" {...ex('shade')} /></Field>
-                <Field label="Rows, packs or pieces"><input className="field" {...ex('quantity')} placeholder="e.g. 2 rows, 3 packs" /></Field>
+                <Field label="Rows, packs or pieces"><input className="field" {...ex('quantity')} placeholder="e.g. 2 rows" /></Field>
+                <Field label="Next appointment"><input className="field" {...ex('nextAppointment')} placeholder="e.g. Move-up in 6–8 weeks" /></Field>
+                <label className="flex items-center gap-2 text-[14px] sm:col-span-2"><input type="checkbox" className="h-4 w-4 accent-plum" checked={!!d.ext.blending} onChange={(e) => setD({ ...d, ext: { ...d.ext, blending: e.target.checked } })} />Includes blending or extension-specific cutting</label>
               </div>
-              <label className="mt-3 flex items-center gap-2 text-[14px]"><input type="checkbox" className="h-4 w-4 accent-plum" checked={!!d.ext.blending} onChange={(e) => setD({ ...d, ext: { ...d.ext, blending: e.target.checked } })} />Includes blending or extension-specific cutting</label>
-              <div className="mt-3 grid gap-3">
-                <Field label="Customization or colour matching"><textarea className="field min-h-[60px]" {...ex('customization')} /></Field>
-                <Field label="Maintenance notes"><textarea className="field min-h-[60px]" {...ex('maintenanceNotes')} /></Field>
-                <Field label="Recommended next appointment"><input className="field" {...ex('nextAppointment')} placeholder="e.g. Move-up in 6–8 weeks" /></Field>
-              </div>
-            </fieldset>
-          )}
-
-          <details className="rounded-xl border border-line p-3" open={!!Object.values(d.details).some(Boolean)}>
-            <summary className="cursor-pointer text-[13px] font-medium text-ink">More details (optional)</summary>
-            <div className="mt-3 grid gap-3">
-              <Field label="Starting hair condition"><textarea className="field min-h-[56px]" {...det('startingCondition')} /></Field>
-              <Field label="Desired result"><textarea className="field min-h-[56px]" {...det('desiredResult')} /></Field>
+            )}
+            <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Techniques used"><input className="field" {...det('techniques')} /></Field>
               <Field label="Products used"><input className="field" {...det('products')} /></Field>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Length & texture"><input className="field" {...det('lengthTexture')} /></Field>
-                <Field label="Styling & finish"><input className="field" {...det('styling')} /></Field>
-              </div>
-              <Field label="Aftercare recommendations"><textarea className="field min-h-[56px]" {...det('aftercare')} /></Field>
             </div>
-          </details>
-          {canTech && (
-            <div className="rounded-xl border border-amber/30 bg-amber/5 p-3">
-              <p className="mb-2 text-[12px] text-stone">Private — only you and people allowed to see technical notes. Never in captions or social exports.</p>
-              <div className="grid gap-3">
-                <Field label="Colour formula / technical notes"><textarea className="field min-h-[60px]" value={d.technicalNotes} onChange={(e) => setD({ ...d, technicalNotes: e.target.value })} /></Field>
-                <Field label="Internal notes"><textarea className="field min-h-[56px]" value={d.internalNotes} onChange={(e) => setD({ ...d, internalNotes: e.target.value })} /></Field>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="space-y-4">
-          <Field label="Photos" hint="Before, after, finished look and details. Originals are kept at full quality; JPEG, PNG, WebP or HEIC up to 25 MB.">
-            <div
-              onDragOver={(e) => { e.preventDefault(); setDrag(true); }} onDragLeave={() => setDrag(false)}
-              onDrop={(e) => { e.preventDefault(); setDrag(false); add(e.dataTransfer.files); }}
-              className={cx('flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-6 text-center text-[13px] text-stone', drag ? 'border-plum bg-plum-tint' : 'border-line')}>
-              <Upload className="h-5 w-5" />
-              <span><span className="hidden sm:inline">Drag photos here, or </span><button type="button" className="text-plum underline" onClick={() => file.current?.click()}>choose photos</button></span>
-              <input ref={file} type="file" multiple accept={ACCEPT} className="hidden" onChange={(e) => { add(e.target.files); e.target.value = ''; }} />
-            </div>
-          </Field>
-          {(photos.length > 0 || queue.length > 0) && (
-            <ul className="space-y-2">
-              {photos.map((p, i) => (
-                <li key={p.id} className="flex items-center gap-2 rounded-lg border border-line p-2">
-                  <img src={p.thumbUrl} alt="" className="h-14 w-14 shrink-0 rounded object-cover" />
-                  <div className="grid min-w-0 flex-1 gap-1">
-                    <select className="field h-8 text-[13px]" value={p.kind} onChange={(e) => photoAction(() => api.patch(`/transformations/photos/${p.id}`, { kind: e.target.value }))}>{KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}</select>
-                    <input className="field h-8 text-[13px]" defaultValue={p.caption ?? ''} placeholder="Caption / description" onBlur={(e) => e.target.value !== (p.caption ?? '') && photoAction(() => api.patch(`/transformations/photos/${p.id}`, { caption: e.target.value || null }))} />
-                  </div>
-                  <div className="flex shrink-0 flex-col">
-                    <button type="button" className="rounded p-1 text-stone hover:bg-mist disabled:opacity-30" disabled={i === 0} onClick={() => move(i, -1)} aria-label="Move up"><ArrowUp className="h-4 w-4" /></button>
-                    <button type="button" className="rounded p-1 text-stone hover:bg-mist disabled:opacity-30" disabled={i === photos.length - 1} onClick={() => move(i, 1)} aria-label="Move down"><ArrowDown className="h-4 w-4" /></button>
-                  </div>
-                  <div className="flex shrink-0 flex-col">
-                    <button type="button" className="rounded p-1 text-stone hover:bg-mist" onClick={() => replace(p)} aria-label="Replace" title="Replace"><RefreshCw className="h-4 w-4" /></button>
-                    <button type="button" className="rounded p-1 text-stone hover:bg-mist hover:text-rose" onClick={() => window.confirm('Remove this photo?') && photoAction(() => api.del(`/transformations/photos/${p.id}`))} aria-label="Remove" title="Remove"><Trash2 className="h-4 w-4" /></button>
-                  </div>
-                </li>
-              ))}
-              {queue.filter((q) => q.status !== 'done' && q.status !== 'duplicate').map((q) => (
-                <li key={q.key} className={cx('flex items-center gap-2 rounded-lg border p-2', q.status === 'failed' ? 'border-rose/50' : 'border-dashed border-line')}>
-                  <img src={q.preview} alt="" className="h-14 w-14 shrink-0 rounded bg-mist object-cover" onError={(e) => { (e.target as HTMLImageElement).style.visibility = 'hidden'; }} />
-                  <div className="grid min-w-0 flex-1 gap-1">
-                    <select className="field h-8 text-[13px]" value={q.kind} disabled={q.status === 'uploading'} onChange={(e) => patchQ(q.key, { kind: e.target.value as TransformationPhotoKind })}>{KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}</select>
-                    <input className="field h-8 text-[13px]" value={q.caption} disabled={q.status === 'uploading'} placeholder="Caption / description" onChange={(e) => patchQ(q.key, { caption: e.target.value })} />
-                    {q.status === 'uploading' && <span className="h-1.5 overflow-hidden rounded-full bg-mist"><span className="block h-full bg-plum transition-all" style={{ width: `${Math.round(q.progress * 100)}%` }} /></span>}
-                    {q.status === 'failed' && <span className="text-[12px] text-rose">{q.error}</span>}
-                    {q.status === 'waiting' && <span className="truncate text-[11px] text-stone">{q.file.name} · {(q.file.size / 1024 / 1024).toFixed(1)} MB · uploads when you save</span>}
-                  </div>
-                  <div className="flex shrink-0 flex-col items-center gap-1">
-                    {q.status === 'failed' && cur && <Button size="sm" onClick={() => uploadOne(cur.id, q).then(async (ok) => { if (ok) setCur((await api.get<{ transformation: TransformationDTO }>(`/transformations/${cur.id}`)).transformation); })}>Retry</Button>}
-                    {q.status !== 'uploading' && <button type="button" className="rounded p-1 text-stone hover:bg-mist" onClick={() => { URL.revokeObjectURL(q.preview); setQueue((x) => x.filter((y) => y.key !== q.key)); }} aria-label="Remove"><X className="h-4 w-4" /></button>}
-                    {q.status === 'uploading' && <Spinner />}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <Field label="Instagram post or Reel" hint="Link only — Instagram content isn’t copied into the CRM.">
-            {cur ? (
-              <div className="space-y-2">
-                {cur.instagram.map((i) => <InstagramCard key={i.id} i={i} actions={<span className="flex shrink-0 flex-col">
-                  {!i.isPrimary && <button type="button" className="rounded p-1 text-stone hover:bg-mist" title="Use as the main reference" onClick={() => photoAction(() => api.patch(`/transformations/instagram/${i.id}`, { isPrimary: true }))}><Star className="h-4 w-4" /></button>}
-                  {i.previewStatus !== 'ok' && <button type="button" className="rounded p-1 text-stone hover:bg-mist" title="Try the preview again" onClick={() => photoAction(() => api.post(`/transformations/instagram/${i.id}/refresh`))}><RefreshCw className="h-4 w-4" /></button>}
-                  <button type="button" className="rounded p-1 text-stone hover:bg-mist hover:text-rose" title="Remove link" onClick={() => photoAction(() => api.del(`/transformations/instagram/${i.id}`))}><Trash2 className="h-4 w-4" /></button>
-                </span>} />)}
-                <div className="flex gap-2"><input className="field" value={igUrl} onChange={(e) => setIgUrl(e.target.value)} placeholder="https://www.instagram.com/p/…" /><Button onClick={addIg} disabled={!igUrl.trim()}>Add</Button></div>
-              </div>
-            ) : <input className="field" value={d.instagramUrl} onChange={(e) => setD({ ...d, instagramUrl: e.target.value })} placeholder="https://www.instagram.com/reel/…" />}
-          </Field>
-
-          <Field label="Suggested caption"><textarea className="field min-h-[80px]" value={d.caption} onChange={(e) => setD({ ...d, caption: e.target.value })} maxLength={2200} /></Field>
-          <Field label="Hashtags"><input className="field" value={d.hashtags} onChange={(e) => setD({ ...d, hashtags: e.target.value })} placeholder="#addendumsalon #balayage" /></Field>
-          <Field label="Tags (searchable)" hint="Separate with commas, e.g. copper, face-framing">
-            <input className="field" list="tf-tags" value={d.tags} onChange={(e) => setD({ ...d, tags: e.target.value })} />
-            <datalist id="tf-tags">{o.tags.map((x) => <option key={x} value={x} />)}</datalist>
-          </Field>
-          {!cur && (
-            <Field label="Publication & usage" hint="New work stays unpublished until the client’s consent is recorded and approved.">
-              <select className="field" value={d.consentStatus} onChange={(e) => setD({ ...d, consentStatus: e.target.value })}>
-                <option value="pending">Pending Consent</option><option value="internal">Internal Use Only</option><option value="do_not_publish">Do Not Publish</option>
-              </select>
+            {canTech && <Field label="Internal notes"><textarea className="field min-h-[56px]" value={d.internalNotes} onChange={(e) => setD({ ...d, internalNotes: e.target.value })} /></Field>}
+            <Field label="Instagram post or Reel" hint="Link only — nothing is copied from Instagram.">
+              {cur ? (
+                <div className="space-y-2">
+                  {cur.instagram.map((i) => <InstagramCard key={i.id} i={i} actions={<span className="flex shrink-0 flex-col">
+                    {!i.isPrimary && <button type="button" className="rounded p-1 text-stone hover:bg-mist" title="Use as the main reference" onClick={() => photoAction(() => api.patch(`/transformations/instagram/${i.id}`, { isPrimary: true }))}><Star className="h-4 w-4" /></button>}
+                    {i.previewStatus !== 'ok' && <button type="button" className="rounded p-1 text-stone hover:bg-mist" title="Try the preview again" onClick={() => photoAction(() => api.post(`/transformations/instagram/${i.id}/refresh`))}><RefreshCw className="h-4 w-4" /></button>}
+                    <button type="button" className="rounded p-1 text-stone hover:bg-mist hover:text-rose" title="Remove link" onClick={() => photoAction(() => api.del(`/transformations/instagram/${i.id}`))}><Trash2 className="h-4 w-4" /></button>
+                  </span>} />)}
+                  <div className="flex gap-2"><input className="field" value={igUrl} onChange={(e) => setIgUrl(e.target.value)} placeholder="https://www.instagram.com/p/…" /><Button onClick={addIg} disabled={!igUrl.trim()}>Add</Button></div>
+                </div>
+              ) : <input className="field" value={d.instagramUrl} onChange={(e) => setD({ ...d, instagramUrl: e.target.value })} placeholder="https://www.instagram.com/reel/…" />}
             </Field>
-          )}
-        </div>
+            <Field label="Suggested caption"><textarea className="field min-h-[72px]" value={d.caption} onChange={(e) => setD({ ...d, caption: e.target.value })} maxLength={2200} /></Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Hashtags"><input className="field" value={d.hashtags} onChange={(e) => setD({ ...d, hashtags: e.target.value })} placeholder="#addendumsalon" /></Field>
+              <Field label="Tags (searchable)">
+                <input className="field" list="tf-tags" value={d.tags} onChange={(e) => setD({ ...d, tags: e.target.value })} placeholder="copper, face-framing" />
+                <datalist id="tf-tags">{o.tags.map((x) => <option key={x} value={x} />)}</datalist>
+              </Field>
+            </div>
+            {!cur && (
+              <Field label="Publication & usage" hint="Stays unpublished until the client’s consent is recorded and approved.">
+                <select className="field" value={d.consentStatus} onChange={(e) => setD({ ...d, consentStatus: e.target.value })}>
+                  <option value="pending">Pending Consent</option><option value="internal">Internal Use Only</option><option value="do_not_publish">Do Not Publish</option>
+                </select>
+              </Field>
+            )}
+          </div>
+        </details>
       </div>
     </Modal>
   );

@@ -53,6 +53,8 @@ async function main() {
   const server = app.listen(cfg.PORT, () => {
     console.log(`Addendum Salon CRM running on http://localhost:${cfg.PORT} (${cfg.DEMO_MODE ? 'DEMO MODE' : 'live'}; database: ${db.kind})`);
   });
+  // Videos from the salon's wifi can take a while to upload: allow up to 30 minutes for one request (Node's default is 5).
+  server.requestTimeout = 30 * 60_000;
   startScheduler();
 
   // Close the database cleanly on stop/restart (Ctrl+C, `tsx watch` reloads, hosting restarts).

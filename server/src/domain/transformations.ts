@@ -28,6 +28,7 @@ export const DEFAULT_SERVICES = [
 ];
 export const isExtensionService = (s: string) => /extension/i.test(s);
 export const MAX_PHOTO_BYTES = 25 * 1024 * 1024;
+export const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
 export const MAX_THUMB_BYTES = 1024 * 1024;
 const EXPORT_HOURS = 24;
 
@@ -69,6 +70,56 @@ export function sniffImage(b: Buffer): { mime: string; ext: string } | null {
   }
   return null;
 }
+/** Photos, plus the videos phones record (MP4 / MOV / WebM), from the file's own bytes. */
+export function sniffMedia(b: Buffer): { mime: string; ext: string; video: boolean } | null {
+  const img = sniffImage(b);
+  if (img) return { ...img, video: false };
+  if (b.length >= 12 && b.toString('latin1', 4, 8) === 'ftyp') {
+    const brand = b.toString('latin1', 8, 12);
+    if (brand === 'qt  ') return { mime: 'video/quicktime', ext: 'mov', video: true };
+    if (/^(isom|iso\d|mp4\d|avc1|M4V |M4VP|M4VH|dash|3gp\d|3g2\w|MSNV|f4v |mmp4)$/.test(brand)) return { mime: 'video/mp4', ext: 'mp4', video: true };
+  }
+  if (b.length >= 4 && b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return { mime: 'video/webm', ext: 'webm', video: true };
+  return null;
+}
+
+/** An upload received straight to a temporary file (never whole in memory), with its size, hash and first bytes. */
+export interface Upload { tmp: string; size: number; sha: string; head: Buffer }
+export async function receiveUpload(stream: NodeJS.ReadableStream, maxBytes = MAX_VIDEO_BYTES): Promise<Upload> {
+  const dir = path.join(mediaRoot(), 'tmp');
+  await fs.promises.mkdir(dir, { recursive: true });
+  const tmp = path.join(dir, crypto.randomBytes(12).toString('hex'));
+  const hash = crypto.createHash('sha256');
+  const out = fs.createWriteStream(tmp);
+  let size = 0;
+  let head = Buffer.alloc(0);
+  try {
+    await new Promise<void>((resolve, reject) => {
+      stream.on('data', (c: Buffer) => {
+        size += c.length;
+        if (size > maxBytes) { reject(Object.assign(new Error('too_large'), { tooLarge: true })); (stream as any).destroy?.(); return; }
+        if (head.length < 64) head = Buffer.concat([head, c.subarray(0, 64 - head.length)]);
+        hash.update(c);
+        if (!out.write(c)) { stream.pause(); out.once('drain', () => stream.resume()); }
+      });
+      stream.on('end', () => out.end(() => resolve()));
+      stream.on('error', reject);
+      out.on('error', reject);
+    });
+  } catch (e: any) {
+    out.destroy();
+    await fs.promises.unlink(tmp).catch(() => {});
+    if (e?.tooLarge) throw badRequest(`Videos can be up to ${maxBytes / 1024 / 1024} MB, photos ${MAX_PHOTO_BYTES / 1024 / 1024} MB.`);
+    throw e;
+  }
+  return { tmp, size, sha: hash.digest('hex'), head };
+}
+/** Test helper and small uploads: a buffer as an Upload. */
+export async function bufferUpload(bytes: Buffer) {
+  const { Readable } = await import('node:stream');
+  return receiveUpload(Readable.from([bytes]));
+}
+const dropUpload = (up: Upload) => fs.promises.unlink(up.tmp).catch(() => {});
 
 // ---------------- access ----------------
 interface Row {
@@ -76,7 +127,8 @@ interface Row {
   main_service: string; details: any; technical_notes: string | null; internal_notes: string | null; caption: string | null; hashtags: string | null; tags: string[];
   created_by_staff_id: string | null; created_at: string; updated_at: string;
 }
-const isOwn = (t: Pick<Row, 'stylist_staff_id' | 'created_by_staff_id'>, u: Who) => t.stylist_staff_id === u.id || t.created_by_staff_id === u.id;
+// Their own work — and work whose stylist isn't known yet, so any stylist can see it and claim it.
+const isOwn = (t: Pick<Row, 'stylist_staff_id' | 'created_by_staff_id'>, u: Who) => t.stylist_staff_id === u.id || t.stylist_staff_id == null;
 export const access = (t: Pick<Row, 'stylist_staff_id' | 'created_by_staff_id'>, u: Who) => {
   const own = isOwn(t, u) && can(u, 'transformations:own');
   const see = own || can(u, 'transformations:view_all') || can(u, 'transformations:manage');
@@ -200,7 +252,7 @@ function where(f: ListFilter, u: Who) {
   const w: string[] = [];
   const p: unknown[] = [];
   const add = (sql: string, ...v: unknown[]) => { let s = sql; for (const x of v) { p.push(x); s = s.replace('?', `$${p.length}`); } w.push(s); };
-  if (!seesAll(u)) add('(t.stylist_staff_id = ? OR t.created_by_staff_id = ?)', u.id, u.id);
+  if (!seesAll(u)) add('(t.stylist_staff_id = ? OR t.stylist_staff_id IS NULL)', u.id);
   if (f.ids?.length) add('t.id = ANY(?)', f.ids);
   if (f.stylist) add('t.stylist_staff_id = ?', f.stylist);
   if (f.from) add('t.service_date >= ?', f.from);
@@ -244,9 +296,11 @@ export async function listTransformations(f: ListFilter, u: Who) {
 // ---------------- create / edit ----------------
 export interface ExtensionInput { hasExtensions: boolean; method?: string | null; brand?: string | null; length?: string | null; shade?: string | null; quantity?: string | null; workType?: string | null; blending?: boolean | null; customization?: string | null; maintenanceNotes?: string | null; nextAppointment?: string | null }
 export interface TransformationInput {
-  title: string; stylistStaffId?: string | null; serviceDate: string; clientId?: string | null; mainService: string; services?: string[];
+  title?: string; stylistStaffId?: string | null; serviceDate?: string; clientId?: string | null; mainService: string; services?: string[];
   details?: Record<string, string | null>; extension?: ExtensionInput | null; technicalNotes?: string | null; internalNotes?: string | null;
   caption?: string | null; hashtags?: string | null; tags?: string[]; consentStatus?: string; instagramUrl?: string | null;
+  /** Confirming one of their finished appointments: date and client come from it. */
+  appointmentId?: string | null;
 }
 const cleanTags = (t: string[] = []) => [...new Set(t.map((x) => x.trim().replace(/^#/, '').toLowerCase()).filter(Boolean))].slice(0, 40);
 
@@ -275,16 +329,27 @@ async function saveExtension(q: { query: (s: string, p?: unknown[]) => Promise<u
 
 export async function createTransformation(b: TransformationInput, u: Who) {
   if (!can(u, 'transformations:own') && !can(u, 'transformations:manage')) throw forbidden('You can’t add transformations.');
-  const stylist = await checkStylist(b.stylistStaffId, u);
+  let stylist = await checkStylist(b.stylistStaffId, u);
+  if (b.appointmentId) {
+    const a = await db().one<{ staff_id: string | null; client_id: string | null; day: string }>(
+      "SELECT staff_id, client_id, to_char(start_at, 'YYYY-MM-DD') AS day FROM appointments WHERE id = $1", [b.appointmentId]);
+    if (!a || (a.staff_id && a.staff_id !== u.id && !can(u, 'transformations:manage'))) throw forbidden('That appointment isn’t yours.');
+    if (await db().one('SELECT 1 FROM transformations WHERE appointment_id = $1', [b.appointmentId])) throw badRequest('This appointment already has a transformation.');
+    if (a.staff_id) stylist = a.staff_id;
+    b = { ...b, clientId: b.clientId ?? a.client_id, serviceDate: b.serviceDate || a.day };
+  }
+  // The title is optional: the service names it until someone writes one.
+  const title = b.title?.trim() || b.mainService.trim();
+  const serviceDate = b.serviceDate || today();
   const status = b.consentStatus ?? 'pending';
   // New work starts as Pending Consent or Internal Use Only; approval is a separate, permissioned step.
   if (status !== 'pending' && status !== 'internal' && status !== 'do_not_publish') throw badRequest('New transformations start as Pending Consent or Internal Use Only. Approve them for social media once consent is verified.');
   const services = [b.mainService, ...(b.services ?? [])];
   const id = await db().tx(async (q) => {
-    const [r] = await q.query<{ id: string }>(`INSERT INTO transformations(title, stylist_staff_id, service_date, client_id, main_service, details, technical_notes, internal_notes, caption, hashtags, tags, created_by_staff_id)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
-    [b.title.trim(), stylist, b.serviceDate, b.clientId ?? null, b.mainService.trim(), JSON.stringify(b.details ?? {}), b.technicalNotes ?? null, b.internalNotes ?? null,
-      b.caption ?? null, b.hashtags ?? null, cleanTags(b.tags), u.id]);
+    const [r] = await q.query<{ id: string }>(`INSERT INTO transformations(title, stylist_staff_id, service_date, client_id, main_service, details, technical_notes, internal_notes, caption, hashtags, tags, created_by_staff_id, appointment_id)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+    [title, stylist, serviceDate, b.clientId ?? null, b.mainService.trim(), JSON.stringify(b.details ?? {}), b.technicalNotes ?? null, b.internalNotes ?? null,
+      b.caption ?? null, b.hashtags ?? null, cleanTags(b.tags), u.id, b.appointmentId ?? null]);
     await saveServices(q, r.id, b.mainService, b.services);
     await saveExtension(q, r.id, b.extension, services);
     await q.query('INSERT INTO transformation_consent(transformation_id, status) VALUES ($1,$2)', [r.id, status]);
@@ -297,15 +362,16 @@ export async function createTransformation(b: TransformationInput, u: Who) {
 export async function updateTransformation(id: string, b: Partial<TransformationInput>, u: Who) {
   const { row, a } = await editable(id, u);
   if (b.stylistStaffId !== undefined && b.stylistStaffId !== row.stylist_staff_id) {
-    if (!can(u, 'transformations:manage')) throw forbidden('Reassigning a transformation to another stylist is for people who manage the library.');
-    b = { ...b, stylistStaffId: await checkStylist(b.stylistStaffId, u) };
+    const claiming = row.stylist_staff_id == null && b.stylistStaffId === u.id;
+    if (!claiming && !can(u, 'transformations:manage')) throw forbidden('Reassigning a transformation to another stylist is for people who manage the library.');
+    b = { ...b, stylistStaffId: claiming ? u.id : await checkStylist(b.stylistStaffId, u) };
   }
   // Technical notes can only be changed by someone who can see them.
   if ((b.technicalNotes !== undefined || b.internalNotes !== undefined) && !a.technical) throw forbidden('You can’t change technical notes on this transformation.');
   const set: string[] = [];
   const p: unknown[] = [id];
   const put = (col: string, v: unknown) => { p.push(v); set.push(`${col} = $${p.length}`); };
-  if (b.title !== undefined) put('title', b.title.trim());
+  if (b.title !== undefined) put('title', b.title.trim() || b.mainService?.trim() || row.main_service);
   if (b.stylistStaffId !== undefined) put('stylist_staff_id', b.stylistStaffId);
   if (b.serviceDate !== undefined) put('service_date', b.serviceDate);
   if (b.clientId !== undefined) put('client_id', b.clientId);
@@ -329,6 +395,39 @@ export async function updateTransformation(id: string, b: Partial<Transformation
     }
   });
   return getTransformation(id, u);
+}
+
+// ---------------- to confirm (from finished appointments) ----------------
+const CONFIRM_DAYS = 14;
+/** A service from the appointment, as one of the library's services when it clearly is one. */
+export function matchService(name: string, list: string[]) {
+  const n = name.toLowerCase();
+  const words = (s: string) => s.toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 3);
+  return list.find((s) => s.toLowerCase() === n)
+    ?? list.find((s) => words(s).some((w) => n.includes(w)) && s !== 'Other')
+    ?? name;
+}
+/** This stylist's finished appointments in the last two weeks that don't have a transformation yet (and weren't skipped). */
+export async function toConfirm(u: Who) {
+  if (!can(u, 'transformations:own')) return [];
+  const rows = await db().query<any>(`SELECT a.id, to_char(a.start_at, 'YYYY-MM-DD') AS day, a.start_at, a.client_id,
+      NULLIF(TRIM(COALESCE(c.first_name,'') || ' ' || LEFT(COALESCE(c.last_name,''), 1)), '') AS client,
+      ARRAY(SELECT service_name FROM appointment_services s WHERE s.appointment_id = a.id ORDER BY position) AS services
+    FROM appointments a LEFT JOIN clients c ON c.id = a.client_id
+    WHERE (a.staff_id = $1 OR a.staff_id IS NULL) AND a.square_status = 'ACCEPTED' AND a.end_at <= now() AND a.end_at > now() - interval '${CONFIRM_DAYS} days'
+      AND NOT EXISTS (SELECT 1 FROM transformations t WHERE t.appointment_id = a.id)
+      AND NOT EXISTS (SELECT 1 FROM transformation_skips k WHERE k.appointment_id = a.id)
+    ORDER BY a.start_at DESC LIMIT 30`, [u.id]);
+  const list = await serviceList();
+  return rows.map((r) => {
+    const services: string[] = [...new Set((r.services as string[]).map((s) => matchService(s, list)))];
+    return { appointmentId: r.id as string, date: r.day as string, clientId: r.client_id as string | null, clientName: (r.client as string | null) && `${r.client}.`, services };
+  });
+}
+export async function skipAppointment(id: string, u: Who) {
+  const a = await db().one<{ staff_id: string | null }>('SELECT staff_id FROM appointments WHERE id = $1', [id]);
+  if (!a || (a.staff_id && a.staff_id !== u.id && !can(u, 'transformations:manage'))) throw notFound('That appointment');
+  await db().query('INSERT INTO transformation_skips(appointment_id, staff_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [id, u.id]);
 }
 
 export async function deleteTransformation(id: string, u: Who) {
@@ -388,29 +487,37 @@ export async function updateConsent(id: string, b: ConsentInput, u: Who) {
 async function removeIfUnused(rel: string) {
   if (!(await db().one('SELECT 1 FROM transformation_media WHERE file_path = $1', [rel]))) await removeFile(rel);
 }
-async function storeOriginal(bytes: Buffer) {
-  if (!bytes.length) throw badRequest('The file is empty.');
-  if (bytes.length > MAX_PHOTO_BYTES) throw badRequest(`Photos can be up to ${MAX_PHOTO_BYTES / 1024 / 1024} MB.`);
-  const kind = sniffImage(bytes);
-  if (!kind) throw badRequest('That file isn’t a photo the library accepts (JPEG, PNG, WebP, HEIC or AVIF).');
-  const sha = crypto.createHash('sha256').update(bytes).digest('hex');
-  const rel = `originals/${sha.slice(0, 2)}/${sha}.${kind.ext}`;
-  await writeFileOnce(rel, bytes);
-  return { rel, sha, ...kind };
+/** Moves a received upload into storage, named by its content (the same file twice is stored once; never overwritten). */
+async function storeOriginal(up: Upload) {
+  try {
+    if (!up.size) throw badRequest('The file is empty.');
+    const kind = sniffMedia(up.head);
+    if (!kind) throw badRequest('That file isn’t a photo or video the library accepts (JPEG, PNG, WebP, HEIC, MP4, MOV or WebM).');
+    if (!kind.video && up.size > MAX_PHOTO_BYTES) throw badRequest(`Photos can be up to ${MAX_PHOTO_BYTES / 1024 / 1024} MB.`);
+    const rel = `originals/${up.sha.slice(0, 2)}/${up.sha}.${kind.ext}`;
+    const dest = abs(rel);
+    await fs.promises.mkdir(path.dirname(dest), { recursive: true });
+    if (fs.existsSync(dest)) await dropUpload(up); else await fs.promises.rename(up.tmp, dest);
+    return { rel, sha: up.sha, size: up.size, ...kind };
+  } catch (e) {
+    await dropUpload(up);
+    throw e;
+  }
 }
 const KINDS = ['before', 'after', 'finished', 'detail', 'other'];
 
-export async function addPhoto(id: string, bytes: Buffer, meta: { kind?: string; caption?: string | null; name?: string | null }, u: Who) {
+/** Adds a photo or video. `receive` reads the upload — only after the permission check, so nothing is stored for refusals. */
+export async function addPhoto(id: string, receive: () => Promise<Upload>, meta: { kind?: string; caption?: string | null; name?: string | null }, u: Who) {
   await editable(id, u);
   const kind = KINDS.includes(meta.kind ?? '') ? meta.kind! : 'after';
-  const sha = crypto.createHash('sha256').update(bytes).digest('hex');
+  const up = await receive();
   // The same file selected twice for one transformation is kept once.
-  const dupe = await db().one<{ id: string }>('SELECT id FROM transformation_media WHERE transformation_id = $1 AND sha256 = $2', [id, sha]);
-  if (dupe) return { photoId: dupe.id, duplicate: true, transformation: await getTransformation(id, u) };
-  const f = await storeOriginal(bytes);
+  const dupe = await db().one<{ id: string }>('SELECT id FROM transformation_media WHERE transformation_id = $1 AND sha256 = $2', [id, up.sha]);
+  if (dupe) { await dropUpload(up); return { photoId: dupe.id, duplicate: true, transformation: await getTransformation(id, u) }; }
+  const f = await storeOriginal(up);
   const [{ pos }] = await db().query<{ pos: number }>('SELECT COALESCE(MAX(position), -1) + 1 AS pos FROM transformation_media WHERE transformation_id = $1', [id]);
   const [r] = await db().query<{ id: string }>(`INSERT INTO transformation_media(transformation_id, kind, caption, position, file_path, mime, size, sha256, original_name, uploaded_by_staff_id)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [id, kind, meta.caption ?? null, pos, f.rel, f.mime, bytes.length, f.sha, meta.name?.slice(0, 200) ?? null, u.id]);
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [id, kind, meta.caption ?? null, pos, f.rel, f.mime, f.size, f.sha, meta.name?.slice(0, 200) ?? null, u.id]);
   await touch(id);
   return { photoId: r.id, duplicate: false, transformation: await getTransformation(id, u) };
 }
@@ -440,11 +547,11 @@ export async function setThumbnail(mid: string, bytes: Buffer, u: Who) {
   return { ok: true };
 }
 
-export async function replacePhoto(mid: string, bytes: Buffer, name: string | null, u: Who) {
+export async function replacePhoto(mid: string, receive: () => Promise<Upload>, name: string | null, u: Who) {
   const m = await editablePhoto(mid, u);
-  const f = await storeOriginal(bytes);
+  const f = await storeOriginal(await receive());
   await db().query('UPDATE transformation_media SET file_path = $2, thumb_path = NULL, mime = $3, size = $4, sha256 = $5, original_name = $6, uploaded_by_staff_id = $7, uploaded_at = now() WHERE id = $1',
-    [mid, f.rel, f.mime, bytes.length, f.sha, name?.slice(0, 200) ?? null, u.id]);
+    [mid, f.rel, f.mime, f.size, f.sha, name?.slice(0, 200) ?? null, u.id]);
   if (m.file_path !== f.rel) await removeIfUnused(m.file_path);
   await removeFile(m.thumb_path);
   await touch(m.transformation_id);
@@ -486,7 +593,8 @@ export async function photoFile(mid: string, which: 'thumb' | 'original', u: Who
   const { row, a } = await visible(m.transformation_id, u);
   if (which === 'original' && !a.download) throw forbidden('You don’t have permission to download this photo.');
   // Without a thumbnail (e.g. HEIC the browser couldn't draw), the gallery gets the original — only for viewers who may download it.
-  const rel = which === 'thumb' && m.thumb_path ? m.thumb_path : which === 'thumb' && !a.download ? null : m.file_path;
+  const isVideo = String(m.mime).startsWith('video/');
+  const rel = which === 'thumb' && m.thumb_path ? m.thumb_path : which === 'thumb' && (!a.download || isVideo) ? null : m.file_path;
   if (!rel) return null;
   const mime = rel === m.file_path ? m.mime : rel.endsWith('.webp') ? 'image/webp' : rel.endsWith('.png') ? 'image/png' : 'image/jpeg';
   const p = abs(rel);
@@ -662,6 +770,24 @@ export class ZipWriter {
   constructor(private file: string) {}
   async open() { await fs.promises.mkdir(path.dirname(this.file), { recursive: true }); this.fd = await fs.promises.open(this.file, 'w'); }
   private async write(b: Buffer) { await this.fd!.write(b); this.offset += b.length; }
+  /** Adds a file from disk, read twice in chunks (checksum, then copy) so large videos never sit in memory. */
+  async addFile(name: string, file: string) {
+    const size = (await fs.promises.stat(file)).size;
+    if (this.offset + size > 0xfffffff0) throw new Error('ZIP_TOO_LARGE');
+    let crc = 0;
+    for await (const c of fs.createReadStream(file)) crc = zlib.crc32(c as Buffer, crc);
+    const n = Buffer.from(name, 'utf8');
+    await this.write(this.header(n, crc >>> 0, size));
+    for await (const c of fs.createReadStream(file)) await this.write(c as Buffer);
+  }
+  private header(n: Buffer, crc: number, size: number) {
+    const h = Buffer.alloc(30);
+    h.writeUInt32LE(0x04034b50, 0); h.writeUInt16LE(20, 4); h.writeUInt16LE(0x0800, 6); h.writeUInt16LE(0, 8);
+    h.writeUInt16LE(this.when.time, 10); h.writeUInt16LE(this.when.date, 12); h.writeUInt32LE(crc, 14); h.writeUInt32LE(size, 18); h.writeUInt32LE(size, 22);
+    h.writeUInt16LE(n.length, 26); h.writeUInt16LE(0, 28);
+    this.entries.push({ name: n, crc, size, offset: this.offset });
+    return Buffer.concat([h, n]);
+  }
   async add(name: string, data: Buffer) {
     if (this.offset + data.length > 0xfffffff0) throw new Error('ZIP_TOO_LARGE');
     const n = Buffer.from(name, 'utf8');
@@ -781,8 +907,8 @@ async function runExport(id: string, req: ExportRequest, u: Who) {
         for (let i = 2; used.has(name); i++) name = name.replace(/(\.[a-z]+)$/, `_${i}$1`);
         try {
           if (!m) throw new Error('Photo was removed');
-          const bytes = await fs.promises.readFile(abs(m.file_path)).catch(() => { throw new Error('File is missing from storage'); });
-          await zip.add(name, bytes);
+          if (!fs.existsSync(abs(m.file_path))) throw new Error('File is missing from storage');
+          await zip.addFile(name, abs(m.file_path));
           used.add(name);
           files.push(name.slice(folder.length + 1));
         } catch (e: any) {

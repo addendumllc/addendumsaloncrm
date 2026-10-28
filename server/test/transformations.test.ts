@@ -278,4 +278,68 @@ describe('Transformations Library', () => {
     expect(opts.can).toMatchObject({ create: true, viewAll: false, bulk: false, consent: false });
     expect(opts.stylists.map((s: any) => s.name)).toEqual(['Jennifer']);
   });
+
+  it('stylists confirm their finished appointments with photos and a note (or mark no photos)', async () => {
+    const jenId = await staffId('jennifer@addendumsalon.com');
+    const client = (await db().one<{ id: string }>('SELECT id FROM clients LIMIT 1'))!.id;
+    const mk = async (ref: string, svc: string, daysAgo: number, staff = jenId) => {
+      const [a] = await db().query<{ id: string }>(`INSERT INTO appointments(square_booking_id, source, client_id, staff_id, start_at, end_at, square_status)
+        VALUES ($1,'demo',$2,$3, now() - make_interval(days => $4) - interval '2 hours', now() - make_interval(days => $4), 'ACCEPTED') RETURNING id`, [ref, client, staff, daysAgo]);
+      await db().query('INSERT INTO appointment_services(appointment_id, position, service_name) VALUES ($1,0,$2)', [a.id, svc]);
+      return a.id;
+    };
+    const a1 = await mk('tf-confirm-1', 'Balayage + Toner', 2);
+    const a2 = await mk('tf-confirm-2', 'Haircut & Style', 3);
+    await mk('tf-confirm-old', 'Haircut', 30); // too long ago
+    await mk('tf-confirm-mike', 'Haircut', 1, await staffId('michael@addendumsalon.com')); // someone else's
+    const mine = (items: any[]) => items.filter((x: any) => [a1, a2].includes(x.appointmentId) || x.services.includes('Haircut') && x.date < '2026-10-01');
+    const all = (await jen.get('/api/transformations/to-confirm')).body.items;
+    const list = mine(all);
+    expect(list.map((x: any) => x.appointmentId)).toEqual([a1, a2]);
+    expect(all.map((x: any) => x.appointmentId)).not.toContain(undefined);
+    expect(list[0].services).toEqual(['Balayage / lightening']); // matched to the library's service
+    // Confirm: just photos, the service and a note — title, date, client and stylist come from the appointment.
+    const r = await jen.post('/api/transformations', { appointmentId: a1, mainService: list[0].services[0], technicalNotes: '7N + gloss 9V' });
+    expect(r.status).toBe(201);
+    expect(r.body.transformation).toMatchObject({ title: 'Balayage / lightening', stylistName: 'Jennifer', clientId: client, technicalNotes: '7N + gloss 9V' });
+    expect(r.body.transformation.serviceDate).toBe(list[0].date);
+    expect((await jen.post('/api/transformations', { appointmentId: a1, mainService: 'Haircut' })).status).toBe(400); // only once
+    expect((await mike.post('/api/transformations', { appointmentId: a2, mainService: 'Haircut' })).status).toBe(403); // not theirs
+    expect((await mike.post(`/api/transformations/to-confirm/${a2}/skip`)).status).toBe(404);
+    expect((await jen.post(`/api/transformations/to-confirm/${a2}/skip`)).status).toBe(200);
+    expect(mine((await jen.get('/api/transformations/to-confirm')).body.items)).toEqual([]);
+  });
+
+  it('videos too (MP4 / MOV), stored once and played from the original; photos still checked by their bytes', async () => {
+    const t = (await jen.post('/api/transformations', { mainService: 'Haircut', technicalNotes: 'note' })).body.transformation;
+    expect(t.title).toBe('Haircut'); // no title needed
+    const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypisom'), Buffer.alloc(200_000, 7)]);
+    const mov = Buffer.concat([Buffer.from([0, 0, 0, 0x14]), Buffer.from('ftypqt  '), Buffer.alloc(1000, 3)]);
+    const v1 = await jen.upload(`/api/transformations/${t.id}/photos?kind=after&name=clip.mp4`, mp4);
+    expect(v1.status).toBe(201);
+    const v2 = await jen.upload(`/api/transformations/${t.id}/photos?kind=finished&name=clip.mov`, mov);
+    expect(v2.body.transformation.photos.map((p: any) => p.mime)).toEqual(['video/mp4', 'video/quicktime']);
+    expect((await jen.upload(`/api/transformations/${t.id}/photos`, mp4)).body.duplicate).toBe(true);
+    const got = await jen.file(`/api/transformations/media/${v1.body.photoId}/original`);
+    expect(got.body.equals(mp4)).toBe(true);
+    expect((await jen.get(`/api/transformations/media/${v1.body.photoId}/thumb`)).status).toBe(404); // no poster yet: never the video
+    // In the ZIP, streamed from disk.
+    const st = await waitExport(jen, (await jen.post('/api/transformations/exports', { preset: 'one', ids: [t.id] })).body.id);
+    expect(st).toMatchObject({ status: 'done', total: 2, failed: [] });
+    expect((await jen.file(st.downloadUrl)).body.toString('latin1')).toContain('/Finished.mov');
+  });
+
+  it('stylists see only their own work, plus work whose stylist is unknown (which they can claim)', async () => {
+    const own = (await mike.post('/api/transformations', { mainService: 'Haircut' })).body.transformation;
+    const orphan = (await owner.post('/api/transformations', { mainService: 'Gloss or toner', stylistStaffId: await staffId('michael@addendumsalon.com') })).body.transformation;
+    await db().query('UPDATE transformations SET stylist_staff_id = NULL WHERE id = $1', [orphan.id]); // e.g. the stylist left
+    const ids = (await jen.get('/api/transformations')).body.items.map((x: any) => x.id);
+    expect(ids).toContain(orphan.id);
+    expect(ids).not.toContain(own.id);
+    expect((await jen.get(`/api/transformations/${own.id}`)).status).toBe(404);
+    // Claim it.
+    const claimed = await jen.patch(`/api/transformations/${orphan.id}`, { stylistStaffId: await staffId('jennifer@addendumsalon.com') });
+    expect([claimed.status, claimed.body.transformation.stylistName]).toEqual([200, 'Jennifer']);
+    expect((await mike.get(`/api/transformations/${orphan.id}`)).status).toBe(404); // now Jennifer's
+  });
 });

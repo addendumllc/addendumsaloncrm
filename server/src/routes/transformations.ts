@@ -4,8 +4,8 @@ import { CONSENT_STATUSES } from '@addendum/shared';
 import { can } from '../auth/permissions.js';
 import {
   addInstagram, addPhoto, createCollection, createTransformation, deleteCollection, deleteTransformation, detailsCsv, exportFile, exportStatus, getTransformation,
-  listTransformations, MAX_PHOTO_BYTES, options, photoFile, refreshInstagram, removeInstagram, removePhoto, reorderPhotos, replacePhoto, setCollectionItems,
-  setInstagramPrimary, setServiceList, setThumbnail, startExport, updateConsent, updatePhoto, updateTransformation,
+  listTransformations, options, receiveUpload, photoFile, refreshInstagram, removeInstagram, removePhoto, reorderPhotos, replacePhoto, setCollectionItems,
+  setInstagramPrimary, setServiceList, setThumbnail, skipAppointment, startExport, toConfirm, updateConsent, updatePhoto, updateTransformation,
 } from '../domain/transformations.js';
 import { forbidden } from '../lib/errors.js';
 import { ah, isoDate, logAction, parse, uuid } from './util.js';
@@ -13,7 +13,6 @@ import { ah, isoDate, logAction, parse, uuid } from './util.js';
 /** Transformations Library (permissions.ts: any transformations permission opens it; each route checks the record). */
 export const transformationsRouter = Router();
 const ID = '([0-9a-fA-F-]{36})';
-const raw = express.raw({ type: () => true, limit: MAX_PHOTO_BYTES + 1024 });
 const rawThumb = express.raw({ type: () => true, limit: '1100kb' });
 const body = (b: unknown) => (Buffer.isBuffer(b) ? b : Buffer.alloc(0));
 const text = (max: number) => z.string().trim().max(max).nullable().optional().transform((v) => (v === undefined ? undefined : v || null));
@@ -33,12 +32,12 @@ const details = z.object({
   startingCondition: text(2000), desiredResult: text(2000), techniques: text(2000), products: text(2000), lengthTexture: text(500), styling: text(1000), aftercare: text(2000),
 }).partial();
 const fields = {
-  title: z.string().trim().min(1, 'add a title').max(200), stylistStaffId: uuid.nullable().optional(), serviceDate: isoDate, clientId: uuid.nullable().optional(),
+  title: z.string().trim().max(200), stylistStaffId: uuid.nullable().optional(), serviceDate: isoDate, clientId: uuid.nullable().optional(),
   mainService: z.string().trim().min(1, 'choose the main service').max(120), services: z.array(z.string().trim().min(1).max(120)).max(30).optional(),
   details: details.optional(), extension: extension.optional(), technicalNotes: text(5000), internalNotes: text(5000), caption: text(2200), hashtags: text(1000),
   tags: z.array(z.string().max(60)).max(40).optional(),
 };
-const createSchema = z.object({ ...fields, consentStatus: z.enum(CONSENT_STATUSES.map((s) => s.value) as [string, ...string[]]).optional(), instagramUrl: text(500) });
+const createSchema = z.object({ ...fields, title: z.string().trim().max(200).optional(), serviceDate: isoDate.optional(), appointmentId: uuid.nullable().optional(), consentStatus: z.enum(CONSENT_STATUSES.map((s) => s.value) as [string, ...string[]]).optional(), instagramUrl: text(500) });
 const listSchema = z.object({
   q: z.string().max(200).optional(), stylist: uuid.optional(), from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   service: z.string().max(120).optional(), extensions: z.string().max(60).optional(), collection: uuid.optional(), consent: z.string().max(30).optional(), tag: z.string().max(60).optional(),
@@ -48,6 +47,8 @@ const listSchema = z.object({
 const blank = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== '' && v != null));
 
 transformationsRouter.get('/', ah(async (req, res) => res.json(await listTransformations(parse(listSchema, blank(req.query as any)), req.user!))));
+transformationsRouter.get('/to-confirm', ah(async (req, res) => res.json({ items: await toConfirm(req.user!) })));
+transformationsRouter.post(`/to-confirm/:aid${ID}/skip`, ah(async (req, res) => { await skipAppointment(req.params.aid, req.user!); res.json({ ok: true }); }));
 transformationsRouter.get('/options', ah(async (req, res) => res.json(await options(req.user!))));
 transformationsRouter.put('/options/services', ah(async (req, res) => {
   if (!can(req.user, 'transformations:manage')) throw forbidden('Managing the services list is for people who manage the library.');
@@ -103,8 +104,8 @@ transformationsRouter.patch(`/photos/:mid${ID}`, ah(async (req, res) => {
   res.json({ transformation: await updatePhoto(req.params.mid, b, req.user!) });
 }));
 transformationsRouter.put(`/photos/:mid${ID}/thumb`, rawThumb, ah(async (req, res) => res.json(await setThumbnail(req.params.mid, body(req.body), req.user!))));
-transformationsRouter.post(`/photos/:mid${ID}/replace`, raw, ah(async (req, res) => {
-  const t = await replacePhoto(req.params.mid, body(req.body), String(req.query.name ?? '') || null, req.user!);
+transformationsRouter.post(`/photos/:mid${ID}/replace`, ah(async (req, res) => {
+  const t = await replacePhoto(req.params.mid, () => receiveUpload(req), String(req.query.name ?? '') || null, req.user!);
   await logAction(req, 'transformations.photo_replace', 'transformation', t.id, { photo: req.params.mid });
   res.json({ transformation: t });
 }));
@@ -147,8 +148,9 @@ transformationsRouter.patch(`/:id${ID}/consent`, ah(async (req, res) => {
   await logAction(req, 'transformations.consent', 'transformation', t.id, { status: t.consent.status, clientConsent: t.consent.clientConsent, verified: b.verified });
   res.json({ transformation: t });
 }));
-transformationsRouter.post(`/:id${ID}/photos`, raw, ah(async (req, res) => {
-  const out = await addPhoto(req.params.id, body(req.body), { kind: String(req.query.kind ?? ''), caption: String(req.query.caption ?? '') || null, name: String(req.query.name ?? '') || null }, req.user!);
+// Photos and videos are streamed to disk as they arrive (up to 500 MB for a video), after the permission check.
+transformationsRouter.post(`/:id${ID}/photos`, ah(async (req, res) => {
+  const out = await addPhoto(req.params.id, () => receiveUpload(req), { kind: String(req.query.kind ?? ''), caption: String(req.query.caption ?? '') || null, name: String(req.query.name ?? '') || null }, req.user!);
   if (!out.duplicate) await logAction(req, 'transformations.photo_add', 'transformation', req.params.id, { photo: out.photoId });
   res.status(out.duplicate ? 200 : 201).json(out);
 }));
