@@ -768,31 +768,40 @@ export async function setCollectionItems(cid: string, ids: string[], remove: boo
   return collections();
 }
 
-/** Addendum Hair's colour names (from the hair products), offered while typing a shade. */
-async function shadeNames() {
-  try {
-    const { stockRows } = await import('./stock.js');
-    const names = new Set<string>();
-    for (const r of await stockRows()) {
-      const n = hairName(r.label, r.sku);
-      if (n.method && n.color && !/swatch/i.test(r.label)) names.add(n.color);
-    }
-    return [...names].sort((a, b) => a.localeCompare(b));
-  } catch { return []; }
+/**
+ * Addendum Hair's colour names (from the hair products), offered while typing a shade. Reading the stores can be slow,
+ * so this has its own request, waits at most a few seconds (nothing to suggest yet otherwise) and is kept for 10 minutes.
+ */
+let shadeCache: { at: number; names: string[] } | null = null;
+let shadeLoading: Promise<string[]> | null = null;
+export async function shadeNames(): Promise<string[]> {
+  if (shadeCache && Date.now() - shadeCache.at < 10 * 60_000) return shadeCache.names;
+  shadeLoading ??= (async () => {
+    try {
+      const { stockRows } = await import('./stock.js');
+      const names = new Set<string>();
+      for (const r of await stockRows()) {
+        const n = hairName(r.label, r.sku);
+        if (n.method && n.color && !/swatch/i.test(r.label)) names.add(n.color);
+      }
+      shadeCache = { at: Date.now(), names: [...names].sort((a, b) => a.localeCompare(b)) };
+      return shadeCache.names;
+    } catch { return shadeCache?.names ?? []; } finally { shadeLoading = null; }
+  })();
+  return Promise.race([shadeLoading, new Promise<string[]>((r) => setTimeout(() => r(shadeCache?.names ?? []), 3000))]);
 }
 
 export async function options(u: Who) {
-  const [services, catalog, stylists, tags, methods, shades] = await Promise.all([
+  const [services, catalog, stylists, tags, methods] = await Promise.all([
     serviceList(),
     db().query<{ name: string }>('SELECT DISTINCT name FROM services ORDER BY name LIMIT 400').catch(() => []),
     db().query<{ id: string; name: string }>(seesAll(u) || can(u, 'transformations:manage')
       ? 'SELECT id, name FROM staff WHERE active ORDER BY lower(name)' : 'SELECT id, name FROM staff WHERE id = $1', seesAll(u) || can(u, 'transformations:manage') ? [] : [u.id]),
     db().query<{ tag: string }>('SELECT DISTINCT unnest(tags) AS tag FROM transformations ORDER BY 1 LIMIT 300'),
     db().query<{ method: string }>("SELECT DISTINCT method FROM transformation_extensions WHERE method IS NOT NULL AND method <> '' ORDER BY 1"),
-    shadeNames(),
   ]);
   return {
-    services, catalog: catalog.map((c) => c.name), shades, stylists, tags: tags.map((t) => t.tag), methods: methods.map((m) => m.method), collections: await collections(),
+    services, catalog: catalog.map((c) => c.name), stylists, tags: tags.map((t) => t.tag), methods: methods.map((m) => m.method), collections: await collections(),
     can: {
       create: can(u, 'transformations:own') || can(u, 'transformations:manage'), viewAll: seesAll(u), manage: can(u, 'transformations:manage'),
       consent: can(u, 'transformations:consent'), download: can(u, 'transformations:download'), bulk: can(u, 'transformations:bulk'), technical: can(u, 'transformations:technical'),

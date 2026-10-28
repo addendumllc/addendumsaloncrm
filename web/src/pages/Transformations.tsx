@@ -12,7 +12,7 @@ import { api } from '../api/client';
 import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, Segmented, Spinner, Toggle, buttonClass, cx, useToast, chipClass } from '../components/ui';
 
 interface Options {
-  services: string[]; catalog: string[]; shades: string[]; stylists: { id: string; name: string }[]; tags: string[]; methods: string[]; collections: { id: string; name: string; count: number }[];
+  services: string[]; catalog: string[]; stylists: { id: string; name: string }[]; tags: string[]; methods: string[]; collections: { id: string; name: string; count: number }[];
   can: { create: boolean; viewAll: boolean; manage: boolean; consent: boolean; download: boolean; bulk: boolean; technical: boolean };
 }
 interface Filter { q: string; stylist: string; service: string; extensions: string; collection: string; consent: string; from: string; to: string; sort: string }
@@ -479,6 +479,8 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
   const allServices = [d.mainService, ...d.services];
   const extRelevant = allServices.some(isExt) || d.hasExtensions;
   const isHybrid = /hybrid/i.test(d.ext.method ?? '');
+  // Colour names to suggest (their own request, so a slow store never holds up the form).
+  const { data: shades } = useQuery({ queryKey: ['tf-shades'], queryFn: () => api.get<{ shades: string[] }>('/transformations/shades').then((r) => r.shades), staleTime: 10 * 60_000, enabled: extRelevant });
   const parts: { method: string; shade: string | null; length: string | null }[] = Array.isArray(d.ext.parts) ? d.ext.parts : [];
   const setParts = (p: typeof parts) => setD({ ...d, ext: { ...d.ext, parts: p } });
   const canTech = !cur || cur.canSeeTechnical;
@@ -685,7 +687,7 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
               </div>
             ))}
             <Button size="sm" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setParts([...parts, { method: '', shade: null, length: d.ext.length || null }])}>{isHybrid ? 'Add method & colour' : 'Add another shade'}</Button>
-            <datalist id="tf-shades">{o.shades.map((x) => <option key={x} value={x} />)}</datalist>
+            <datalist id="tf-shades">{(shades ?? []).map((x) => <option key={x} value={x} />)}</datalist>
           </div>
         )}
         {canTech && <Field label="Notes" hint="Formula, products, anything to remember. Private — never in captions or exports.">

@@ -412,4 +412,11 @@ describe('Transformations Library', () => {
     const st = await waitExport(jen, (await jen.post('/api/transformations/exports', { preset: 'one', ids: [t.id] })).body.id);
     expect((await jen.file(st.downloadUrl)).body.toString('latin1')).toContain('/Original.jpg');
   });
+
+  it('shade suggestions have their own request (the page never waits on the stores)', async () => {
+    const r = await jen.get('/api/transformations/shades');
+    expect(r.status).toBe(200);
+    expect(Array.isArray(r.body.shades)).toBe(true);
+    expect((await jen.get('/api/transformations/options')).body.shades).toBeUndefined();
+  });
 });

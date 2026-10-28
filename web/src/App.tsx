@@ -1,3 +1,4 @@
+import { PageErrorBoundary } from './components/layout/PageErrorBoundary';
 import { Suspense, lazy, useEffect, type ReactNode } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -180,7 +181,7 @@ function SignedIn() {
     const home = canAny('appointments:read_own', 'appointments:read') ? '/my-calendar' : canAny('inventory:order', 'inventory:view') ? '/inventory' : canAny('commission:own') ? '/my-commission' : '/settings';
     return (
       <StylistShell>
-        <Suspense fallback={<PageLoading />}>{routes(home)}</Suspense>
+        <PageErrorBoundary resetKey={loc.pathname}><Suspense fallback={<PageLoading />}>{routes(home)}</Suspense></PageErrorBoundary>
       </StylistShell>
     );
   }
@@ -191,7 +192,7 @@ function SignedIn() {
   return (
     <ActionsProvider>
       <AppShell>
-        <Suspense fallback={<PageLoading />}>{routes('/')}</Suspense>
+        <PageErrorBoundary resetKey={loc.pathname}><Suspense fallback={<PageLoading />}>{routes('/')}</Suspense></PageErrorBoundary>
       </AppShell>
     </ActionsProvider>
   );

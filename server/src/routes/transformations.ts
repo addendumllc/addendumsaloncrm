@@ -5,7 +5,7 @@ import { can } from '../auth/permissions.js';
 import {
   addInstagram, addInstagramLinks, addPhoto, createCollection, createTransformation, deleteCollection, deleteTransformation, detailsCsv, exportFile, exportStatus, getTransformation,
   listTransformations, options, receiveUpload, photoFile, refreshInstagram, removeInstagram, removePhoto, reorderPhotos, replacePhoto, setCollectionItems,
-  setInstagramPrimary, setServiceList, setThumbnail, skipAppointment, startExport, toConfirm, needsDetails, updateConsent, updatePhoto, updateTransformation,
+  setInstagramPrimary, setServiceList, setThumbnail, shadeNames, skipAppointment, startExport, toConfirm, needsDetails, updateConsent, updatePhoto, updateTransformation,
 } from '../domain/transformations.js';
 import { forbidden } from '../lib/errors.js';
 import { ah, isoDate, logAction, parse, uuid } from './util.js';
@@ -51,6 +51,7 @@ const blank = (o: Record<string, unknown>) => Object.fromEntries(Object.entries(
 transformationsRouter.get('/', ah(async (req, res) => res.json(await listTransformations(parse(listSchema, blank(req.query as any)), req.user!))));
 transformationsRouter.get('/to-confirm', ah(async (req, res) => res.json({ items: await toConfirm(req.user!), needsDetails: await needsDetails(req.user!) })));
 transformationsRouter.post(`/to-confirm/:aid${ID}/skip`, ah(async (req, res) => { await skipAppointment(req.params.aid, req.user!); res.json({ ok: true }); }));
+transformationsRouter.get('/shades', ah(async (_req, res) => res.json({ shades: await shadeNames() })));
 transformationsRouter.get('/options', ah(async (req, res) => res.json(await options(req.user!))));
 transformationsRouter.put('/options/services', ah(async (req, res) => {
   if (!can(req.user, 'transformations:manage')) throw forbidden('Managing the services list is for people who manage the library.');
