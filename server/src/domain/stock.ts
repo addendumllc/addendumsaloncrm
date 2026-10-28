@@ -1095,6 +1095,33 @@ export async function correctReceived(id: string, lineId: string, received: numb
   return { order: await onePO(id), result: res };
 }
 
+/**
+ * The wrong product on an order (e.g. 18" Espresso Martini instead of 22"): the line becomes the right product — at any
+ * stage. Units already received move with it: off the wrong product's stock and onto the right one's, in the order's
+ * store, logged as a purchase order correction.
+ */
+export async function changePoLineProduct(id: string, lineId: string, productKey: string, staffId: string | null) {
+  const p = await onePO(id);
+  const l = p.lines.find((x) => x.id === lineId);
+  if (!l) throw notFound('That item');
+  if (l.productKey === productKey) return { order: p, result: null };
+  if (p.lines.some((x) => x.productKey === productKey)) throw badRequest('That product is already on this order — change its quantity instead.');
+  const [row] = await lineRows([{ productKey, quantity: l.quantity }]);
+  let result = null;
+  if (l.received > 0) {
+    result = await applyStockChanges([{ key: l.productKey, delta: -l.received }, { key: row.key, delta: l.received }], { kind: 'adjust', reason: 'Purchase order correction',
+      note: `Wrong product on the order: ${l.label} → ${row.label}`, staffId, reference: p.name ? `${p.name} (PO #${p.number})` : `PO #${p.number}`, only: p.store === 'shopify' ? 'shopify' : 'square' });
+    const failed = result.results.filter((r) => !r.ok);
+    if (failed.length) throw badRequest(`The store’s stock couldn’t be moved (${failed.map((f) => f.note || f.label).join('; ')}). Nothing was changed on the order.`);
+  }
+  // The right product's details; the price paid stays (it's what was invoiced) unless the line had none.
+  await db().query('UPDATE purchase_order_lines SET product_key = $2, label = $3, sku = $4, supplier = COALESCE(supplier, $5), cost_cents = COALESCE(cost_cents, $6) WHERE id = $1',
+    [lineId, row.key, row.label, row.sku, row.supplier, row.cost]);
+  await db().query('UPDATE purchase_orders SET updated_at = now() WHERE id = $1', [id]);
+  forgetStockCache();
+  return { order: await onePO(id), result };
+}
+
 export async function receivePurchaseOrder(id: string, got: { lineId: string; quantity: number }[], staffId: string | null, note?: string | null) {
   const p = await onePO(id);
   if (p.status === 'draft' || p.status === 'cancelled' || p.status === 'received') throw badRequest(p.status === 'draft' ? 'Mark the order as ordered first.' : 'This order is closed.');

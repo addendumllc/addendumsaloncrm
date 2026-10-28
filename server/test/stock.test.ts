@@ -101,6 +101,19 @@ describe('Inventory tools (Stockline features)', () => {
     expect(demoSquareStock.get(SQ.weft60)).toBe(before + 10);
   });
 
+  it('the wrong product on an order is changed to the right one, and received units move with it', async () => {
+    const po = (await api.post('/api/inventory-sync/stock/purchase-orders', { lines: [{ productKey: SQ.weft60, quantity: 6 }], store: 'salon' })).body.orders[0];
+    await api.patch(`/api/inventory-sync/stock/purchase-orders/${po.id}`, { status: 'ordered' });
+    await api.post(`/api/inventory-sync/stock/purchase-orders/${po.id}/receive`, { lines: [{ lineId: po.lines[0].id, quantity: 6 }] });
+    const wBefore = demoSquareStock.get(SQ.weft60)!, kBefore = demoSquareStock.get(SQ.ktip)!;
+    const r = await api.post(`/api/inventory-sync/stock/purchase-orders/${po.id}/lines/${po.lines[0].id}/product`, { productKey: SQ.ktip });
+    expect(r.status).toBe(200);
+    expect(r.body.order.lines[0]).toMatchObject({ productKey: SQ.ktip, received: 6, quantity: 6 });
+    expect(r.body.order.status).toBe('received'); // still received, now the right product
+    expect(demoSquareStock.get(SQ.weft60)).toBe(wBefore - 6);
+    expect(demoSquareStock.get(SQ.ktip)).toBe(kBefore + 6);
+  });
+
   it('forecasts from sales, suggests orders, and purchase orders add stock when received', async () => {
     await api.put('/api/inventory-sync/stock/products/settings', { rows: [{ key: SQ.weft60, supplier: 'Hair Co', costCents: 4000, leadTimeDays: 45, moq: 10, caseSize: 5 }] });
     const f = (await api.post('/api/inventory-sync/stock/sales/refresh')).body;

@@ -1438,6 +1438,7 @@ export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'sho
   }, [productList]);
   // Moving an order made in the wrong store.
   const [moving, setMoving] = useState<PurchaseOrderDTO | null>(null);
+  const [changing, setChanging] = useState<string | null>(null);
   const { data: suppliers } = useSuppliers();
   const fallbackSupplier = suppliers?.find((s) => s.isDefault)?.name ?? null;
   const patchLine = async (p: PurchaseOrderDTO, lineId: string, body: object) => {
@@ -1530,6 +1531,8 @@ export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'sho
               <li className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
                 <span className="min-w-[min(100%,12rem)] flex-1 text-ink">
                   {productName(l.label, l.sku)}<ProductSettingsButton productKey={l.productKey} className="ml-1 align-middle" /><span className="ml-2 text-[11px] text-stone">{l.sku}{p.supplier?.includes(' + ') && l.supplier ? ` · ${l.supplier}` : ''}</span>
+                  {edit && <button type="button" className="ml-2 text-[12px] text-plum underline" onClick={() => setChanging(changing === l.id ? null : l.id)}>{changing === l.id ? 'Keep' : 'Change product'}</button>}
+                  {edit && changing === l.id && <ChangeProduct po={p} line={l} onDone={() => { setChanging(null); refresh(); }} />}
                 </span>
                 {/* A short note per item (e.g. a different lot, or "2 damaged"), at any stage. */}
                 <input className={cx(small, 'w-32 text-[12px]')} maxLength={40} defaultValue={l.lotNote ?? ''} placeholder="Note" aria-label={`Note for ${l.label}`}
@@ -1600,6 +1603,30 @@ export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'sho
 }
 
 /** Add products to an open order: search by name, colour, collection or SKU. */
+/** The wrong product on a line: pick the right one (units already received move with it). */
+function ChangeProduct({ po, line, onDone }: { po: PurchaseOrderDTO; line: PurchaseOrderDTO['lines'][number]; onDone: () => void }) {
+  const toast = useToast();
+  const { data } = useProducts();
+  const [q, setQ] = useState('');
+  const found = q.trim() ? filterProducts(data?.products ?? [], q, 'all').filter((x) => (po.store === 'salon' ? !!x.squareVariationId : !!x.shopifyInventoryItemId) && !po.lines.some((l) => l.productKey === x.key)).slice(0, 8) : [];
+  const pick = async (x: StockProductDTO) => {
+    const from = productName(line.label, line.sku), to = productName(x.label, x.sku);
+    if (!window.confirm(line.received ? `Change ${from} to ${to}? The ${line.received} received move too: ${from} stock goes down by ${line.received} and ${to} goes up by ${line.received}.` : `Change ${from} to ${to}?`)) return;
+    try { await api.post(`/inventory-sync/stock/purchase-orders/${po.id}/lines/${line.id}/product`, { productKey: x.key }); toast(line.received ? 'Product changed — stock moved' : 'Product changed'); onDone(); }
+    catch (e) { toast((e as Error).message, 'error'); }
+  };
+  return (
+    <span className="relative mt-1 block max-w-md">
+      <input className="field h-9 text-[14px]" autoFocus placeholder="The right product — e.g. 22 espresso martini" value={q} onChange={(e) => setQ(e.target.value)} />
+      {found.length > 0 && (
+        <ul className="absolute z-20 mt-1 w-full rounded-lg border border-line bg-white shadow-pop">
+          {found.map((x) => <li key={x.key}><button type="button" className="w-full px-3 py-2 text-left text-[13px] hover:bg-mist" onClick={() => pick(x)}>{productName(x.label, x.sku)} <span className="text-stone">{x.sku}</span></button></li>)}
+        </ul>
+      )}
+    </span>
+  );
+}
+
 function AddToOrder({ po, onAdded }: { po: PurchaseOrderDTO; onAdded: () => void }) {
   const toast = useToast();
   const { data } = useProducts();

@@ -8,7 +8,7 @@ import {
   unmarkSeparate,
 } from '../domain/inventorySync.js';
 import { addToSquare, confirmCounts, applyNewLength, applySwatches, moveSwatchesFirst, swatchPlan, applyPrices, applyProPrices, newLengthPlan, priceList, proPricePlan, squareCandidates,
-  applyStockChanges, assignCollection, createPurchaseOrders, deleteLeadRule, setSupplierLeadDefault, leadRules, leadTimesFor, saveLeadRule, internalCollections, mergeSuppliers, renameCollection, saveCollectionList, productSales, skipProducts, suggestPurchaseOrders, suggestedOrderPlan, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder, reopenPurchaseOrder, correctReceived,
+  applyStockChanges, assignCollection, createPurchaseOrders, deleteLeadRule, setSupplierLeadDefault, leadRules, leadTimesFor, saveLeadRule, internalCollections, mergeSuppliers, renameCollection, saveCollectionList, productSales, skipProducts, suggestPurchaseOrders, suggestedOrderPlan, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder, reopenPurchaseOrder, correctReceived, changePoLineProduct,
   assignSupplier, deleteSupplier, refreshShopifySales, renameSupplier, saveProductSettings, saveSupplier, setForecastSettings, setSupplierLeadTime, stockForecast, stockHistory, stockProducts, updatePurchaseOrder,
 } from '../domain/stock.js';
 import { setSquareSku } from '../domain/squareInventory.js';
@@ -355,6 +355,12 @@ inventorySyncRouter.post('/stock/purchase-orders/:id/reopen', ah(async (req, res
   const order = await reopenPurchaseOrder(req.params.id);
   await logAction(req, 'stock.po_reopen', 'purchase_order', req.params.id, { number: order.number });
   res.json({ order });
+}));
+inventorySyncRouter.post('/stock/purchase-orders/:id/lines/:lineId/product', ah(async (req, res) => {
+  const b = parse(z.object({ productKey: z.string().min(1).max(200) }), req.body);
+  const r = await changePoLineProduct(req.params.id, req.params.lineId, b.productKey, req.user!.id);
+  await logAction(req, 'stock.po_change_product', 'purchase_order', req.params.id, { line: req.params.lineId, product: b.productKey });
+  res.json(r);
 }));
 inventorySyncRouter.post('/stock/purchase-orders/:id/lines/:lineId/received', ah(async (req, res) => {
   const b = parse(z.object({ received: z.number().int().min(0).max(1_000_000), note: z.string().trim().max(500).nullable().optional() }), req.body);
