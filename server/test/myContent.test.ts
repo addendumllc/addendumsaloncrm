@@ -98,4 +98,20 @@ describe('My Content (a stylist’s own Instagram plan)', () => {
     expect((await jen.get(`/api/my-content/downloads/${hidden.id}`)).status).toBe(404); // only shared ones
     expect((await desk.get('/api/my-content/downloads')).status).toBe(403);
   });
+
+  it('shows the Content Calendar’s saved Instagram ideas for the salon (not suggestions, emails or other accounts)', async () => {
+    const { db } = await import('../src/db/index.js');
+    const add = (title: string, extra: string, args: unknown[] = []) => db().query(`INSERT INTO content_ideas(title, pillar, platform, format, accounts, status, caption, hashtags${extra ? ', ' + extra.split('=')[0] : ''}) VALUES ($1,'Education',$2,$3,$4,$5,'A caption','#tag'${extra ? ', $6' : ''})`, [title, ...args]);
+    await add('Salon reel idea', '', ['instagram', 'reel', ['a1'], 'library']);
+    await add('Everyone idea', '', ['instagram', 'feed', [], 'library']);
+    await add('Pro-only idea', '', ['instagram', 'feed', ['a3'], 'library']);
+    await add('Unsaved suggestion', '', ['instagram', 'feed', ['a1'], 'suggested']);
+    await add('Email idea', '', ['email', 'feed', ['a1'], 'library']);
+    const ideas = (await jen.get('/api/my-content/ideas')).body.ideas;
+    const titles = ideas.map((i: any) => i.title);
+    expect(titles).toEqual(expect.arrayContaining(['Salon reel idea', 'Everyone idea']));
+    for (const t of ['Pro-only idea', 'Unsaved suggestion', 'Email idea']) expect(titles).not.toContain(t);
+    expect(ideas.find((i: any) => i.title === 'Everyone idea').format).toBe('post');
+    expect((await desk.get('/api/my-content/ideas')).status).toBe(403);
+  });
 });

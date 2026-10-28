@@ -1,7 +1,7 @@
 import express, { Router } from 'express';
 import { z } from 'zod';
 import {
-  addFromTransformation, addUpload, salonDownload, salonDownloads, createPost, deletePost, FORMATS, getHandle, getPost, listPosts, mediaFile, myTransformationPhotos, removeMedia, setHandle, setThumb, STATUSES, updatePost,
+  addFromTransformation, addUpload, salonDownload, salonDownloads, salonIdeas, createPost, deletePost, FORMATS, getHandle, getPost, listPosts, mediaFile, myTransformationPhotos, removeMedia, setHandle, setThumb, STATUSES, updatePost,
 } from '../domain/myContent.js';
 import { receiveUpload } from '../domain/transformations.js';
 import { ah, parse, uuid } from './util.js';
@@ -22,6 +22,7 @@ myContentRouter.get('/', ah(async (req, res) => {
   res.json({ posts: await listPosts(req.user!, q.from, q.to), instagram: await getHandle(req.user!) });
 }));
 myContentRouter.put('/instagram', ah(async (req, res) => res.json({ instagram: await setHandle(req.user!, parse(z.object({ handle: z.string().max(100).nullable() }), req.body).handle) })));
+myContentRouter.get('/ideas', ah(async (_req, res) => res.json({ ideas: await salonIdeas() })));
 myContentRouter.get('/downloads', ah(async (_req, res) => res.json({ downloads: await salonDownloads() })));
 myContentRouter.get(`/downloads/:did${ID}`, ah(async (req, res) => {
   const m = await salonDownload(req.params.did);

@@ -7,6 +7,8 @@ import { TransformationsDue } from '../components/domain/TransformationsDue';
 import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, Segmented, Spinner, buttonClass, chipClass, cx, useToast } from '../components/ui';
 
 type Format = 'post' | 'reel' | 'story' | 'carousel';
+/** A new post, possibly started from one of the salon's ideas. */
+interface Draft { date: string | null; title?: string; caption?: string; hashtags?: string; notes?: string; format?: Format }
 type Status = 'idea' | 'draft' | 'ready' | 'posted';
 interface Media { id: string; thumbUrl: string; originalUrl: string; mime: string; fromTransformation: boolean }
 interface Post { id: string; date: string | null; time: string | null; format: Format; status: Status; title: string; caption: string | null; hashtags: string | null; notes: string | null; media: Media[]; updatedAt: string }
@@ -39,7 +41,7 @@ export function MyContentPage() {
   });
   useEffect(() => { try { localStorage.setItem('mc-view', view); } catch { /* private window */ } }, [view]);
   const { data, isLoading, error, refetch } = useMonth(month);
-  const [edit, setEdit] = useState<Post | { date: string | null } | null>(null);
+  const [edit, setEdit] = useState<Post | Draft | null>(null);
   const [handleOpen, setHandleOpen] = useState(false);
   const refresh = () => void qc.invalidateQueries({ queryKey: ['my-content'] });
   const posts = data?.posts ?? [];
@@ -101,6 +103,8 @@ export function MyContentPage() {
           </section>
         </>
       )}
+
+      <SalonIdeas onUse={(d) => setEdit(d)} />
 
       <SalonDownloads />
 
@@ -219,13 +223,13 @@ async function sendFile(url: string, body: Blob, method = 'POST') {
   return d;
 }
 
-function PostEditor({ initial, handle, onClose }: { initial: Post | { date: string | null }; handle: string | null; onClose: () => void }) {
+function PostEditor({ initial, handle, onClose }: { initial: Post | Draft; handle: string | null; onClose: () => void }) {
   const toast = useToast();
   const existing = 'id' in initial ? initial : null;
   const [post, setPost] = useState<Post | null>(existing);
   const [d, setD] = useState({
-    date: existing?.date ?? initial.date ?? '', time: existing?.time ?? '', format: existing?.format ?? 'post' as Format, status: existing?.status ?? (initial.date ? 'draft' : 'idea') as Status,
-    title: existing?.title ?? '', caption: existing?.caption ?? '', hashtags: existing?.hashtags ?? '', notes: existing?.notes ?? '',
+    date: existing?.date ?? initial.date ?? '', time: existing?.time ?? '', format: existing?.format ?? (initial as Draft).format ?? 'post' as Format, status: existing?.status ?? (initial.date ? 'draft' : 'idea') as Status,
+    title: existing?.title ?? (initial as Draft).title ?? '', caption: existing?.caption ?? (initial as Draft).caption ?? '', hashtags: existing?.hashtags ?? (initial as Draft).hashtags ?? '', notes: existing?.notes ?? (initial as Draft).notes ?? '',
   });
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(0);
@@ -457,6 +461,64 @@ function SalonDownloads() {
           ))}
         </div>
       )}
+    </section>
+  );
+}
+
+interface SalonIdea { id: string; title: string; pillar: string; format: Format; hook: string | null; visual: string | null; shotList: string | null; caption: string | null; cta: string | null; hashtags: string | null; alsoStory: boolean; effort: string }
+/** The Content Calendar's ideas, for stylists to use in their own plan ("Use this idea" starts a post with it). */
+function SalonIdeas({ onUse }: { onUse: (d: Draft) => void }) {
+  const { data } = useQuery({ queryKey: ['my-content-ideas'], queryFn: () => api.get<{ ideas: SalonIdea[] }>('/my-content/ideas').then((r) => r.ideas), staleTime: 5 * 60_000 });
+  const [q, setQ] = useState('');
+  const [format, setFormat] = useState<'' | Format>('');
+  const [open, setOpen] = useState<string | null>(null);
+  const [all, setAll] = useState(false);
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const list = (data ?? []).filter((i) => (!format || i.format === format || (format === 'story' && i.alsoStory))
+    && words.every((w) => [i.title, i.pillar, i.hook, i.caption].join(' ').toLowerCase().includes(w)));
+  const use = (i: SalonIdea) => onUse({
+    date: null, title: i.title, format: i.format,
+    caption: [i.caption, i.cta].filter(Boolean).join('\n\n'), hashtags: i.hashtags ?? '',
+    notes: [i.hook && `Hook: ${i.hook}`, i.visual && `Visual: ${i.visual}`, i.shotList && `Shots: ${i.shotList}`].filter(Boolean).join('\n'),
+  });
+  if (data && !data.length) return null;
+  return (
+    <section className="mt-8">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <h2 className="h-display text-[20px]">Ideas from the salon</h2>
+        <span className="text-[13px] text-stone">Use one to start a post of your own</span>
+      </div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input className="field h-10 min-w-[10rem] flex-1 sm:max-w-xs" placeholder="Search ideas" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="flex flex-wrap gap-1.5">{([['', 'All'], ['post', 'Posts'], ['carousel', 'Carousels'], ['reel', 'Reels'], ['story', 'Stories']] as const).map(([v, l]) => (
+          <button key={v} type="button" aria-pressed={format === v} className={chipClass(format === v)} onClick={() => setFormat(v)}>{l}</button>
+        ))}</div>
+      </div>
+      {!data ? <PageLoading /> : !list.length ? <p className="text-[13px] text-stone">No ideas match.</p> : (
+        <div className="panel divide-y divide-line !p-0">
+          {(all ? list : list.slice(0, 12)).map((i) => (
+            <div key={i.id}>
+              <div className="flex items-center gap-3 px-3 py-2.5">
+                <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setOpen(open === i.id ? null : i.id)} aria-expanded={open === i.id}>
+                  <span className="block text-[15px] text-ink">{i.title}</span>
+                  <span className="block truncate text-[12px] text-stone">{FORMATS.find((f) => f.value === i.format)?.label}{i.alsoStory ? ' · also a Story' : ''} · {i.pillar}</span>
+                </button>
+                <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => use(i)}>Use this idea</Button>
+              </div>
+              {open === i.id && (
+                <div className="space-y-1 bg-mist/40 px-3 pb-3 pt-1 text-[13px] text-ink-soft">
+                  {i.hook && <p><span className="text-stone">Hook:</span> {i.hook}</p>}
+                  {i.visual && <p><span className="text-stone">Visual:</span> {i.visual}</p>}
+                  {i.shotList && <p className="whitespace-pre-wrap"><span className="text-stone">Shots:</span> {i.shotList}</p>}
+                  {i.caption && <p className="whitespace-pre-wrap"><span className="text-stone">Caption:</span> {i.caption}</p>}
+                  {i.hashtags && <p className="text-plum">{i.hashtags}</p>}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {list.length > 12 && !all && <div className="mt-2 flex justify-center"><Button size="sm" onClick={() => setAll(true)}>Show all {list.length}</Button></div>}
     </section>
   );
 }

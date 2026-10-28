@@ -171,3 +171,19 @@ export async function salonDownload(id: string) {
   if (!m) throw notFound('That download');
   return m;
 }
+
+// ---------------- the salon's ideas ----------------
+/**
+ * The Content Calendar's saved Instagram ideas for the salon's account (addendum.salon, or ideas for every account), for
+ * stylists to use in their own plan. Read-only: using one copies it into a post of theirs.
+ */
+export async function salonIdeas() {
+  const rows = await db().query<any>(`SELECT id, title, pillar, format, hook, visual, shot_list, caption, cta, hashtags, also_story, effort FROM content_ideas
+    WHERE platform = 'instagram' AND COALESCE(status, 'library') = 'library' AND (accounts = '{}' OR 'a1' = ANY(accounts))
+    ORDER BY builtin, created_at DESC LIMIT 300`);
+  return rows.map((r) => ({
+    id: r.id as string, title: r.title as string, pillar: r.pillar as string,
+    format: (r.format === 'reel' || r.format === 'story' || r.format === 'carousel' ? r.format : 'post') as (typeof FORMATS)[number],
+    hook: r.hook, visual: r.visual, shotList: r.shot_list, caption: r.caption, cta: r.cta, hashtags: r.hashtags, alsoStory: !!r.also_story, effort: r.effort,
+  }));
+}
