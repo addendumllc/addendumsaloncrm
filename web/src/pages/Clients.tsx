@@ -83,17 +83,17 @@ function ClientList() {
       {data && <p className="-mt-2 mb-3 text-[14px] text-stone">{data.total} client{data.total === 1 ? '' : 's'}</p>}
       <div className="mb-5 flex flex-wrap gap-2">
         <input className="field h-9 w-full py-1 text-sm sm:w-64" placeholder="Name, phone or email" value={f.q} onChange={(e) => set('q', e.target.value)} />
-        <select className="field h-9 w-auto py-1 text-sm" value={f.tag} onChange={(e) => set('tag', e.target.value)} aria-label="Tag">
+        <select className="field h-10 w-auto py-1 text-sm" value={f.tag} onChange={(e) => set('tag', e.target.value)} aria-label="Tag">
           <option value="">All tags</option>{tags?.map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
         </select>
-        <select className="field h-9 w-auto py-1 text-sm" value={f.staffId} onChange={(e) => set('staff', e.target.value)} aria-label="Stylist">
+        <select className="field h-10 w-auto py-1 text-sm" value={f.staffId} onChange={(e) => set('staff', e.target.value)} aria-label="Stylist">
           <option value="">Any stylist</option>{staff?.filter((s) => s.stylist || s.id === f.staffId).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
         <input className="field h-9 w-40 py-1 text-sm" placeholder="Service" value={f.service} onChange={(e) => set('service', e.target.value)} />
-        <select className="field h-9 w-auto py-1 text-sm" value={f.last} onChange={(e) => set('last', e.target.value)} aria-label="Last visit">
+        <select className="field h-10 w-auto py-1 text-sm" value={f.last} onChange={(e) => set('last', e.target.value)} aria-label="Last visit">
           {Object.entries(LAST_VISIT).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </select>
-        <select className="field h-9 w-auto py-1 text-sm" value={f.next} onChange={(e) => set('next', e.target.value)} aria-label="Next appointment">
+        <select className="field h-10 w-auto py-1 text-sm" value={f.next} onChange={(e) => set('next', e.target.value)} aria-label="Next appointment">
           <option value="">Any next appointment</option><option value="yes">Has next appointment</option><option value="no">Nothing booked</option>
         </select>
         <label className="flex items-center gap-1.5 text-sm text-stone"><input type="checkbox" className="accent-plum" checked={f.archived === 'true'} onChange={(e) => set('archived', e.target.checked ? 'true' : '')} />Archived</label>

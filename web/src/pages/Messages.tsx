@@ -6,7 +6,7 @@ import {
 import { api } from '../api/client';
 import { useCanDo, useConversation, useConversations, useIntegrations, useRefreshAll, useSettings } from '../api/hooks';
 import { dateShort, dateTime, phone as fmtPhone, relative, time } from '../lib/format';
-import { buttonClass, Avatar, Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, Segmented, cx, useToast } from '../components/ui';
+import { buttonClass, Avatar, Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, Segmented, cx, useToast, PageHeader } from '../components/ui';
 import { useActions } from '../components/domain/ActionsProvider';
 import { ContactPicker, type PickedContact } from '../components/domain/ContactPicker';
 import { SavedRepliesPicker } from '../components/domain/SavedRepliesPicker';
@@ -54,7 +54,7 @@ export function MessagesPage() {
     return (
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="app-content mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-          <h1 className="h-display mb-4 text-[32px] leading-none">{defaults.title}</h1>
+          <PageHeader title={defaults.title} />
           <SectionPicker path="/messages" names={names} can={canDo} className="mb-4" />
           {defaults.render()}
         </div>

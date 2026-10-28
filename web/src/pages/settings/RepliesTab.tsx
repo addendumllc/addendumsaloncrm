@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
 import { REPLY_PLACEHOLDERS, REPLY_SITUATIONS, type ReplySituation, type SavedReply } from '@addendum/shared';
-import { Button, Field, cx } from '../../components/ui';
+import { Button, Field, cx, chipClass } from '../../components/ui';
 import { Card, SaveBar, useCan, useSection } from './shared';
 
 const SAMPLE = Object.fromEntries(REPLY_PLACEHOLDERS.map((p) => [p.key, p.sample]));
@@ -102,7 +102,7 @@ function ReplyEditor({ reply, locked, onChange, onDelete, onUp, onDown }: {
           const on = reply.situations.includes(s.value);
           return (
             <button key={s.value} type="button" disabled={locked} onClick={() => toggle(s.value)} aria-pressed={on}
-              className={cx('rounded-full border px-2.5 py-1 text-xs transition-colors disabled:cursor-not-allowed', on ? 'border-plum bg-plum text-white' : 'border-line bg-white text-ink-soft hover:border-plum/40')}>
+              className={chipClass(on)}>
               {s.label}
             </button>
           );

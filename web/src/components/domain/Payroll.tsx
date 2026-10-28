@@ -5,7 +5,7 @@ import { ArrowDownToLine, ArrowUpFromLine, ChevronLeft, ChevronRight, Clock3, Re
 import { api } from '../../api/client';
 import { useCanDo, useMe } from '../../api/hooks';
 import { addDaysKey, dayKey, labelOfKey, weekdayOfKey } from '../../lib/format';
-import { Button, Modal, PageLoading, Segmented, cx, useToast } from '../ui';
+import { Button, Modal, PageLoading, Segmented, cx, useToast, chipClass } from '../ui';
 import { ShiftModal, ShiftsList } from './Shifts';
 
 const ymdLocal = (iso: string) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
@@ -180,7 +180,7 @@ export function PayrollTimesheet() {
         <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label="People">
           {[{ staffId: null as string | null, name: 'Everyone' }, ...listed].map((p) => (
             <button key={p.staffId ?? 'all'} type="button" role="tab" aria-selected={person === p.staffId}
-              className={cx('rounded-full border px-3 py-1 text-[13px]', person === p.staffId ? 'border-plum bg-plum font-medium text-white' : 'border-plum/30 bg-white text-plum hover:bg-plum-tint')}
+              className={chipClass(person === p.staffId)}
               onClick={() => setPerson(p.staffId)}>{p.name}</button>
           ))}
         </div>

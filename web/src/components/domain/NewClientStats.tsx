@@ -87,14 +87,14 @@ export function NewClientStats({ className = 'mt-12' }: { className?: string }) 
           <div ref={listRef} className="mt-5 flex scroll-mt-4 flex-wrap items-center gap-2">
             <label className="relative min-w-[200px] flex-1">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone" />
-              <input className="field h-9 pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search client or stylist" aria-label="Search client or stylist" />
+              <input className="field h-10 pl-9" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search client or stylist" aria-label="Search client or stylist" />
             </label>
-            <select className="field h-9 w-auto py-1 text-sm" value={staffId} onChange={(e) => setStaffId(e.target.value)} aria-label="Stylist">
+            <select className="field h-10 w-auto py-1 text-sm" value={staffId} onChange={(e) => setStaffId(e.target.value)} aria-label="Stylist">
               <option value="">All stylists</option>
               {stylists.map((b) => <option key={b.staffId} value={b.staffId!}>{b.staffName}</option>)}
               {staffId && !stylists.some((b) => b.staffId === staffId) && <option value={staffId}>Selected stylist</option>}
             </select>
-            <select className="field h-9 w-auto py-1 text-sm" value={filter} onChange={(e) => setFilter(e.target.value as Filter)} aria-label="Rebooking status">
+            <select className="field h-10 w-auto py-1 text-sm" value={filter} onChange={(e) => setFilter(e.target.value as Filter)} aria-label="Rebooking status">
               {FILTERS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
             </select>
           </div>

@@ -15,7 +15,7 @@ import { useActions } from '../domain/ActionsProvider';
 import { BrandMark, useAppearance } from './Brand';
 import { GlobalSearch } from './GlobalSearch';
 import { SystemBanner } from './SystemBanner';
-import { SUB_NAV, SubNavList, setSectionCollapsed, useSectionCollapsed } from './subNav';
+import { SubNavList, setSectionCollapsed, useSectionCollapsed, useSubCount } from './subNav';
 import { CustomizeMenuLink, CustomizeMenuModal, useMenu } from './sidebarLayout';
 import { useStoreNames } from '../../lib/storeNames';
 import { Notifications, useUpdates } from './Notifications';
@@ -53,26 +53,31 @@ const MOBILE_TABS = ['/', '/time-clock', '/follow-ups', '/appointments', '/my-ca
  * A sidebar tab. A tab with collapsible sub-tabs (Inventory) opens them when you go to it, and clicking it while you're
  * in that section opens or closes them — it stays highlighted while any of its sub-tabs is showing.
  */
-function NavItem({ n, unread }: { n: (typeof NAV)[number]; unread: number }) {
+export function NavItem({ n, unread }: { n: Pick<(typeof NAV)[number], 'to' | 'label' | 'icon' | 'end' | 'badge'>; unread: number }) {
   const loc = useLocation();
-  const collapsible = !!SUB_NAV[n.to]?.collapsible;
+  const { data: me } = useMe();
+  // A section with sub-pages (2+ this person can open) gets the expand arrow; all of them behave the same way.
+  const parent = useSubCount(n.to, (p) => !!me?.permissions.includes(p)) > 1;
   const collapsed = useSectionCollapsed(n.to);
   const inSection = loc.pathname === n.to || loc.pathname.startsWith(`${n.to}/`);
+  const open = parent && inSection && !collapsed;
   return (
     <NavLink
       to={n.to}
       end={n.end}
-      aria-expanded={collapsible ? inSection && !collapsed : undefined}
+      aria-expanded={parent ? open : undefined}
       onClick={(e) => {
-        if (!collapsible) return;
+        if (!parent) return;
         if (inSection) { e.preventDefault(); setSectionCollapsed(n.to, !collapsed); } else setSectionCollapsed(n.to, false);
       }}
-      className={({ isActive }) => cx('relative flex min-h-[48px] items-center gap-3 rounded-lg px-3 py-2 text-[16px] transition-colors lg:min-h-0 lg:text-[14.5px]', isActive ? 'bg-white font-medium text-ink shadow-sm' : 'text-ink-soft hover:bg-white/60')}
+      // One look for every row: the page you're on is highlighted. While a section's sub-pages show, its parent is only
+      // emphasised, so the highlighted sub-page is the one place marked.
+      className={({ isActive }) => cx('nav-row', isActive && !open && 'is-active', open && 'is-open')}
     >
-      <n.icon className="h-[18px] w-[18px] text-stone" />
+      <n.icon className="h-[18px] w-[18px] shrink-0 text-stone" />
       <span className="flex-1">{n.label}</span>
       {n.badge === 'messages' && unread > 0 && <span className="rounded-full bg-plum px-1.5 text-[11px] font-semibold leading-5 text-white num">{unread}</span>}
-      {collapsible && <ChevronDown className={cx('h-3.5 w-3.5 text-stone transition-transform', inSection && !collapsed && 'rotate-180')} aria-hidden />}
+      {parent && <ChevronDown className={cx('h-3.5 w-3.5 shrink-0 text-stone transition-transform', open && 'rotate-180')} aria-hidden />}
     </NavLink>
   );
 }

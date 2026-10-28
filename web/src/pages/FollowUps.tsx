@@ -87,12 +87,12 @@ export function FollowUpsPage() {
       <SectionPicker path="/follow-ups" names={names} can={(p) => !!me?.permissions.includes(p)} className="mb-4" />
       {view === 'inquiries' ? <WebsiteInquiriesList /> : view === 'schedule' ? <RebookingScheduleList /> : <>
       <div className="mb-5 flex flex-wrap items-center gap-3">
-        <select className="field h-9 w-auto py-1 text-sm" value={type} onChange={(e) => set('type', e.target.value)} aria-label="Type">
+        <select className="field h-10 w-auto py-1 text-sm" value={type} onChange={(e) => set('type', e.target.value)} aria-label="Type">
           <option value="">All types</option>
           {Object.entries(TASK_TYPE_LABELS).filter(([k]) => k !== 'internal').map(([k, v]) => <option key={k} value={k}>{v}{typesPresent.includes(k as any) ? '' : ''}</option>)}
         </select>
         {canSeeAll && (
-          <select className="field h-9 w-auto py-1 text-sm" value={staffId} onChange={(e) => set('staff', e.target.value)} aria-label="Staff">
+          <select className="field h-10 w-auto py-1 text-sm" value={staffId} onChange={(e) => set('staff', e.target.value)} aria-label="Staff">
             <option value="">Everyone</option>
             {staff?.filter((s) => s.active).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>

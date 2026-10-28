@@ -50,9 +50,9 @@ export function LeadsPage({ embedded = false }: { embedded?: boolean }) {
       <div className="mb-5 flex flex-wrap items-center gap-2">
         <Segmented value={view} onChange={(v) => set('layout', v === 'pipeline' ? '' : v)} options={[{ value: 'pipeline', label: 'Pipeline' }, { value: 'list', label: 'List' }]} />
         <input className="field h-9 w-full py-1 text-sm sm:w-56" placeholder="Search clients" value={f.q} onChange={(e) => set('q', e.target.value)} />
-        <select className="field h-9 w-auto py-1 text-sm" value={f.source} onChange={(e) => set('source', e.target.value)} aria-label="Source"><option value="">All sources</option>{LEAD_SOURCES.map((s) => <option key={s}>{s}</option>)}</select>
-        <select className="field h-9 w-auto py-1 text-sm" value={f.staffId} onChange={(e) => set('staff', e.target.value)} aria-label="Assigned to"><option value="">Anyone</option>{staff?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
-        {view === 'list' && <select className="field h-9 w-auto py-1 text-sm" value={f.status} onChange={(e) => set('status', e.target.value)} aria-label="Status"><option value="">All statuses</option>{LEAD_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}</select>}
+        <select className="field h-10 w-auto py-1 text-sm" value={f.source} onChange={(e) => set('source', e.target.value)} aria-label="Source"><option value="">All sources</option>{LEAD_SOURCES.map((s) => <option key={s}>{s}</option>)}</select>
+        <select className="field h-10 w-auto py-1 text-sm" value={f.staffId} onChange={(e) => set('staff', e.target.value)} aria-label="Assigned to"><option value="">Anyone</option>{staff?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+        {view === 'list' && <select className="field h-10 w-auto py-1 text-sm" value={f.status} onChange={(e) => set('status', e.target.value)} aria-label="Status"><option value="">All statuses</option>{LEAD_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}</select>}
         {embedded && leads && <span className="ml-auto text-[13px] text-stone">{leads.filter((l) => !['won', 'lost'].includes(l.status)).length} open</span>}
       </div>
 

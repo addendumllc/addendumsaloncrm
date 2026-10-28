@@ -66,7 +66,7 @@ export function ClientProfilePage() {
         <div className="flex items-start gap-4">
           <Avatar name={c.name} size="lg" color={getAccentHex()} />
           <div>
-            <h1 className="h-display text-[38px] leading-none sm:text-[46px]">{c.name}</h1>
+            <h1 className="h-display text-[34px] leading-[1.05] sm:text-[40px]">{c.name}</h1>
             <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[15px] text-ink-soft">
               {c.phone && <a href={`tel:${c.phone}`} className="hover:text-plum">{phone(c.phone)}</a>}
               {c.email && <a href={`mailto:${c.email}`} className="hover:text-plum">{c.email}</a>}

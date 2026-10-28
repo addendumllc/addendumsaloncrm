@@ -265,26 +265,26 @@ function TaskList({ preset, section, first }: { preset?: Preset; section?: boole
       {!preset && <div className="mb-5 flex flex-wrap items-center gap-2">
         {!away && <Segmented value={f.kind || 'all'} onChange={(v) => { const p = new URLSearchParams(params); if (v === 'all') p.delete('kind'); else p.set('kind', v); if (v !== 'task') p.delete('biz'); setParams(p, { replace: true }); }} options={[{ value: 'all', label: 'All' }, { value: 'follow_up', label: 'Follow-ups' }, { value: 'task', label: 'Internal' }]} />}
         {f.kind === 'task' && (
-          <select className="field h-9 w-auto py-1 text-sm" value={f.business} onChange={(e) => set('biz', e.target.value)} aria-label="For">
+          <select className="field h-10 w-auto py-1 text-sm" value={f.business} onChange={(e) => set('biz', e.target.value)} aria-label="For">
             <option value="">Salon and Hair</option><option value="salon">Addendum Salon</option><option value="hair">Addendum Hair</option>
           </select>
         )}
-        <select className="field h-9 w-auto py-1 text-sm" value={f.status} onChange={(e) => set('status', e.target.value)} aria-label="Status">
+        <select className="field h-10 w-auto py-1 text-sm" value={f.status} onChange={(e) => set('status', e.target.value)} aria-label="Status">
           <option value="open">Due</option><option value="snoozed">Snoozed</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option><option value="any">Any status</option>
         </select>
-        <select className="field h-9 w-auto py-1 text-sm" value={f.type} onChange={(e) => set('type', e.target.value)} aria-label="Type">
+        <select className="field h-10 w-auto py-1 text-sm" value={f.type} onChange={(e) => set('type', e.target.value)} aria-label="Type">
           <option value="">All types</option>{Object.entries(TASK_TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
-        <select className="field h-9 w-auto py-1 text-sm" value={f.priority} onChange={(e) => set('priority', e.target.value)} aria-label="Priority">
+        <select className="field h-10 w-auto py-1 text-sm" value={f.priority} onChange={(e) => set('priority', e.target.value)} aria-label="Priority">
           <option value="">Any priority</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option>
         </select>
         {canSeeAll && (
-          <select className="field h-9 w-auto py-1 text-sm" value={f.staffId} onChange={(e) => set('staff', e.target.value)} aria-label="Staff">
+          <select className="field h-10 w-auto py-1 text-sm" value={f.staffId} onChange={(e) => set('staff', e.target.value)} aria-label="Staff">
             <option value="">Everyone</option>{staff?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         )}
         {integ?.highlevel.connected && (
-          <select className="field h-9 w-auto py-1 text-sm" value={f.hl} onChange={(e) => set('hl', e.target.value)} aria-label="HighLevel status">
+          <select className="field h-10 w-auto py-1 text-sm" value={f.hl} onChange={(e) => set('hl', e.target.value)} aria-label="HighLevel status">
             <option value="">HighLevel: any</option><option value="synced">In HighLevel</option><option value="failed">Needs attention</option><option value="not_pushed">Not pushed</option>
           </select>
         )}

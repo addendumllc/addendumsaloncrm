@@ -1,3 +1,5 @@
+import { SectionPicker } from '../components/layout/subNav';
+import { useCanDo } from '../api/hooks';
 import { ReorderList } from '../components/domain/ReorderList';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -17,7 +19,7 @@ import { PricingView } from '../components/domain/Pricing';
 import { AddToSquareButton } from '../components/domain/AddToSquare';
 import { AddLengthButton } from '../components/domain/AddLength';
 import { pageBusiness, useWorkspace } from '../lib/workspace';
-import { Badge, Button, EmptyState, ErrorNote, Field, Menu, Modal, PageHeader, PageLoading, PageTabs, Segmented, Spinner, Toggle, cx, useToast } from '../components/ui';
+import { Badge, Button, EmptyState, ErrorNote, Field, Menu, Modal, PageHeader, PageLoading, Segmented, Spinner, Toggle, cx, useToast } from '../components/ui';
 import { NumberField } from './settings/shared';
 import { Tc } from '../lib/titleCase';
 import { useStoreNames, type StoreNames } from '../lib/storeNames';
@@ -27,15 +29,7 @@ const result = (N: StoreNames): Record<InventorySyncRunDTO['details'][number]['r
   unchanged: { label: 'No change', tone: 'neutral' }, failed: { label: 'Failed', tone: 'rose' }, attention: { label: 'Needs attention', tone: 'amber' }, retry: { label: 'Will retry', tone: 'plum' },
 });
 
-/**
- * Inventory's pages, in one tab bar: an overview, the product lists, counts and prices, then ordering (what to order,
- * purchase orders, suppliers) and the stock activity log. The Square ↔ Shopify sync is under More.
- */
-const TABS = [
-  // Inventory: the products with their stock — searchable by product, SKU or collection, counted or adjusted in place.
-  { value: 'stock', label: 'Inventory' }, { value: 'reorder', label: 'To order' }, { value: 'reorder-list', label: 'Reorder List' }, { value: 'orders', label: 'Purchase orders' }, { value: 'items', label: 'Products' },
-  { value: 'pricing', label: 'Pricing' }, { value: 'suppliers', label: 'Suppliers' }, { value: 'activity', label: 'Activity' },
-];
+/** Each Inventory page's line under the title (the pages themselves are listed in subNav.tsx: sidebar and tabs). */
 const ABOUT: Record<string, string> = {
   overview: 'Stock in the salon (Square) and online (Shopify), kept separate. Open a product for its details.',
   items: 'Each store’s products. All stores: pair products, set SKUs and types, and add products.',
@@ -52,6 +46,7 @@ const STORES = [{ value: 'all', label: 'All stores' }, { value: 'salon', label: 
 
 export function InventorySyncPage() {
   const N = useStoreNames();
+  const canDo = useCanDo();
   const toast = useToast();
   const qc = useQueryClient();
   const { data, isLoading, error, refetch } = useQuery({
@@ -130,7 +125,7 @@ export function InventorySyncPage() {
       />
       {/* Inventory's pages (a dropdown on phones); the store switch sits with the header's actions. */}
       {/* On larger screens the sidebar lists Inventory's sub-tabs; phones get the page dropdown here. */}
-      <PageTabs className="lg:hidden" value={view === 'products' ? 'items' : view} onChange={(v) => setView(v)} options={TABS} />
+      <SectionPicker path="/inventory-sync" names={N} can={canDo} />
       {data.demoMode && view === 'sync' && <p className="mb-4 rounded-xl2 border border-line bg-mist/50 px-4 py-2 text-[13px] text-ink-soft">Demo Mode: this syncs the demo Square and Shopify catalogs. Nothing is sent to a real store.</p>}
       {['overview', 'items', 'stock'].includes(view) && <PreorderBanner />}
       {view === 'overview' && <InventoryOverview store={storePick} onOpenTab={setView} />}
@@ -309,7 +304,7 @@ function Links({ status }: { status?: 'problems' }) {
     <div className="space-y-3">
     <label className="relative block">
       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone" />
-      <input className="field h-11 pl-9 pr-9" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search linked products by name or SKU" aria-label="Search linked products" />
+      <input className="field h-10 pl-9 pr-9" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search linked products by name or SKU" aria-label="Search linked products" />
       {q && <button type="button" onClick={() => setQ('')} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-stone hover:bg-mist hover:text-ink" aria-label="Clear search"><X className="h-4 w-4" /></button>}
     </label>
     {shown.length === 0 && <p className="text-[14px] text-stone">Nothing matches “{q}”.</p>}
@@ -519,7 +514,7 @@ function Unmatched({ u, separate }: { u: InventorySyncOverviewDTO['unmatched']; 
       <p className="text-[13px] text-stone">These products exist in only one store (by SKU), so they aren’t synced. To link two, pick one on each side. If a product is sold in one store only, press <b>Only here</b>. A product still pairs and syncs if it ever gets a SKU matching the other store. Nothing is created in either store automatically.</p>
       <label className="relative block">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone" />
-        <input className="field h-11 pl-9 pr-9" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search both stores by name or SKU" aria-label="Search unmatched products" />
+        <input className="field h-10 pl-9 pr-9" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search both stores by name or SKU" aria-label="Search unmatched products" />
         {q && <button type="button" onClick={() => setQ('')} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-stone hover:bg-mist hover:text-ink" aria-label="Clear search"><X className="h-4 w-4" /></button>}
       </label>
       {(pickSq || pickSh) && (

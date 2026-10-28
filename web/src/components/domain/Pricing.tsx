@@ -155,12 +155,12 @@ export function PricingView({ store = 'all' }: { store?: 'all' | 'salon' | 'hair
         <div className="mb-3 flex flex-wrap items-end gap-2 border border-line bg-white p-3">
           <span className="pb-2 text-[13px] font-medium text-ink">{selected.size} selected</span>
           <Field label="Store">
-            <select className="field h-9 w-auto py-1 text-sm" value={bulk.col} onChange={(e) => setBulk({ ...bulk, col: e.target.value as Col })}>
+            <select className="field h-10 w-auto py-1 text-sm" value={bulk.col} onChange={(e) => setBulk({ ...bulk, col: e.target.value as Col })}>
               {cols.map((c) => <option key={c.col} value={c.col}>{c.name}</option>)}
             </select>
           </Field>
           <Field label="How">
-            <select className="field h-9 w-auto py-1 text-sm" value={bulk.how} onChange={(e) => setBulk({ ...bulk, how: e.target.value as typeof bulk.how, value: e.target.value === 'markup' ? '2' : e.target.value === 'percent' ? '5' : '' })}>
+            <select className="field h-10 w-auto py-1 text-sm" value={bulk.how} onChange={(e) => setBulk({ ...bulk, how: e.target.value as typeof bulk.how, value: e.target.value === 'markup' ? '2' : e.target.value === 'percent' ? '5' : '' })}>
               <option value="markup">Unit cost × markup</option><option value="percent">Change by %</option><option value="set">Set one price</option>
             </select>
           </Field>

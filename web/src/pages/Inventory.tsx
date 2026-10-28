@@ -469,7 +469,7 @@ function HairPicker({ shopify, loading, onPick, added }: { shopify?: { connected
       <span className="label">Or search by SKU, name, length or colour</span>
       <label className="relative block">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone" />
-        <input className="field h-11 pl-9 pr-9" type="search" inputMode="search" value={text} onChange={(e) => setText(e.target.value)} placeholder="SKU, name, length or colour" aria-label="Search Shopify hair inventory" />
+        <input className="field h-10 pl-9 pr-9" type="search" inputMode="search" value={text} onChange={(e) => setText(e.target.value)} placeholder="SKU, name, length or colour" aria-label="Search Shopify hair inventory" />
         {text && <button type="button" onClick={() => setText('')} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-stone hover:bg-mist hover:text-ink" aria-label="Clear search"><X className="h-4 w-4" /></button>}
       </label>
       {shopify?.error && <p className="mt-2 text-[13px] text-rose">{shopify.error}</p>}

@@ -1,3 +1,7 @@
+import { useSearchParams } from 'react-router-dom';
+import { SectionPicker } from '../components/layout/subNav';
+import { useCanDo } from '../api/hooks';
+import { useStoreNames } from '../lib/storeNames';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -5,7 +9,7 @@ import {
 } from 'lucide-react';
 import { CONSENT_STATUSES, EXTENSION_METHODS, EXTENSION_WORK, type TransformationDTO, type TransformationPhotoDTO, type TransformationPhotoKind } from '@addendum/shared';
 import { api } from '../api/client';
-import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, PageTabs, Segmented, Spinner, Toggle, buttonClass, cx, useToast } from '../components/ui';
+import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageHeader, PageLoading, Segmented, Spinner, Toggle, buttonClass, cx, useToast, chipClass } from '../components/ui';
 
 interface Options {
   services: string[]; catalog: string[]; stylists: { id: string; name: string }[]; tags: string[]; methods: string[]; collections: { id: string; name: string; count: number }[];
@@ -54,7 +58,10 @@ export function TransformationsPage() {
   const opts = useOptions();
   const qc = useQueryClient();
   const toast = useToast();
-  const [tab, setTab] = useState<'library' | 'social'>('library');
+  const [params] = useSearchParams();
+  const tab: 'library' | 'social' = params.get('tab') === 'social' ? 'social' : 'library';
+  const names = useStoreNames();
+  const canDo = useCanDo();
   const [f, setF] = useState<Filter>(EMPTY);
   const [q, setQ] = useState('');
   useEffect(() => { const h = setTimeout(() => setF((x) => ({ ...x, q })), 300); return () => clearTimeout(h); }, [q]);
@@ -65,6 +72,7 @@ export function TransformationsPage() {
   const total = lib.data?.pages[0]?.total ?? 0;
   const [selecting, setSelecting] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
+  useEffect(() => setSel(new Set()), [tab]);
   const [open, setOpen] = useState<string | null>(null);
   const [edit, setEdit] = useState<TransformationDTO | 'new' | null>(null);
   const [exportId, setExportId] = useState<string | null>(null);
@@ -89,7 +97,7 @@ export function TransformationsPage() {
           {o.can.manage && <Button icon={<Settings2 className="h-4 w-4" />} onClick={() => setSettings(true)}>Services & collections</Button>}
           {o.can.create && <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEdit('new')}>New transformation</Button>}
         </>} />
-      <PageTabs value={tab} onChange={(v) => { setTab(v); setSel(new Set()); }} options={[{ value: 'library', label: 'Library' }, { value: 'social', label: 'Ready for Social' }]} />
+      <SectionPicker path="/transformations" names={names} can={canDo} />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <label className="relative min-w-[12rem] flex-1 sm:max-w-sm">
@@ -534,7 +542,7 @@ function Editor({ t, o, onClose }: { t: TransformationDTO | null; o: Options; on
           <Field label="Also performed">
             <div className="flex flex-wrap gap-1.5">{serviceOptions.filter((s) => s !== d.mainService).map((s) => {
               const on = d.services.includes(s);
-              return <button key={s} type="button" onClick={() => setD({ ...d, services: on ? d.services.filter((x) => x !== s) : [...d.services, s] })} className={cx('rounded-full border px-2.5 py-1 text-[12px]', on ? 'border-plum bg-plum-tint text-plum' : 'border-line text-ink-soft hover:border-plum/40')}>{on && <Check className="mr-1 inline h-3 w-3" />}{s}</button>;
+              return <button key={s} type="button" onClick={() => setD({ ...d, services: on ? d.services.filter((x) => x !== s) : [...d.services, s] })} className={chipClass(on)}>{on && <Check className="mr-1 inline h-3 w-3" />}{s}</button>;
             })}</div>
           </Field>
           <ClientPicker value={d.clientId ? { id: d.clientId, name: d.clientName } : null} onChange={(c) => setD({ ...d, clientId: c?.id ?? null, clientName: c?.name ?? '' })} />

@@ -28,7 +28,7 @@
   /* The highlighted (card-coloured) item and anything opening from the menu keep the page's text tones. */
   /* Cards, panels, fields and dialogs: their own text tones, worked out for the card colour (a dark page can have light
      cards, and the other way round). Also the highlighted menu item. */
-  :is(.bg-white, .panel, [role="dialog"], .field) { --ink: var(--card-ink, 29 28 26); --ink-soft: var(--card-ink-soft, 58 56 53); --stone: var(--card-stone, 117 113 107); --stone-light: var(--card-stone-light, 162 158 151); --heading: var(--card-ink, 29 28 26); --mist: var(--card-mist, 242 241 238); }
+  :is(.bg-white, .panel, [role="dialog"], .field, .is-active) { --ink: var(--card-ink, 29 28 26); --ink-soft: var(--card-ink-soft, 58 56 53); --stone: var(--card-stone, 117 113 107); --stone-light: var(--card-stone-light, 162 158 151); --heading: var(--card-ink, 29 28 26); --mist: var(--card-mist, 242 241 238); }
   html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
   /* Long words, names and emails wrap instead of widening the page; the page itself never scrolls sideways. */
   body { @apply bg-paper text-ink font-sans antialiased; font-size: 15px; line-height: var(--body-leading, 1.5); font-weight: var(--body-weight, 400); overflow-wrap: break-word; overflow-x: clip; }
@@ -50,6 +50,13 @@
   .field { @apply w-full rounded-lg border border-line-strong bg-white px-3 py-2 text-base sm:text-[15px] text-ink placeholder:text-stone-light transition-colors focus:border-plum focus:outline-none focus:ring-2 focus:ring-plum/15; }
   .label { @apply mb-1 block text-[13px] font-medium text-ink-soft; }
   .panel { @apply rounded-xl2 border border-line bg-white; }
+  /* Sidebar rows (every section, both sidebars): one height, spacing and hover; .is-active marks the page you're on,
+     .is-open a section whose sub-pages are showing. Sub-pages hang off one guide line under their section. */
+  .nav-row { @apply relative flex min-h-[48px] items-center gap-3 rounded-lg px-3 py-2 text-[16px] text-ink-soft transition-colors hover:bg-white/60 lg:min-h-[38px] lg:text-[14.5px]; }
+  .nav-row.is-open { @apply font-medium text-ink; }
+  .nav-children { @apply mb-1 ml-[22px] flex flex-col gap-px border-l border-line pl-2; }
+  .nav-sub { @apply block rounded-md px-3 py-1.5 text-[15px] text-ink-soft transition-colors hover:bg-white/60 lg:text-[13.5px]; }
+  :is(.nav-row, .nav-sub).is-active { @apply font-medium text-ink; background-color: rgb(var(--surface)); box-shadow: inset 3px 0 0 rgb(var(--accent2, var(--accent))); }
   .h-display { @apply font-display font-medium tracking-[-0.01em]; color: rgb(var(--heading)); }
   .num { font-variant-numeric: tabular-nums; }
 }
@@ -81,8 +88,7 @@
 }
 
 /* Accent colour (each person's own, Settings → Appearance & Display). It fills buttons, toggles and the active menu
-   marker as chosen; text on it is black or white, whichever reads; accent-coloured text uses a readable shade. */
-.bg-sidebar nav a.bg-white { box-shadow: inset 3px 0 0 rgb(var(--accent2, var(--accent))); }
+   marker (.nav-row / .nav-sub .is-active) as chosen; text on it is black or white, whichever reads; accent-coloured text uses a readable shade. */
 :root :is(.bg-plum, .bg-plum-dark).text-white, :root :is(.bg-plum, .bg-plum-dark) .text-white { color: rgb(var(--on-accent, 255 255 255)); }
 :root .text-plum, :root .hover\:text-plum:hover { color: rgb(var(--accent-ink, var(--accent))); }
 

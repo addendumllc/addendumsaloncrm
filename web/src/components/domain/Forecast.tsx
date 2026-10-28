@@ -57,10 +57,10 @@ export function ForecastWidget({ scope }: { scope: 'all' | 'salon' | 'online' })
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <Segmented size="sm" value={shop} onChange={(v) => { setShop(v); setColl(''); }} options={[{ value: 'all', label: 'All shops' }, { value: 'salon', label: 'Addendum Salon' }, { value: 'online', label: 'Addendum Hair' }]} />
-        <select className="field h-9 w-auto py-1 text-sm" value={by} onChange={(e) => { setBy(e.target.value as typeof by); setGroup(null); }} aria-label="View by">
+        <select className="field h-10 w-auto py-1 text-sm" value={by} onChange={(e) => { setBy(e.target.value as typeof by); setGroup(null); }} aria-label="View by">
           <option value="product">View by product</option><option value="collection">View by collection</option><option value="supplier">View by supplier</option>
         </select>
-        <select className="field h-9 w-auto max-w-full py-1 text-sm" value={coll} onChange={(e) => setColl(e.target.value)} aria-label="Collection">
+        <select className="field h-10 w-auto max-w-full py-1 text-sm" value={coll} onChange={(e) => setColl(e.target.value)} aria-label="Collection">
           <option value="">All collections</option>{collections.map((c) => <option key={c} value={c}>{collectionLabel(c)}</option>)}
         </select>
         <Link to="/inventory-sync?view=reorder" className="ml-auto text-[13px] text-plum hover:underline">Open To order</Link>

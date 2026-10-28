@@ -38,7 +38,7 @@ export function ScheduleSection({ staffId, staffName }: { staffId: string; staff
       setSaving(false);
     }
   };
-  const box = 'field h-9 w-auto px-2';
+  const box = 'field h-10 w-auto px-2';
   return (
     <div className="space-y-2">
       <ul className="divide-y divide-line rounded-xl border border-line">

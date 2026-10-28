@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowDown, ArrowUp, ChevronDown } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown } from 'lucide-react';
+import { PageTabs } from '../ui';
 import { useSidebarLayout } from './sidebarLayout';
 import type { SharedSettings } from '@addendum/shared';
 import { useSettings } from '../../api/hooks';
@@ -14,7 +15,7 @@ import type { StoreNames } from '../../lib/storeNames';
 /** `menu`: similar sub-tabs folded under one dropdown in the sidebar (e.g. Ordering, Products). */
 /** `also`: other pages of this sub-tab (picked with a toggle on the page) — it's highlighted on those too. */
 export type SubItem = { to: string; label: string | ((n: StoreNames) => string); anyOf?: string[]; group?: string; menu?: string; also?: string[] };
-/** `collapsible`: clicking the parent tab while in the section opens or closes its sub-tabs (Inventory). */
+/** Every section with sub-pages works the same way: clicking the parent while in the section opens or closes them. */
 export type SubNav = { params: string[]; items: SubItem[]; collapsible?: boolean };
 
 export const SUB_NAV: Record<string, SubNav> = {
@@ -33,6 +34,25 @@ export const SUB_NAV: Record<string, SubNav> = {
       { to: '/inventory-sync?view=pricing', label: 'Pricing' },
       { to: '/inventory-sync?view=suppliers', label: 'Suppliers' },
       { to: '/inventory-sync?view=sync', label: 'Sync' },
+    ],
+  },
+  // Content Calendar's pages (Studio-only people have just Studio, so no sub-menu).
+  '/content': {
+    params: ['tab'],
+    items: [
+      { to: '/content', label: 'Calendar', anyOf: ['content:manage'], also: ['/content?tab=calendar', '/content?tab=planning'] },
+      { to: '/content?tab=studio', label: 'Studio', anyOf: ['content:manage'] },
+      { to: '/content?tab=ideas', label: 'Ideas library', anyOf: ['content:manage'] },
+      { to: '/content?tab=assets', label: 'Assets', anyOf: ['content:manage'] },
+      { to: '/content?tab=analytics', label: 'Analytics', anyOf: ['content:manage'] },
+      { to: '/content?tab=settings', label: 'Settings', anyOf: ['settings:write'] },
+    ],
+  },
+  '/transformations': {
+    params: ['tab'],
+    items: [
+      { to: '/transformations', label: 'Library' },
+      { to: '/transformations?tab=social', label: 'Ready for Social' },
     ],
   },
   // Tasks: each page starts with Addendum Salon / Addendum Hair.
@@ -122,20 +142,29 @@ export function subActive(i: SubItem, nav: SubNav, pathname: string, search: str
   return nav.params.every((k) => (want.get(k) ?? '') === (now.get(k) ?? ''));
 }
 
-/** On phones (no sidebar): a dropdown of the section's sub-menu, in place of the sidebar list. */
-export function SectionPicker({ path, names, can: canDo, className }: { path: string; names: StoreNames; can: (p: string) => boolean; className?: string }) {
+/**
+ * A section's pages where there's no sidebar (tablets and phones): the shared tab bar (a dropdown on phones). On larger
+ * screens the sidebar lists them under the section, so this shows nothing. Every section uses this one pattern.
+ */
+export function SectionPicker({ path, names, can: canDo, className, aside }: { path: string; names: StoreNames; can: (p: string) => boolean; className?: string; aside?: ReactNode }) {
   const can = useCanOrShared(canDo);
   const nav = SUB_NAV[path];
   const loc = useLocation();
   const go = useNavigate();
   const items = nav.items.filter((i) => !i.anyOf || i.anyOf.some(can));
   const current = items.find((i) => subActive(i, nav, loc.pathname, loc.search)) ?? items[0];
-  if (items.length < 2) return null;
+  if (items.length < 2) return aside ? <div className={`mb-5 flex justify-end ${className ?? ''}`}>{aside}</div> : null;
   return (
-    <select className={`field h-11 w-full text-[16px] font-medium lg:hidden ${className ?? ''}`} value={current.to} onChange={(e) => go(e.target.value)} aria-label="Section">
-      {items.map((i) => <option key={i.to} value={i.to}>{subLabel(i, names)}</option>)}
-    </select>
+    <div className="lg:hidden">
+      <PageTabs className={className} value={current.to} onChange={(to) => go(to)} options={items.map((i) => ({ value: i.to, label: subLabel(i, names) }))} aside={aside} />
+    </div>
   );
+}
+/** How many of a section's sub-pages this person can open (a sidebar item with 2+ gets the expand arrow). */
+export function useSubCount(path: string, canDo: (p: string) => boolean) {
+  const can = useCanOrShared(canDo);
+  const sub = SUB_NAV[path];
+  return sub ? sub.items.filter((i) => !i.anyOf || i.anyOf.some(can)).length : 0;
 }
 
 /** The sub-menu under a sidebar item, while you're in that section (both sidebars use it). Nothing when there's only one part. */
@@ -168,7 +197,7 @@ export function SubNavList({ path, names, can: canDo }: { path: string; names: S
   const [openMenus, setOpenMenus] = useState<Record<string, boolean>>({});
   const sub = SUB_NAV[path];
   if (!sub || !(loc.pathname === path || loc.pathname.startsWith(`${path}/`))) return null;
-  if (sub.collapsible && collapsed) return null;
+  if (collapsed) return null;
   const allowed = sub.items.filter((i) => !i.anyOf || i.anyOf.some(can));
   if (allowed.length < 2) return null;
   // Their order (new sub-tabs keep their built-in place).
@@ -177,7 +206,7 @@ export function SubNavList({ path, names, can: canDo }: { path: string; names: S
   const subs = [...allowed].sort((a, b) => pos(a.to) - pos(b.to));
   const active = (i: SubItem) => subActive(i, sub, loc.pathname, loc.search);
   const link = (i: SubItem, indent = false) => (
-    <NavLink key={i.to} to={i.to} end className={() => `block rounded-md px-2 py-1.5 text-[15px] lg:text-[13.5px] ${indent ? 'ml-3' : ''} ${active(i) ? 'bg-white font-medium text-ink shadow-sm' : 'text-ink-soft hover:bg-white/60'}`}>
+    <NavLink key={i.to} to={i.to} end className={() => `nav-sub ${indent ? 'ml-3' : ''} ${active(i) ? 'is-active' : ''}`}>
       {subLabel(i, names)}
     </NavLink>
   );
@@ -190,7 +219,7 @@ export function SubNavList({ path, names, can: canDo }: { path: string; names: S
   };
   if (reordering) {
     return (
-      <div className="mb-1 ml-[22px] border-l border-line pl-2">
+      <div className="nav-children">
         {subs.map((i, k) => (
           <div key={i.to} className="flex items-center gap-1 px-1 py-1 text-[13.5px] text-ink-soft">
             <span className="min-w-0 flex-1 truncate">{subLabel(i, names)}{i.menu && <span className="text-[11px] text-stone"> · {i.menu}</span>}</span>
@@ -208,7 +237,7 @@ export function SubNavList({ path, names, can: canDo }: { path: string; names: S
   // A dropdown shows where its first sub-tab is, with all of its sub-tabs; open while one of them is showing.
   const shownMenus = new Set<string>();
   return (
-    <div className="mb-1 ml-[22px] border-l border-line pl-2">
+    <div className="nav-children group/sub">
       {subs.map((i, k) => {
         if (!i.menu) return (
           <div key={i.to}>
@@ -224,14 +253,15 @@ export function SubNavList({ path, names, can: canDo }: { path: string; names: S
         return (
           <div key={`menu-${i.menu}`}>
             <button type="button" onClick={() => setOpenMenus((m) => ({ ...m, [i.menu!]: !open }))} aria-expanded={open}
-              className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[15px] lg:text-[13.5px] ${isActive && !open ? 'bg-white font-medium text-ink shadow-sm' : 'text-ink-soft hover:bg-white/60'}`}>
+              className={`nav-sub flex w-full items-center justify-between text-left ${isActive && !open ? 'is-active' : ''}`}>
               {i.menu}<ChevronDown className={`h-3.5 w-3.5 text-stone transition-transform ${open ? 'rotate-180' : ''}`} />
             </button>
             {open && members.map((m) => link(m, true))}
           </div>
         );
       })}
-      <button type="button" className="px-2 pt-1 text-[11px] text-stone hover:text-ink" onClick={() => setReordering(true)}>Reorder</button>
+      {/* Reorder these (saved to their account): a quiet icon that shows on hover, not a menu item. */}
+      <button type="button" className="ml-auto flex items-center gap-1 px-3 pt-1 text-[11px] text-stone opacity-0 transition-opacity hover:text-ink focus:opacity-100 group-hover/sub:opacity-100" onClick={() => setReordering(true)} title="Change the order of these" aria-label="Change the order of these pages"><ArrowUpDown className="h-3 w-3" />Order</button>
     </div>
   );
 }

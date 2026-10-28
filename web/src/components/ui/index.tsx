@@ -45,6 +45,19 @@ export function Button({
   );
 }
 
+// ---------- Chip ----------
+/**
+ * A choice shown as a pill (filters such as accounts, tags, services, people): one look everywhere — selected chips are
+ * accent-tinted with an accent border. Use Segmented for one-of-a-few switches and PageTabs for a page's sections.
+ */
+export function chipClass(selected: boolean, className?: string) {
+  return cx(
+    'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+    selected ? 'border-plum bg-plum-tint font-medium text-plum' : 'border-line-strong bg-white text-ink-soft hover:border-plum/40 hover:text-ink',
+    className,
+  );
+}
+
 // ---------- Badge ----------
 type Tone = 'neutral' | 'plum' | 'sage' | 'rose' | 'amber' | 'ink';
 const TONES: Record<Tone, string> = {
@@ -141,14 +154,15 @@ export function Toggle({ checked, onChange, label, description, disabled }: { ch
 export function Segmented<T extends string>({ value, onChange, options, className, size }: { value: T; onChange: (v: T) => void; options: { value: T; label: ReactNode }[]; className?: string; size?: 'sm' }) {
   return (
     // Never wider than the screen: on a phone, a long row of choices scrolls sideways instead of running off the edge.
-    <div className={cx('inline-flex max-w-full overflow-x-auto scrollbar-none rounded-lg bg-mist p-0.5 font-button', className)} role="tablist">
+    // Same height as filter boxes (h-10; size sm: h-9) so a toolbar's controls line up.
+    <div className={cx('inline-flex max-w-full shrink-0 items-stretch overflow-x-auto scrollbar-none rounded-lg bg-mist p-0.5 font-button', size === 'sm' ? 'h-9' : 'h-10', className)} role="tablist">
       {options.map((o) => (
         <button
           key={o.value}
           role="tab"
           aria-selected={value === o.value}
           onClick={() => onChange(o.value)}
-          className={cx('whitespace-nowrap rounded-md font-medium transition-colors', size === 'sm' ? 'px-2.5 py-1 text-[12.5px]' : 'px-3 py-1.5 text-[13px]', value === o.value ? 'bg-white text-plum shadow-sm' : 'text-stone hover:text-plum')}
+          className={cx('flex items-center whitespace-nowrap rounded-md font-medium transition-colors', size === 'sm' ? 'px-2.5 text-[12.5px]' : 'px-3 text-[13px]', value === o.value ? 'bg-white text-plum shadow-sm' : 'text-stone hover:text-plum')}
         >
           {tc(o.label)}
         </button>

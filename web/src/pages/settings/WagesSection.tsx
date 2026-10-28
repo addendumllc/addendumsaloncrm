@@ -173,7 +173,7 @@ export function WagesSection({ staffId, staffName, part }: { staffId: string; st
         )}
         {editable && (
           <div className="mt-2 flex flex-wrap items-end gap-2">
-            <Field label="Date"><input type="date" className="field h-9 w-auto" max={today} value={entry.date} onChange={(e) => setEntry({ ...entry, date: e.target.value })} /></Field>
+            <Field label="Date"><input type="date" className="field h-10 w-auto" max={today} value={entry.date} onChange={(e) => setEntry({ ...entry, date: e.target.value })} /></Field>
             <Field label="Hours"><input type="number" min={0.25} step={0.25} className="field num h-9 w-24" value={entry.hours} onChange={(e) => setEntry({ ...entry, hours: e.target.value })} /></Field>
             <Field label="Note (optional)"><input className="field h-9 w-48" maxLength={300} value={entry.note} onChange={(e) => setEntry({ ...entry, note: e.target.value })} placeholder="e.g. training day" /></Field>
             <Button size="sm" icon={<Plus className="h-4 w-4" />} disabled={!(Number(entry.hours) > 0) || !entry.date} onClick={addHours}>Add hours</Button>
@@ -284,10 +284,10 @@ function RateForm({ d, onChange, onSave, onCancel, saveLabel, fromRequired, with
   const missing = (fromRequired && !d.from) || (d.payType === 'hourly' && !d.hourly) || (d.payType === 'salary' && !d.salary) || (!!d.to && !!d.from && d.to < d.from);
   return (
     <div className="flex flex-wrap items-end gap-2">
-      <Field label="Starts on"><input type="date" className="field h-9 w-auto" value={d.from} onChange={(e) => onChange({ ...d, from: e.target.value })} /></Field>
-      {withEnd && <Field label="Until (optional)"><input type="date" className="field h-9 w-auto" min={d.from || undefined} value={d.to ?? ''} onChange={(e) => onChange({ ...d, to: e.target.value })} /></Field>}
+      <Field label="Starts on"><input type="date" className="field h-10 w-auto" value={d.from} onChange={(e) => onChange({ ...d, from: e.target.value })} /></Field>
+      {withEnd && <Field label="Until (optional)"><input type="date" className="field h-10 w-auto" min={d.from || undefined} value={d.to ?? ''} onChange={(e) => onChange({ ...d, to: e.target.value })} /></Field>}
       <Field label="Pay">
-        <select className="field h-9 w-auto" value={d.payType} onChange={(e) => onChange({ ...d, payType: e.target.value as PayRateDTO['payType'] })}>
+        <select className="field h-10 w-auto" value={d.payType} onChange={(e) => onChange({ ...d, payType: e.target.value as PayRateDTO['payType'] })}>
           <option value="hourly">Hourly</option><option value="salary">Salary</option><option value="none">No wage</option>
         </select>
       </Field>
@@ -295,7 +295,7 @@ function RateForm({ d, onChange, onSave, onCancel, saveLabel, fromRequired, with
       {d.payType === 'salary' && (
         <Field label="Salary">
           <span className="flex gap-1"><input type="number" min={0} step="0.01" className="field num h-9 w-28" value={d.salary} onChange={(e) => onChange({ ...d, salary: e.target.value })} />
-            <select className="field h-9 w-auto" value={d.period} onChange={(e) => onChange({ ...d, period: e.target.value as SalaryPeriod })}>{PERIODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></span>
+            <select className="field h-10 w-auto" value={d.period} onChange={(e) => onChange({ ...d, period: e.target.value as SalaryPeriod })}>{PERIODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></span>
         </Field>
       )}
       <Button size="sm" variant="primary" disabled={missing} onClick={onSave}>{saveLabel}</Button>

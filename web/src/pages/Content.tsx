@@ -1,9 +1,11 @@
+import { SectionPicker } from '../components/layout/subNav';
+import { useStoreNames } from '../lib/storeNames';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import type { ContentPostDTO } from '@addendum/shared';
 import { api } from '../api/client';
-import { Button, PageHeader, PageLoading, PageTabs } from '../components/ui';
+import { Button, PageHeader, PageLoading } from '../components/ui';
 import { useContentBasics } from './content/common';
 import { CalendarTab } from './content/Calendar';
 import { IdeasTab } from './content/Ideas';
@@ -28,10 +30,11 @@ export function ContentPage() {
 /** Content calendar for @addendum.salon, @addendumhair and @addendumhairpro: plan, write, review, publish and measure. */
 function ContentCalendarPage() {
   const b = useContentBasics();
+  const canDo = useCanDo();
+  const names = useStoreNames();
   const [params, setParams] = useSearchParams();
   // Planning now sits under the calendar (old ?tab=planning links open the calendar).
   const tab = ((params.get('tab') === 'planning' ? 'calendar' : params.get('tab')) as Tab) || 'calendar';
-  const setTab = (t: Tab) => { const p = new URLSearchParams(params); p.set('tab', t); setParams(p, { replace: true }); };
   const [editing, setEditing] = useState<{ post: ContentPostDTO | null; prefill?: Prefill } | null>(null);
   // Opened from a notification (?post=…).
   const focus = params.get('post');
@@ -51,12 +54,10 @@ function ContentCalendarPage() {
   const create = (prefill?: Prefill) => setEditing({ post: null, prefill });
   return (
     <div>
-      <PageHeader title="Content calendar" subtitle={b.mine.map((a) => a.name).join(' · ')}
+      <PageHeader title="Content Calendar" subtitle={b.mine.map((a) => a.name).join(' · ')}
         actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => create()}>New post</Button>} />
-      <PageTabs value={tab} onChange={setTab} options={[
-        { value: 'calendar', label: 'Calendar' }, { value: 'studio', label: 'Studio' }, { value: 'ideas', label: 'Ideas library' }, { value: 'assets', label: 'Assets' }, { value: 'analytics', label: 'Analytics' },
-        ...(b.isAdmin ? [{ value: 'settings' as const, label: 'Settings' }] : []),
-      ]} />
+      {/* Its pages: in the sidebar under Content Calendar, as tabs on tablets and phones (like every section). */}
+      <SectionPicker path="/content" names={names} can={canDo} />
       {tab === 'calendar' && <CalendarTab b={b} onOpen={open} onNew={(date) => create({ date })} onUse={create} />}
       {tab === 'studio' && <StudioTab />}
       {tab === 'ideas' && <IdeasTab b={b} onUse={create} />}

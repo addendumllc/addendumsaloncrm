@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Plus } from 'lucide-react';
-import { cx } from '../ui';
+import { cx, chipClass } from '../ui';
 
 /** Toggle preset tags or add a custom one. */
 export function TagPicker({ value, onChange, options }: { value: string[]; onChange: (v: string[]) => void; options: string[] }) {
@@ -21,7 +21,7 @@ export function TagPicker({ value, onChange, options }: { value: string[]; onCha
             type="button"
             onClick={() => toggle(t)}
             aria-pressed={value.includes(t)}
-            className={cx('rounded-full border px-2.5 py-1 text-[13px] transition-colors', value.includes(t) ? 'border-plum bg-plum text-white' : 'border-line-strong bg-white text-ink-soft hover:border-ink/30')}
+            className={chipClass(value.includes(t))}
           >
             {t}
           </button>

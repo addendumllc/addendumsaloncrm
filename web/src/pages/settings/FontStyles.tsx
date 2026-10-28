@@ -165,17 +165,17 @@ function FontStyleEditor({ style, library: libraryIn, onClose, onDone }: { style
                     </label>
                   )}
                   {!linked && <div className="flex flex-wrap items-center gap-2">
-                    <select className="field h-9 w-auto py-1 text-sm" value={s.fonts[r.key]} onChange={(e) => setFont(r.key, e.target.value)} aria-label={`${r.label} font`}>
+                    <select className="field h-10 w-auto py-1 text-sm" value={s.fonts[r.key]} onChange={(e) => setFont(r.key, e.target.value)} aria-label={`${r.label} font`}>
                       {library.length > 0 && <optgroup label="Your fonts">{library.map((f) => <option key={f.id} value={`file:${f.id}`}>{f.name}</option>)}</optgroup>}
                       <optgroup label="Serif">{FONT_CHOICES.filter((f) => f.kind === 'serif').map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}</optgroup>
                       <optgroup label="Sans-serif">{FONT_CHOICES.filter((f) => f.kind === 'sans').map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}</optgroup>
                     </select>
                     <Button size="sm" variant="ghost" icon={<Upload className="h-4 w-4" />} loading={uploadingFor === r.key} onClick={() => { setUploadingFor(r.key); file.current?.click(); }}>Upload</Button>
-                    <select className="field h-9 w-auto py-1 text-sm" value={s.weights?.[r.key] ?? ''} onChange={(e) => setS({ ...s, weights: { ...(s.weights ?? {}), [r.key]: e.target.value ? Number(e.target.value) as FontWeight : undefined } })} aria-label={`${r.label} weight`}>
+                    <select className="field h-10 w-auto py-1 text-sm" value={s.weights?.[r.key] ?? ''} onChange={(e) => setS({ ...s, weights: { ...(s.weights ?? {}), [r.key]: e.target.value ? Number(e.target.value) as FontWeight : undefined } })} aria-label={`${r.label} weight`}>
                       <option value="">Standard weight</option>
                       {WEIGHTS.map((w) => <option key={w} value={w}>{w === 300 ? 'Light' : w === 400 ? 'Regular' : w === 500 ? 'Medium' : w === 600 ? 'Semibold' : 'Bold'} ({w})</option>)}
                     </select>
-                    <select className="field h-9 w-auto py-1 text-sm" value={s.sizes?.[r.key] ?? ''} onChange={(e) => setS({ ...s, sizes: { ...(s.sizes ?? {}), [r.key]: e.target.value ? Number(e.target.value) : undefined } })} aria-label={`${r.label} size`}>
+                    <select className="field h-10 w-auto py-1 text-sm" value={s.sizes?.[r.key] ?? ''} onChange={(e) => setS({ ...s, sizes: { ...(s.sizes ?? {}), [r.key]: e.target.value ? Number(e.target.value) : undefined } })} aria-label={`${r.label} size`}>
                       <option value="">Standard size</option>
                       {SIZES.map((p) => <option key={p} value={p}>{p < 100 ? 'Smaller' : 'Larger'} ({p}%)</option>)}
                     </select>

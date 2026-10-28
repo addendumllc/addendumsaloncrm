@@ -97,15 +97,15 @@ export function AppointmentsPage() {
             <span className="ml-2 font-display text-xl">{title}</span>
           </div>
         ) : (
-          <select className="field h-9 w-auto py-1 text-sm" value={listRange} onChange={(e) => set({ range: e.target.value })} aria-label="Range">
+          <select className="field h-10 w-auto py-1 text-sm" value={listRange} onChange={(e) => set({ range: e.target.value })} aria-label="Range">
             <option value="today">Today</option><option value="tomorrow">Tomorrow</option><option value="upcoming">Upcoming (90 days)</option><option value="past">Past (90 days)</option>
           </select>
         )}
         <div className="ml-auto flex flex-wrap gap-2">
-          <select className="field h-9 w-auto py-1 text-sm" value={staffId} onChange={(e) => set({ staff: e.target.value })} aria-label="Stylist">
+          <select className="field h-10 w-auto py-1 text-sm" value={staffId} onChange={(e) => set({ staff: e.target.value })} aria-label="Stylist">
             <option value="">{me?.calendarStaffIds ? 'Everyone I can see' : 'All stylists'}</option>{staff?.filter((s) => s.squareTeamMemberId && (s.stylist || s.id === staffId) && (!me?.calendarStaffIds || s.id === me.id || me.calendarStaffIds.includes(s.id))).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
-          <select className="field h-9 w-auto py-1 text-sm" value={status} onChange={(e) => set({ status: e.target.value })} aria-label="Status">
+          <select className="field h-10 w-auto py-1 text-sm" value={status} onChange={(e) => set({ status: e.target.value })} aria-label="Status">
             <option value="">All statuses</option>{Object.entries(APPT_STYLE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
           </select>
         </div>

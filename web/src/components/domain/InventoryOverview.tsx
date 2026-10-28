@@ -113,15 +113,15 @@ export function InventoryOverview({ store, onOpenTab }: { store: Store; onOpenTa
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <label className="relative min-w-[14rem] flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone" />
-          <input className="field h-11 pl-9 text-[16px] sm:text-[14px]" placeholder="Search products, SKUs or collections" value={q} onChange={(e) => { setQ(e.target.value); setShown(PAGE); }} aria-label="Search products" />
+          <input className="field h-10 pl-9" placeholder="Search products, SKUs or collections" value={q} onChange={(e) => { setQ(e.target.value); setShown(PAGE); }} aria-label="Search products" />
         </label>
-        <select className="field h-11 w-auto" value={status} onChange={(e) => pick(e.target.value as '' | Simple)} aria-label="Stock status">
+        <select className="field h-10 w-auto" value={status} onChange={(e) => pick(e.target.value as '' | Simple)} aria-label="Stock status">
           <option value="">All statuses</option>{order.map((s) => <option key={s} value={s}>{SIMPLE[s].label}</option>)}
         </select>
-        <select className="field h-11 w-auto max-w-[12rem]" value={coll} onChange={(e) => { setColl(e.target.value); setShown(PAGE); }} aria-label="Collection">
+        <select className="field h-10 w-auto max-w-[12rem]" value={coll} onChange={(e) => { setColl(e.target.value); setShown(PAGE); }} aria-label="Collection">
           <option value="">All collections</option>{collFilter.options.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
         </select>
-        <select className="field h-11 w-auto" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Sort">
+        <select className="field h-10 w-auto" value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Sort">
           <option value="name">Sort by name</option><option value="stock">Sort by stock (low first)</option><option value="status">Sort by status</option>
         </select>
       </div>
@@ -133,7 +133,7 @@ export function InventoryOverview({ store, onOpenTab }: { store: Store; onOpenTa
           {picked.size ? `${picked.size} selected` : `Select all ${rows.length}`}
         </label>
         {picked.size > 0 && <>
-          <select className="field h-9 w-auto py-1 text-[13px]" value={target} onChange={(e) => setTarget(e.target.value)} aria-label="Inventory collection">
+          <select className="field h-10 w-auto" value={target} onChange={(e) => setTarget(e.target.value)} aria-label="Inventory collection">
             <option value="">Put in collection…</option>
             {(internal?.collections ?? []).map((c) => <option key={c.name} value={c.name}>{collectionLabel(c.name)}</option>)}
             <option value="__new">New collection…</option>

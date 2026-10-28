@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CalendarPlus, GanttChart, Mail, Plus, Rocket, Trash2 } from 'lucide-react';
 import type { ContentAccountId, ContentCampaignDTO, ContentIdeaDTO, ContentPostDTO } from '@addendum/shared';
 import { api } from '../../api/client';
-import { Badge, Button, Field, Modal, PageLoading, useToast } from '../../components/ui';
+import { Badge, Button, Field, Modal, PageLoading, useToast, chipClass } from '../../components/ui';
 import { AccountTag, STATUS_TONE, formatLabel, platformLabel, postStatusLabel, type Basics } from './common';
 import type { Prefill } from './PostEditor';
 
@@ -144,7 +144,7 @@ function LaunchModal({ b, onClose }: { b: Basics; onClose: () => void }) {
           <input className="field" list="launch-products" value={d.product} onChange={(e) => setD({ ...d, product: e.target.value })} placeholder="e.g. The Bond – Keratin Application Tool Pro" />
           <datalist id="launch-products">{PRODUCTS.map((p) => <option key={p} value={p} />)}</datalist>
         </Field>
-        <div className="flex flex-wrap gap-1.5">{PRODUCTS.map((p) => <button key={p} type="button" className="rounded-full border border-line px-2.5 py-1 text-[12px] text-ink-soft hover:border-ink/40" onClick={() => setD({ ...d, product: p })}>{p}</button>)}</div>
+        <div className="flex flex-wrap gap-1.5">{PRODUCTS.map((p) => <button key={p} type="button" className={chipClass(false)} onClick={() => setD({ ...d, product: p })}>{p}</button>)}</div>
         <Field label="Release date" hint="Not known yet? Leave it empty — the drafts wait under “Not scheduled yet” and move into place when you set it (Campaigns → the launch)."><input type="date" className="field" value={d.releaseOn} onChange={(e) => setD({ ...d, releaseOn: e.target.value })} /></Field>
         <Field label="Accounts">
           <div className="flex flex-wrap gap-3">{b.mine.map((a) => <label key={a.id} className="flex items-center gap-1.5"><input type="checkbox" className="h-4 w-4 accent-plum" checked={d.accounts.includes(a.id)} onChange={(e) => setD({ ...d, accounts: e.target.checked ? [...d.accounts, a.id] : d.accounts.filter((x) => x !== a.id) })} /><AccountTag a={a} /></label>)}</div>

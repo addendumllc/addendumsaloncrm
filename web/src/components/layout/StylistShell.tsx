@@ -7,7 +7,7 @@ import { pathInAwaySections } from '@addendum/shared';
 import { useMe } from '../../api/hooks';
 import { useAccessStatus } from './NetworkBlocked';
 import { cx } from '../ui';
-import { SidebarFooter, Wordmark } from './AppShell';
+import { NavItem, SidebarFooter, Wordmark } from './AppShell';
 import { BrandMark, useAppearance } from './Brand';
 import { Notifications, useUpdates } from './Notifications';
 import { SubNavList } from './subNav';
@@ -52,12 +52,9 @@ export function StylistShell({ children }: { children: ReactNode }) {
     qc.clear();
     nav('/login');
   };
-  const link = ({ isActive }: { isActive: boolean }) =>
-    cx('flex items-center gap-3 rounded-lg px-3 py-2 text-[14.5px] transition-colors', isActive ? 'bg-white font-medium text-ink shadow-sm' : 'text-ink-soft hover:bg-white/60');
-
   const item = (n: (typeof NAV)[number]) => (
     <div key={n.to}>
-      <NavLink to={n.to} className={link}><n.icon className="h-[18px] w-[18px] text-stone" />{n.label}</NavLink>
+      <NavItem n={n} unread={0} />
       <SubNavList path={n.to} names={names} can={(p) => !!me?.permissions.includes(p)} />
     </div>
   );

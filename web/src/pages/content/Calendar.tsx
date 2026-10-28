@@ -5,7 +5,7 @@ import { CONTENT_FORMATS, CONTENT_PLATFORMS, CONTENT_STATUSES, type ContentAccou
 import { PlanningTab } from './Planning';
 import type { Prefill } from './PostEditor';
 import { api } from '../../api/client';
-import { Badge, Button, PageLoading, Segmented, cx, useToast } from '../../components/ui';
+import { Badge, Button, PageLoading, Segmented, cx, useToast, chipClass } from '../../components/ui';
 import { AccountTag, STATUS_TONE, formatLabel, platformLabel, postStatusLabel, timeOf, ymd, type Basics } from './common';
 
 type View = 'month' | 'week' | 'day';
@@ -76,7 +76,7 @@ export function CalendarTab({ b, onOpen, onNew, onUse }: { b: Basics; onOpen: (p
     );
   };
   const sel = (k: keyof typeof f, label: string, opts: { value: string; label: string }[]) => (
-    <select className="field h-9 w-auto py-1 text-[13px]" value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} aria-label={label}><option value="">{label}</option>{opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+    <select className="field h-10 w-auto" value={f[k]} onChange={(e) => setF({ ...f, [k]: e.target.value })} aria-label={label}><option value="">{label}</option>{opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
   );
   const title = view === 'month' ? anchor.toLocaleDateString([], { month: 'long', year: 'numeric' }) : view === 'week' ? `Week of ${days[0].toLocaleDateString([], { month: 'short', day: 'numeric' })}` : anchor.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
   return (
@@ -92,7 +92,7 @@ export function CalendarTab({ b, onOpen, onNew, onUse }: { b: Basics; onOpen: (p
       <div className="mb-4 flex flex-wrap gap-2">
         <div className="flex flex-wrap gap-1.5">
           {[{ id: '', name: 'All accounts', color: '' }, ...b.mine].map((a) => (
-            <button key={a.id || 'all'} type="button" onClick={() => setF({ ...f, account: a.id })} className={cx('inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px]', f.account === a.id ? 'border-ink text-ink' : 'border-line text-stone hover:border-ink/40')}>
+            <button key={a.id || 'all'} type="button" onClick={() => setF({ ...f, account: a.id })} className={chipClass(f.account === a.id)}>
               {a.color && <span className="h-2.5 w-2.5 rounded-full" style={{ background: a.color }} />}{a.name}
             </button>
           ))}

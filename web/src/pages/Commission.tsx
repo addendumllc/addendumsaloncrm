@@ -396,7 +396,7 @@ function ReviewQueue() {
             {ids.length ? `${ids.length} selected` : 'Select all'}
           </label>
           {ids.length > 0 && <>
-            <select className="field h-9 w-auto py-1 text-sm" value={bulkPick} onChange={(x) => setBulkPick(x.target.value)} aria-label="Credit selected to">
+            <select className="field h-10 w-auto py-1 text-sm" value={bulkPick} onChange={(x) => setBulkPick(x.target.value)} aria-label="Credit selected to">
               <option value="">Credit selected to…</option>
               {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
@@ -431,7 +431,7 @@ function ReviewQueue() {
                     ))}
                     {e.kind !== 'refund' && (
                       <>
-                        <select className="field h-9 w-auto py-1 text-sm" value={pick[e.id] ?? ''} onChange={(x) => setPick({ ...pick, [e.id]: x.target.value })} aria-label="Credit to">
+                        <select className="field h-10 w-auto py-1 text-sm" value={pick[e.id] ?? ''} onChange={(x) => setPick({ ...pick, [e.id]: x.target.value })} aria-label="Credit to">
                           <option value="">Someone else…</option>
                           {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                         </select>

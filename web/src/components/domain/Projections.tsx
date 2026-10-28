@@ -75,9 +75,9 @@ export function ProjectionsSection() {
         <Segmented value={mode} onChange={(v) => { setMode(v); setShowAppts(false); }} options={[{ value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'future', label: 'Future' }, { value: 'custom', label: 'Custom dates' }]} />
         {mode === 'custom' ? (
           <span className="flex flex-wrap items-center gap-1.5 text-sm">
-            <input type="date" className="field h-9 w-auto" value={custom.from} max={custom.to} onChange={(e) => e.target.value && setCustom({ ...custom, from: e.target.value })} aria-label="From" />
+            <input type="date" className="field h-10 w-auto" value={custom.from} max={custom.to} onChange={(e) => e.target.value && setCustom({ ...custom, from: e.target.value })} aria-label="From" />
             <span className="text-stone">to</span>
-            <input type="date" className="field h-9 w-auto" value={custom.to} min={custom.from} onChange={(e) => e.target.value && setCustom({ ...custom, to: e.target.value })} aria-label="To" />
+            <input type="date" className="field h-10 w-auto" value={custom.to} min={custom.from} onChange={(e) => e.target.value && setCustom({ ...custom, to: e.target.value })} aria-label="To" />
           </span>
         ) : mode !== 'future' ? (
           <div className="flex items-center gap-1">

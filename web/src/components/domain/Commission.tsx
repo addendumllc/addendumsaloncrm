@@ -59,9 +59,9 @@ export function DateRangeBar({ preset, setPreset, custom, setCustom, range, payP
       </div>
       {preset === 'custom' ? (
         <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-          <input type="date" className="field h-9 w-auto" value={custom.from} max={custom.to} onChange={(e) => setCustom({ ...custom, from: e.target.value })} aria-label="From" />
+          <input type="date" className="field h-10 w-auto" value={custom.from} max={custom.to} onChange={(e) => setCustom({ ...custom, from: e.target.value })} aria-label="From" />
           <span className="text-stone">to</span>
-          <input type="date" className="field h-9 w-auto" value={custom.to} min={custom.from} onChange={(e) => setCustom({ ...custom, to: e.target.value })} aria-label="To" />
+          <input type="date" className="field h-10 w-auto" value={custom.to} min={custom.from} onChange={(e) => setCustom({ ...custom, to: e.target.value })} aria-label="To" />
         </div>
       ) : (
         <p className="mt-2 text-[13px] text-stone">{range.from === range.to ? fmt(range.from) : `${fmt(range.from)} – ${fmt(range.to)}`}{range.payDate ? ` · paid ${fmt(range.payDate)}` : ''}</p>

@@ -4,7 +4,7 @@ import { Check, ClipboardPaste, Copy, ExternalLink, Link2, RefreshCw, Save, Spar
 import type { TaskDTO } from '@addendum/shared';
 import { api } from '../../api/client';
 import { useTasks } from '../../api/hooks';
-import { Badge, Button, EmptyState, Field, Modal, Segmented, cx, useToast } from '../../components/ui';
+import { Badge, Button, EmptyState, Field, Modal, Segmented, cx, useToast, chipClass } from '../../components/ui';
 
 type Format = 'story' | 'reel' | 'carousel' | 'feed' | 'caption' | 'sms' | 'email' | 'google' | 'signage';
 type Goal = 'book' | 'educate' | 'promote' | 'reengage';
@@ -164,7 +164,7 @@ export function StudioTab() {
 
             {fmt === 'email' && !!result.subject_lines?.length && (
               <div className="flex flex-wrap items-center gap-2"><span className="text-[12px] uppercase tracking-wide text-stone">Subject</span>
-                {result.subject_lines.map((s, i) => <button key={s} type="button" onClick={() => setSubject(i)} className={cx('rounded-full border px-3 py-1 text-[13px]', subject === i ? 'border-ink bg-ink text-white' : 'border-line text-ink-soft hover:border-ink/40')}>{subject === i && <Check className="mr-1 inline h-3.5 w-3.5" />}{s} <span className="opacity-60">({s.length})</span></button>)}
+                {result.subject_lines.map((s, i) => <button key={s} type="button" onClick={() => setSubject(i)} className={chipClass(subject === i)}>{subject === i && <Check className="mr-1 inline h-3.5 w-3.5" />}{s} <span className="opacity-60">({s.length})</span></button>)}
               </div>
             )}
 

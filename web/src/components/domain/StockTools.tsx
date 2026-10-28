@@ -11,7 +11,7 @@ import { downloadCsv, parseCsv } from '../../lib/csv';
 import { collectionFilter, useInternalCollections, collectionLabel } from './Collections';
 import { LeadTimesView } from './LeadTimes';
 import { dateShort, dateTime, dayKey, labelOfKey, relative } from '../../lib/format';
-import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, Segmented, Toggle, cx, useToast } from '../ui';
+import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, Segmented, Toggle, cx, useToast, chipClass } from '../ui';
 import { useStoreNames } from '../../lib/storeNames';
 import { ProductThumb } from './ProductThumb';
 
@@ -251,10 +251,10 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="relative min-w-[220px] flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone" />
-          <input className="field h-11 pl-9 text-[16px] sm:text-[14px]" type="search" placeholder={SEARCH_HINT} value={q} onChange={(e) => setQ(e.target.value)} />
+          <input className="field h-10 pl-9" type="search" placeholder={SEARCH_HINT} value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         {collFilter.options.length > 0 && (
-          <select className="field h-11 w-auto max-w-full py-1 text-[14px]" value={coll} onChange={(e) => setColl(e.target.value)} aria-label="Collection">
+          <select className="field h-10 w-auto max-w-full" value={coll} onChange={(e) => setColl(e.target.value)} aria-label="Collection">
             <option value="">All collections</option>
             {collFilter.options.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
           </select>
@@ -270,11 +270,11 @@ export function ProductsView({ only, setup }: { only?: 'shopify'; setup?: boolea
           {picked.size ? `${picked.size} selected` : `Select all ${Math.min(shown.length, 500)} shown`}
         </label>
         {picked.size > 0 && <>
-          <select className="field h-9 w-auto py-1 text-[13px]" value="" onChange={(e) => { const v = e.target.value as StockProductStatus; if (v) for (const k of picked) set(k, { status: v }); }} aria-label="Set status for selected">
+          <select className="field h-10 w-auto" value="" onChange={(e) => { const v = e.target.value as StockProductStatus; if (v) for (const k of picked) set(k, { status: v }); }} aria-label="Set status for selected">
             <option value="">Set status…</option>
             {Object.entries(STATUS_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
-          <select className="field h-9 w-auto py-1 text-[13px]" value={bulkField} onChange={(e) => { setBulkField(e.target.value as keyof Draft | ''); setBulkValue(''); }} aria-label="Field to change for selected">
+          <select className="field h-10 w-auto" value={bulkField} onChange={(e) => { setBulkField(e.target.value as keyof Draft | ''); setBulkValue(''); }} aria-label="Field to change for selected">
             <option value="">Edit selected…</option>
             <option value="supplier">Supplier</option><option value="collection">Purchasing collection</option><option value="cost">Our cost ($)</option>
             <option value="lead">Production lead time (days)</option><option value="ship">Transit time (days)</option><option value="moq">Minimum order</option>
@@ -975,7 +975,7 @@ function SuggestedOrders({ store, onClose, onMade }: { store: 'all' | 'salon' | 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="min-w-0 flex-1 text-ink-soft">One draft per {SUGGEST_BY[groupBy].toLowerCase()} and supplier, at the suggested amounts. Untick anything you don’t want or change an amount. Earlier suggested drafts are replaced; nothing is ordered until you mark a draft ordered.</p>
             <label className="flex items-center gap-2 text-stone">Group by
-              <select className="field h-9 w-auto py-0 text-[13px]" value={groupBy} onChange={(e) => setGroupBy(e.target.value as SuggestGroupBy)}>
+              <select className="field h-10 w-auto py-0 text-[13px]" value={groupBy} onChange={(e) => setGroupBy(e.target.value as SuggestGroupBy)}>
                 {(Object.keys(SUGGEST_BY) as SuggestGroupBy[]).map((k) => <option key={k} value={k}>{SUGGEST_BY[k]}</option>)}
               </select>
             </label>
@@ -1183,7 +1183,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
             const n = countOf(f.value);
             return (
               <button key={f.value} type="button" role="tab" aria-selected={filter === f.value} onClick={() => setFilter(f.value)}
-                className={cx('rounded-full border px-3 py-1 text-[13px] transition-colors', filter === f.value ? 'border-plum bg-plum text-white' : 'border-line bg-white text-ink-soft hover:border-line-strong')}>
+                className={chipClass(filter === f.value)}>
                 {f.label} <span className={cx('num ml-0.5', filter === f.value ? 'text-white/80' : 'text-stone')}>{n}</span>
               </button>
             );
@@ -1191,7 +1191,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
         </div>
       </div>
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <select className="field h-9 w-auto py-1 text-sm" value={by} onChange={(e) => setBy(e.target.value as typeof by)} aria-label="View by">
+        <select className="field h-10 w-auto py-1 text-sm" value={by} onChange={(e) => setBy(e.target.value as typeof by)} aria-label="View by">
           <option value="product">View by product</option><option value="collection">View by collection</option><option value="supplier">View by supplier</option>
         </select>
         <span className="flex flex-wrap items-center gap-2 sm:ml-auto">
@@ -1269,7 +1269,7 @@ export function ReorderView({ onOrders, store = 'all', initialFilter = 'reorder'
             <option value="__none">No collection</option>
           </select>
           {[...picked].some((k) => data.items.find((i) => i.key === k)?.recount) && <Button size="sm" variant="ghost" disabled={busy} onClick={() => counted([...picked].filter((k) => data.items.find((i) => i.key === k)?.recount))}>Count is right</Button>}
-          <select className="field h-9 w-auto py-1 text-sm" value="" disabled={busy} aria-label="Skip selected"
+          <select className="field h-10 w-auto py-1 text-sm" value="" disabled={busy} aria-label="Skip selected"
             onChange={(e) => { const v = e.target.value; if (v) void skip([...picked], v === 'forever' ? null : Number(v)); }}>
             <option value="">Skip (not ordering)…</option><option value="14">for 2 weeks</option><option value="30">for 30 days</option><option value="90">for 90 days</option><option value="forever">until I turn it back on</option>
           </select>
@@ -1485,7 +1485,7 @@ export function PurchaseOrdersView({ store = 'salon' }: { store?: 'salon' | 'sho
         {!['received', 'cancelled'].includes(p.status) && (
           <div className="mt-2 flex flex-wrap items-center gap-3 text-[13px] text-ink-soft">
             <label className="flex items-center gap-1.5">Supplier
-              <select className="field h-9 w-auto py-1" value={p.supplier ?? ''} onChange={(e) => patch(p, { supplier: e.target.value || null })}>
+              <select className="field h-10 w-auto py-1" value={p.supplier ?? ''} onChange={(e) => patch(p, { supplier: e.target.value || null })}>
                 <option value="">{fallbackSupplier ? `${fallbackSupplier} (default)` : 'Choose…'}</option>
                 {(suppliers ?? []).map((x) => <option key={x.name} value={x.name}>{x.name}</option>)}
                 {p.supplier && !(suppliers ?? []).some((x) => x.name === p.supplier) && <option value={p.supplier}>{p.supplier}</option>}
@@ -1754,7 +1754,7 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
                 <button type="button" className="rounded-full p-0.5 text-stone hover:bg-mist hover:text-ink" aria-label={`Remove ${n}`} onClick={() => setPicked(chosenList.filter((x) => x !== n))}><X className="h-3.5 w-3.5" /></button>
               </span>
             ))}
-            <select className="field h-9 w-auto min-w-[12rem] py-1 text-sm" value="" onChange={(e) => e.target.value && setPicked([...chosenList, e.target.value])} aria-label="Add a supplier">
+            <select className="field h-10 w-auto min-w-[12rem] py-1 text-sm" value="" onChange={(e) => e.target.value && setPicked([...chosenList, e.target.value])} aria-label="Add a supplier">
               <option value="">{chosenList.length ? '+ Add a supplier' : 'Choose a supplier'}</option>
               {(suppliers ?? []).filter((x) => !chosenList.includes(x.name)).map((x) => <option key={x.name} value={x.name}>{x.name}{x.isDefault ? ' (default)' : ''}{x.leadTimeDays != null ? ` · usually ${x.leadTimeDays} days` : ''}</option>)}
             </select>
@@ -1768,7 +1768,7 @@ function NewPoModal({ onClose, store = 'salon' }: { onClose: () => void; store?:
               {suggested.length > 0 && <Button size="sm" variant="ghost" className="ml-auto" onClick={() => add(suggested)}>Add all suggested ({suggested.length})</Button>}
             </div>
             <div className="mb-2 flex flex-wrap items-center gap-2 text-[13px]">
-              <select className="field h-9 w-auto py-1 text-[13px]" value={coll} onChange={(e) => setColl(e.target.value)} aria-label="Collection">
+              <select className="field h-10 w-auto" value={coll} onChange={(e) => setColl(e.target.value)} aria-label="Collection">
                 <option value="">All collections</option>{collections.map((c) => <option key={c} value={c}>{collectionLabel(c)}</option>)}
               </select>
               <label className="flex items-center gap-1.5 text-stone"><input type="checkbox" className="h-4 w-4 accent-plum" checked={showSkipped} onChange={(e) => setShowSkipped(e.target.checked)} /> Show skipped</label>
