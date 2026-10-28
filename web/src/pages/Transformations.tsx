@@ -1,7 +1,5 @@
 import { useSearchParams } from 'react-router-dom';
-import { SectionPicker } from '../components/layout/subNav';
-import { useCanDo, useMe } from '../api/hooks';
-import { useStoreNames } from '../lib/storeNames';
+import { useMe } from '../api/hooks';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -89,8 +87,6 @@ export function TransformationsPage() {
   const qc = useQueryClient();
   const toast = useToast();
   const [params] = useSearchParams();
-  const names = useStoreNames();
-  const canDo = useCanDo();
   const [f, setF] = useState<Filter>(EMPTY);
   const [q, setQ] = useState('');
   useEffect(() => { const h = setTimeout(() => setF((x) => ({ ...x, q })), 300); return () => clearTimeout(h); }, [q]);
@@ -137,7 +133,6 @@ export function TransformationsPage() {
           {o.can.manage && <Button icon={<Instagram className="h-4 w-4" />} onClick={() => setBulkIg(true)}>Add Instagram links</Button>}
           {o.can.create && <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEdit('new')}>New transformation</Button>}
         </>} />
-      <SectionPicker path="/transformations" names={names} can={canDo} />
 
       {o.can.create && <ToConfirm onConfirm={setConfirming} onDetails={(id) => api.get<{ transformation: TransformationDTO }>(`/transformations/${id}`).then((r) => setEdit(r.transformation)).catch((e) => toast((e as Error).message, 'error'))} />}
 

@@ -144,8 +144,9 @@ export function SectionPicker({ path, names, can: canDo, className, aside }: { p
   const nav = SUB_NAV[path];
   const loc = useLocation();
   const go = useNavigate();
-  const items = nav.items.filter((i) => !i.anyOf || i.anyOf.some(can));
-  const current = items.find((i) => subActive(i, nav, loc.pathname, loc.search)) ?? items[0];
+  // A section without sub-pages has nothing to pick (never fail the page over it).
+  const items = (nav?.items ?? []).filter((i) => !i.anyOf || i.anyOf.some(can));
+  const current = items.find((i) => subActive(i, nav!, loc.pathname, loc.search)) ?? items[0];
   if (items.length < 2) return aside ? <div className={`mb-5 flex justify-end ${className ?? ''}`}>{aside}</div> : null;
   return (
     <div className="lg:hidden">
