@@ -125,4 +125,48 @@ describe('My Content (a stylist’s own Instagram plan)', () => {
     expect((await jen.del(`/api/my-content/links/${links[0].id}`)).status).toBe(403);
     expect((await owner.del(`/api/my-content/links/${links[0].id}`)).body.links).toEqual([]);
   });
+
+  it('assets by type of post and group; Canva links kept with the assets; a whole group downloads as a ZIP', async () => {
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(80, 2)]);
+    const up = async (name: string) => (await (owner as any).raw.post('/api/content/media').set(H).set('content-type', 'image/png').set('x-file-name', name).send(png)).body.media;
+    const a = await up('Slide 1.png'), b = await up('Slide 2.png');
+    for (const m of [a, b]) expect((await owner.patch(`/api/content/assets/${m.id}`, { postType: 'carousel', group: 'Holiday 2026', stylistShare: 'post' })).status).toBe(200);
+    const assets = (await owner.get('/api/content/assets')).body.assets.filter((m: any) => m.group === 'Holiday 2026');
+    expect(assets.map((m: any) => m.postType)).toEqual(['carousel', 'carousel']);
+    // A Canva link with the assets, shared with stylists; one kept for the salon only.
+    await owner.post('/api/content/asset-links', { url: 'https://www.canva.com/design/HOL/view', title: 'Holiday story template', postType: 'story', group: 'Holiday 2026' });
+    await owner.post('/api/content/asset-links', { url: 'https://www.canva.com/design/INT/view', title: 'Internal only', group: 'Holiday 2026', stylists: false });
+    expect((await jen.get('/api/content/asset-links')).status).toBe(403); // Content Calendar only
+    const forStylists = (await jen.get('/api/my-content/links')).body.links.map((l: any) => [l.title, l.kind]);
+    expect(forStylists).toContainEqual(['Holiday story template', 'story']);
+    expect(forStylists.map((x: any) => x[0])).not.toContain('Internal only');
+    expect((await jen.get('/api/my-content/downloads')).body.downloads.filter((d: any) => d.group === 'Holiday 2026')).toHaveLength(2);
+    // The group as a ZIP: both files and the links.
+    const zip = await owner.file(`/api/content/assets/group-download?group=${encodeURIComponent('Holiday 2026')}`);
+    expect(zip.status).toBe(200);
+    const text = zip.body.toString('latin1');
+    expect(text).toContain('Holiday_2026/01_Slide_1.png');
+    expect(text).toContain('Holiday_2026/02_Slide_2.png');
+    expect(text).toContain('https://www.canva.com/design/HOL/view');
+    expect((await jen.get(`/api/content/assets/group-download?group=x`)).status).toBe(403);
+  });
+
+  it('Plan a post from a transformation (its photos linked), and ideas shared with the team (text only)', async () => {
+    const t = (await jen.post('/api/transformations', { mainService: 'Balayage / lightening' })).body.transformation;
+    await jen.upload(`/api/transformations/${t.id}/photos?kind=after`, jpeg('p1'));
+    await jen.upload(`/api/transformations/${t.id}/photos?kind=after`, jpeg('p2'));
+    const p = await jen.post('/api/my-content/from-transformation', { transformationId: t.id });
+    expect(p.status).toBe(201);
+    expect(p.body.post).toMatchObject({ format: 'carousel', status: 'idea' });
+    expect(p.body.post.media.map((m: any) => m.fromTransformation)).toEqual([true, true]);
+    expect((await mike.post('/api/my-content/from-transformation', { transformationId: t.id })).status).toBe(404); // not his
+    // Share it as an idea: others see the text, not the photos; turning it off hides it again.
+    await jen.patch(`/api/my-content/${p.body.post.id}`, { caption: 'Sun-kissed', sharedWithTeam: true });
+    const seen = (await mike.get('/api/my-content/team-ideas')).body.ideas.find((i: any) => i.id === p.body.post.id);
+    expect(seen).toMatchObject({ caption: 'Sun-kissed', author: 'Jennifer', mine: false });
+    expect(seen.media).toBeUndefined();
+    expect((await mike.get(`/api/my-content/${p.body.post.id}`)).status).toBe(404); // the post itself stays private
+    await jen.patch(`/api/my-content/${p.body.post.id}`, { sharedWithTeam: false });
+    expect((await mike.get('/api/my-content/team-ideas')).body.ideas.map((i: any) => i.id)).not.toContain(p.body.post.id);
+  });
 });

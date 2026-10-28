@@ -1,3 +1,4 @@
+import { addSharedLink, removeSharedLink, sharedLinks, updateSharedLink } from '../domain/myContent.js';
 import express, { Router } from 'express';
 import { z } from 'zod';
 import { CONTENT_PLATFORMS, CONTENT_FORMATS } from '@addendum/shared';
@@ -5,6 +6,7 @@ import {
   accountsFor, addComment, analytics, campaignTimeline, companionBlog, createLaunch, crossPost, comments, contentAccounts, contentSettings, createPosts, deleteAsset, deleteCampaign, deleteIdea, deletePost, favoriteIdea, generate,
   getPost, importMetrics, keepIdea, suggestIdeas, linkOptions, listAssets, listCampaigns, listIdeas, listPosts, MEDIA_LIMITS, planning, readMedia, repurpose, reschedule, saveCampaign,
   saveContentAccounts, saveContentSettings, saveIdea, saveMedia, setMetrics, transition, updateAsset, updatePost,
+  assetGroupZip,
 } from '../domain/content.js';
 import { can } from '../auth/permissions.js';
 import { forbidden, notFound } from '../lib/errors.js';
@@ -163,8 +165,23 @@ contentRouter.get('/assets', ah(async (req, res) => {
   const q = parse(z.object({ q: z.string().max(100).optional(), account: account.optional(), tag: z.string().max(60).optional(), approved: z.enum(['true', 'false']).optional() }), req.query);
   res.json({ assets: await listAssets(who(req), { ...q, approved: q.approved == null ? undefined : q.approved === 'true' }) });
 }));
+// Links as assets (Canva designs and templates…), organised like files; shared with stylists unless turned off.
+const linkBody = z.object({ title: z.string().max(120).optional(), postType: z.enum(['post', 'story', 'reel', 'carousel']).nullable().optional(), group: z.string().max(80).nullable().optional(), stylists: z.boolean().optional() });
+// A whole asset group as a ZIP (photos and videos, plus its links in Links.txt).
+contentRouter.get('/assets/group-download', ah(async (req, res) => {
+  const z1 = await assetGroupZip(String(req.query.group ?? '').slice(0, 80));
+  await logAction(req, 'content.asset_group_download', undefined, undefined, { group: req.query.group });
+  res.setHeader('Cache-Control', 'no-store');
+  res.attachment(z1.name);
+  res.sendFile(z1.file, () => void z1.remove());
+}));
+contentRouter.get('/asset-links', ah(async (_req, res) => res.json({ links: await sharedLinks() })));
+contentRouter.post('/asset-links', ah(async (req, res) => res.status(201).json({ links: await addSharedLink({ title: '', ...parse(linkBody.extend({ url: z.string().max(1000) }), req.body) }) })));
+contentRouter.patch('/asset-links/:lid', ah(async (req, res) => res.json({ links: await updateSharedLink(req.params.lid, parse(linkBody, req.body)) })));
+contentRouter.delete('/asset-links/:lid', ah(async (req, res) => res.json({ links: await removeSharedLink(req.params.lid) })));
 contentRouter.patch('/assets/:id', ah(async (req, res) => {
-  await updateAsset(who(req), req.params.id, parse(z.object({ title: text(200).optional(), tags: z.array(z.string().max(40)).max(30).optional(), account: account.nullable().optional(), approved: z.boolean().optional(), stylistShare: z.enum(['post', 'story']).nullable().optional() }), req.body) as any);
+  await updateAsset(who(req), req.params.id, parse(z.object({ title: text(200).optional(), tags: z.array(z.string().max(40)).max(30).optional(), account: account.nullable().optional(), approved: z.boolean().optional(), stylistShare: z.enum(['post', 'story']).nullable().optional(),
+    postType: z.enum(['post', 'story', 'reel', 'carousel']).nullable().optional(), group: z.string().max(80).nullable().optional() }), req.body) as any);
   res.json({ ok: true });
 }));
 contentRouter.delete('/assets/:id', ah(async (req, res) => { await deleteAsset(req.params.id); res.json({ ok: true }); }));

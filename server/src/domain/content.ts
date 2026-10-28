@@ -90,13 +90,13 @@ export async function checkMediaSignature(id: string, sig: string) {
   const want = sign(await mediaSecret(), id);
   return sig.length === want.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(want));
 }
-const mediaDTO = (m: any): ContentMediaDTO => ({ id: m.id, mime: m.mime, name: m.name, size: m.size, url: `/api/content/media/${m.id}`, title: m.title ?? null, tags: m.tags ?? [], account: m.account ?? null, approved: !!m.approved, createdAt: iso(m.created_at) ?? undefined, stylistShare: m.stylist_share ?? null });
+const mediaDTO = (m: any): ContentMediaDTO => ({ id: m.id, mime: m.mime, name: m.name, size: m.size, url: `/api/content/media/${m.id}`, title: m.title ?? null, tags: m.tags ?? [], account: m.account ?? null, approved: !!m.approved, createdAt: iso(m.created_at) ?? undefined, stylistShare: m.stylist_share ?? null, postType: m.post_type ?? null, group: m.group_name ?? null });
 export async function saveMedia(bytes: Buffer, mime: string, name: string | null, staffId: string | null, account: string | null = null): Promise<ContentMediaDTO> {
   const type = mime.toLowerCase().split(';')[0].trim();
   if (!MEDIA_TYPES.test(type)) throw badRequest('Photos (JPG, PNG, WebP, HEIC) or videos (MP4, MOV) only.');
   if (!bytes.length) throw badRequest('That file is empty.');
   if (bytes.length > (type.startsWith('video/') ? MEDIA_LIMITS.video : MEDIA_LIMITS.image)) throw badRequest(`Too big — ${type.startsWith('video/') ? 'videos up to 100 MB' : 'photos up to 15 MB'}.`);
-  const r = (await db().one<any>('INSERT INTO content_media(mime, name, bytes, size, created_by_staff_id, account, title) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, mime, name, size, title, tags, account, approved, stylist_share, created_at',
+  const r = (await db().one<any>('INSERT INTO content_media(mime, name, bytes, size, created_by_staff_id, account, title) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, mime, name, size, title, tags, account, approved, stylist_share, post_type, group_name, created_at',
     [type, name?.slice(0, 200) ?? null, bytes, bytes.length, staffId, ACCOUNT_IDS.includes(account as ContentAccountId) ? account : null, name ? name.replace(/\.[a-z0-9]+$/i, '').slice(0, 120) : null]))!;
   return mediaDTO(r);
 }
@@ -104,18 +104,20 @@ export async function readMedia(id: string) { return db().one<{ mime: string; by
 /** The asset library: files the person's accounts may use (an account's own, or shared), newest first. */
 export async function listAssets(u: Who, f: { q?: string; account?: string; tag?: string; approved?: boolean }) {
   const mine = await accountsFor(u);
-  const rows = await db().query<any>(`SELECT id, mime, name, size, title, tags, account, approved, stylist_share, created_at FROM content_media
+  const rows = await db().query<any>(`SELECT id, mime, name, size, title, tags, account, approved, stylist_share, post_type, group_name, created_at FROM content_media
      WHERE (account IS NULL OR account = ANY($1::text[])) ORDER BY created_at DESC LIMIT 500`, [mine]);
   const words = (f.q ?? '').toLowerCase().split(/\s+/).filter(Boolean);
   return rows.filter((m) => (!f.account || m.account === f.account || (f.account && !m.account)) && (!f.tag || (m.tags ?? []).includes(f.tag)) && (f.approved == null || m.approved === f.approved)
     && words.every((w) => `${m.title ?? ''} ${m.name ?? ''} ${(m.tags ?? []).join(' ')}`.toLowerCase().includes(w))).map(mediaDTO);
 }
-export async function updateAsset(u: Who, id: string, p: { title?: string | null; tags?: string[]; account?: ContentAccountId | null; approved?: boolean; stylistShare?: 'post' | 'story' | null }) {
+export async function updateAsset(u: Who, id: string, p: { title?: string | null; tags?: string[]; account?: ContentAccountId | null; approved?: boolean; stylistShare?: 'post' | 'story' | null; postType?: 'post' | 'story' | 'reel' | 'carousel' | null; group?: string | null }) {
   if (p.approved !== undefined && !has(u, 'content:approve')) throw forbidden('Only people who approve content can mark assets approved.');
   if (p.account) await assertAccount(u, p.account);
   await db().query(`UPDATE content_media SET title = COALESCE($2, title), tags = COALESCE($3, tags), account = CASE WHEN $4 THEN $5 ELSE account END, approved = COALESCE($6, approved) WHERE id = $1`,
     [id, p.title ?? null, p.tags ? [...new Set(p.tags.map((t) => t.trim().toLowerCase()).filter(Boolean))] : null, p.account !== undefined, p.account ?? null, p.approved ?? null]);
   if (p.stylistShare !== undefined) await db().query('UPDATE content_media SET stylist_share = $2 WHERE id = $1', [id, p.stylistShare]);
+  if (p.postType !== undefined) await db().query('UPDATE content_media SET post_type = $2 WHERE id = $1', [id, p.postType]);
+  if (p.group !== undefined) await db().query('UPDATE content_media SET group_name = $2 WHERE id = $1', [id, p.group?.trim() || null]);
 }
 export async function deleteAsset(id: string) {
   const used = await db().one('SELECT 1 FROM content_posts WHERE $1 = ANY(media_ids) LIMIT 1', [id]);
@@ -813,4 +815,33 @@ export async function importRecentMetrics() {
   let n = 0;
   for (const r of rows) { try { await importMetrics(null, r.id); n++; } catch { /* next time */ } }
   return n;
+}
+
+/** All the files of one asset group (and its links, listed in a text file) as a ZIP. Returns the file to send and remove. */
+export async function assetGroupZip(group: string) {
+  const { ZipWriter, mediaRoot } = await import('./transformations.js');
+  const { sharedLinks } = await import('./myContent.js');
+  const rows = await db().query<{ id: string; mime: string; name: string | null; title: string | null; bytes: Buffer }>('SELECT id, mime, name, title, bytes FROM content_media WHERE group_name = $1 ORDER BY created_at', [group]);
+  const links = (await sharedLinks()).filter((l) => l.group === group);
+  if (!rows.length && !links.length) throw notFound('That group');
+  const safe = (x: string) => x.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9 ._-]+/g, ' ').trim().replace(/\s+/g, '_').slice(0, 60) || 'file';
+  const folder = safe(group);
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const file = path.join(mediaRoot(), 'tmp', `group-${crypto.randomUUID()}.zip`);
+  const zip = new ZipWriter(file);
+  await zip.open();
+  try {
+    const used = new Set<string>();
+    for (const [i, r] of rows.entries()) {
+      const ext = (r.name?.match(/\.[A-Za-z0-9]+$/)?.[0] ?? `.${r.mime.split('/')[1]?.replace('jpeg', 'jpg').replace('quicktime', 'mov') ?? 'bin'}`).toLowerCase();
+      let name = `${folder}/${String(i + 1).padStart(2, '0')}_${safe((r.title || r.name || 'asset').replace(/\.[A-Za-z0-9]+$/, ''))}${ext}`;
+      for (let k = 2; used.has(name); k++) name = name.replace(/(\.[a-z0-9]+)$/, `_${k}$1`);
+      used.add(name);
+      await zip.add(name, Buffer.from(r.bytes));
+    }
+    if (links.length) await zip.add(`${folder}/Links.txt`, Buffer.from(links.map((l) => `${l.title}\r\n${l.url}\r\n`).join('\r\n'), 'utf8'));
+    await zip.close();
+  } catch (e) { await zip.abort(); throw e; }
+  return { file, name: `${folder}.zip`, remove: () => fs.promises.unlink(file).catch(() => {}) };
 }

@@ -18,8 +18,10 @@ export interface PersonalMediaDTO { id: string; thumbUrl: string; originalUrl: s
 export interface PersonalPostDTO {
   id: string; date: string | null; time: string | null; format: (typeof FORMATS)[number]; status: (typeof STATUSES)[number];
   title: string; caption: string | null; hashtags: string | null; notes: string | null; media: PersonalMediaDTO[]; updatedAt: string;
+  /** Shared with the team as an idea (its text, not its photos). */
+  sharedWithTeam: boolean;
 }
-export interface PersonalPostInput { date?: string | null; time?: string | null; format?: string; status?: string; title?: string; caption?: string | null; hashtags?: string | null; notes?: string | null }
+export interface PersonalPostInput { date?: string | null; time?: string | null; format?: string; status?: string; title?: string; caption?: string | null; hashtags?: string | null; notes?: string | null; sharedWithTeam?: boolean }
 
 const day = (d: unknown) => (d == null ? null : typeof d === 'string' ? d.slice(0, 10) : new Date(d as string).toISOString().slice(0, 10));
 
@@ -29,7 +31,7 @@ async function dtos(rows: any[]): Promise<PersonalPostDTO[]> {
     WHERE m.post_id = ANY($1) ORDER BY m.position, m.created_at`, [rows.map((r) => r.id)]);
   return rows.map((r) => ({
     id: r.id, date: day(r.post_date), time: r.post_time, format: r.format, status: r.status, title: r.title, caption: r.caption, hashtags: r.hashtags, notes: r.notes,
-    updatedAt: new Date(r.updated_at).toISOString(),
+    updatedAt: new Date(r.updated_at).toISOString(), sharedWithTeam: !!r.shared_at,
     media: media.filter((m) => m.post_id === r.id).map((m) => ({
       id: m.id, mime: m.mime ?? m.t_mime ?? 'image/jpeg', fromTransformation: !!m.transformation_media_id,
       thumbUrl: `/api/my-content/media/${m.id}/thumb`, originalUrl: `/api/my-content/media/${m.id}/original`,
@@ -72,6 +74,7 @@ export async function updatePost(id: string, b: PersonalPostInput, u: Who) {
     post_date: b.date, post_time: b.time, format: b.format, status: b.status, title: b.title?.trim(), caption: b.caption, hashtags: b.hashtags, notes: b.notes,
   };
   const set = Object.entries(cols).filter(([, v]) => v !== undefined);
+  if (b.sharedWithTeam !== undefined) await db().query(`UPDATE personal_posts SET shared_at = ${b.sharedWithTeam ? 'COALESCE(shared_at, now())' : 'NULL'} WHERE id = $1 AND staff_id = $2`, [id, u.id]);
   if (set.length) {
     await db().query(`UPDATE personal_posts SET ${set.map(([k], i) => `${k} = $${i + 3}`).join(', ')}, updated_at = now() WHERE id = $1 AND staff_id = $2`,
       [id, u.id, ...set.map(([k, v]) => (k === 'post_date' || k === 'post_time' ? v || null : v))]);
@@ -160,9 +163,9 @@ export async function setHandle(u: Who, raw: string | null) {
 // ---------------- salon downloads ----------------
 /** Posts and stories the salon shares with stylists (Content Calendar → Assets → "Stylists can download"). */
 export async function salonDownloads() {
-  const rows = await db().query<any>(`SELECT id, mime, name, size, title, tags, stylist_share, created_at FROM content_media WHERE stylist_share IS NOT NULL ORDER BY created_at DESC LIMIT 300`);
+  const rows = await db().query<any>(`SELECT id, mime, name, size, title, tags, stylist_share, group_name, created_at FROM content_media WHERE stylist_share IS NOT NULL ORDER BY group_name NULLS LAST, created_at DESC LIMIT 300`);
   return rows.map((m) => ({ id: m.id as string, kind: m.stylist_share as 'post' | 'story', title: (m.title ?? m.name ?? null) as string | null, mime: m.mime as string, size: m.size as number,
-    url: `/api/my-content/downloads/${m.id}`, createdAt: new Date(m.created_at).toISOString() }));
+    group: (m.group_name ?? null) as string | null, url: `/api/my-content/downloads/${m.id}`, createdAt: new Date(m.created_at).toISOString() }));
 }
 /** A shared file (only ones the salon has shared). */
 export async function salonDownload(id: string) {
@@ -189,20 +192,61 @@ export async function salonIdeas() {
 }
 
 // ---------------- shared links (e.g. Canva templates) ----------------
-export interface SharedLink { id: string; title: string; url: string; kind: 'post' | 'story' | 'both'; addedAt: string }
+export interface SharedLink {
+  id: string; title: string; url: string; kind: 'post' | 'story' | 'both'; addedAt: string;
+  /** Content Calendar → Assets: type of post and group; whether stylists see it (My Content → Salon downloads). */
+  postType?: 'post' | 'story' | 'reel' | 'carousel' | null; group?: string | null; stylists?: boolean;
+}
 const LINKS_KEY = 'mycontent.links';
 export const sharedLinks = async () => (await getKV<SharedLink[]>(LINKS_KEY)) ?? [];
 /** A link the salon shares with stylists (Canva designs and templates, a Drive folder…). */
-export async function addSharedLink(b: { title: string; url: string; kind: SharedLink['kind'] }) {
+/** What stylists see (links not hidden from them). */
+export const stylistLinks = async () => (await sharedLinks()).filter((l) => l.stylists !== false);
+const kindOf = (t: SharedLink['postType'], stylists: boolean, fallback: SharedLink['kind']): SharedLink['kind'] => (!stylists ? fallback : t === 'story' ? 'story' : t ? 'post' : fallback);
+export async function addSharedLink(b: { title: string; url: string; kind?: SharedLink['kind']; postType?: SharedLink['postType']; group?: string | null; stylists?: boolean }) {
   let u: URL;
   try { u = new URL(b.url.trim()); } catch { throw badRequest('Paste the full link, starting with https://'); }
   if (u.protocol !== 'https:') throw badRequest('Use an https:// link.');
   const list = await sharedLinks();
-  const link: SharedLink = { id: crypto.randomUUID(), title: b.title.trim() || (/canva\.com$/i.test(u.hostname.replace(/^www\./, '')) ? 'Canva design' : u.hostname), url: u.toString(), kind: b.kind, addedAt: new Date().toISOString() };
+  const stylists = b.stylists ?? true;
+  const link: SharedLink = { id: crypto.randomUUID(), title: b.title.trim() || (/canva\.com$/i.test(u.hostname.replace(/^www\./, '')) ? 'Canva design' : u.hostname), url: u.toString(),
+    kind: b.kind ?? kindOf(b.postType ?? null, stylists, 'both'), postType: b.postType ?? null, group: b.group?.trim() || null, stylists, addedAt: new Date().toISOString() };
   await setKV(LINKS_KEY, [link, ...list].slice(0, 200));
+  return sharedLinks();
+}
+export async function updateSharedLink(id: string, b: { title?: string; postType?: SharedLink['postType']; group?: string | null; stylists?: boolean; kind?: SharedLink['kind'] }) {
+  const list = await sharedLinks();
+  const i = list.findIndex((l) => l.id === id);
+  if (i < 0) throw notFound('That link');
+  const n = { ...list[i], ...Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined)) } as SharedLink;
+  if (b.group !== undefined) n.group = b.group?.trim() || null;
+  if (b.kind === undefined && (b.postType !== undefined || b.stylists !== undefined)) n.kind = kindOf(n.postType ?? null, n.stylists !== false, n.kind);
+  list[i] = n;
+  await setKV(LINKS_KEY, list);
   return sharedLinks();
 }
 export async function removeSharedLink(id: string) {
   await setKV(LINKS_KEY, (await sharedLinks()).filter((l) => l.id !== id));
   return sharedLinks();
+}
+
+/** A post in their plan from one of their transformations: its photos and videos linked (not copied), as an idea. */
+export async function postFromTransformation(transformationId: string, u: Who) {
+  const { row, a } = await visible(transformationId, u);
+  if (!a.download) throw notFound('That transformation');
+  const media = await db().query<{ id: string; mime: string }>('SELECT id, mime FROM transformation_media WHERE transformation_id = $1 ORDER BY position, uploaded_at', [transformationId]);
+  const format = media.length > 1 ? 'carousel' : media[0]?.mime.startsWith('video/') ? 'reel' : 'post';
+  const post = await createPost({ title: row.title, format, notes: row.main_service || null }, u);
+  for (const [i, m] of media.entries()) {
+    await db().query('INSERT INTO personal_post_media(post_id, position, transformation_media_id) VALUES ($1,$2,$3)', [post.id, i, m.id]);
+  }
+  return getPost(post.id, u);
+}
+
+/** Ideas stylists have shared with the team (title, format, caption, hashtags, notes — never their photos). */
+export async function teamIdeas(u: Who) {
+  const rows = await db().query<any>(`SELECT p.id, p.title, p.format, p.caption, p.hashtags, p.notes, p.shared_at, p.staff_id, s.name FROM personal_posts p JOIN staff s ON s.id = p.staff_id
+    WHERE p.shared_at IS NOT NULL ORDER BY p.shared_at DESC LIMIT 200`);
+  return rows.map((r) => ({ id: r.id as string, title: r.title as string, format: r.format as (typeof FORMATS)[number], caption: r.caption, hashtags: r.hashtags, notes: r.notes,
+    author: (r.name as string).split(/\s+/)[0], mine: r.staff_id === u.id, sharedAt: new Date(r.shared_at).toISOString() }));
 }

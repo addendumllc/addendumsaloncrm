@@ -1,7 +1,7 @@
 import express, { Router } from 'express';
 import { z } from 'zod';
 import {
-  addFromTransformation, addUpload, addSharedLink, removeSharedLink, salonDownload, salonDownloads, salonIdeas, sharedLinks, createPost, deletePost, FORMATS, getHandle, getPost, listPosts, mediaFile, myTransformationPhotos, removeMedia, setHandle, setThumb, STATUSES, updatePost,
+  addFromTransformation, addUpload, addSharedLink, postFromTransformation, teamIdeas, removeSharedLink, salonDownload, salonDownloads, salonIdeas, stylistLinks, createPost, deletePost, FORMATS, getHandle, getPost, listPosts, mediaFile, myTransformationPhotos, removeMedia, setHandle, setThumb, STATUSES, updatePost,
 } from '../domain/myContent.js';
 import { receiveUpload } from '../domain/transformations.js';
 import { can } from '../auth/permissions.js';
@@ -16,7 +16,7 @@ const text = (max: number) => z.string().max(max).nullable().optional();
 const post = z.object({
   date: date.nullable().optional(), time: z.string().regex(/^\d{2}:\d{2}$/).nullable().optional().or(z.literal('').transform(() => null)),
   format: z.enum(FORMATS).optional(), status: z.enum(STATUSES).optional(), title: z.string().max(200).optional(),
-  caption: text(2200), hashtags: text(1000), notes: text(4000),
+  caption: text(2200), hashtags: text(1000), notes: text(4000), sharedWithTeam: z.boolean().optional(),
 });
 
 myContentRouter.get('/', ah(async (req, res) => {
@@ -24,9 +24,10 @@ myContentRouter.get('/', ah(async (req, res) => {
   res.json({ posts: await listPosts(req.user!, q.from, q.to), instagram: await getHandle(req.user!) });
 }));
 myContentRouter.put('/instagram', ah(async (req, res) => res.json({ instagram: await setHandle(req.user!, parse(z.object({ handle: z.string().max(100).nullable() }), req.body).handle) })));
+myContentRouter.get('/team-ideas', ah(async (req, res) => res.json({ ideas: await teamIdeas(req.user!) })));
 myContentRouter.get('/ideas', ah(async (_req, res) => res.json({ ideas: await salonIdeas() })));
 // Links the salon shares (Canva…): everyone with My Content sees them; adding or removing is for Content Calendar managers.
-myContentRouter.get('/links', ah(async (_req, res) => res.json({ links: await sharedLinks() })));
+myContentRouter.get('/links', ah(async (_req, res) => res.json({ links: await stylistLinks() })));
 myContentRouter.post('/links', ah(async (req, res) => {
   if (!can(req.user, 'content:manage')) throw forbidden('Adding links for stylists is for people who manage the Content Calendar.');
   const b = parse(z.object({ title: z.string().max(120), url: z.string().max(1000), kind: z.enum(['post', 'story', 'both']).default('both') }), req.body);
@@ -60,6 +61,7 @@ myContentRouter.put(`/media/:mid${ID}/thumb`, express.raw({ type: () => true, li
   res.json({ ok: true });
 }));
 myContentRouter.delete(`/media/:mid${ID}`, ah(async (req, res) => res.json({ post: await removeMedia(req.params.mid, req.user!) })));
+myContentRouter.post('/from-transformation', ah(async (req, res) => res.status(201).json({ post: await postFromTransformation(parse(z.object({ transformationId: uuid }), req.body).transformationId, req.user!) })));
 myContentRouter.post('/', ah(async (req, res) => res.status(201).json({ post: await createPost(parse(post, req.body), req.user!) })));
 myContentRouter.get(`/:id${ID}`, ah(async (req, res) => res.json({ post: await getPost(req.params.id, req.user!) })));
 myContentRouter.patch(`/:id${ID}`, ah(async (req, res) => res.json({ post: await updatePost(req.params.id, parse(post, req.body), req.user!) })));

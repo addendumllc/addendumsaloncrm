@@ -1,9 +1,11 @@
 import { useSearchParams } from 'react-router-dom';
-import { useMe } from '../api/hooks';
+import { useCanDo, useMe } from '../api/hooks';
+import { useNavigate } from 'react-router-dom';
+import { sharePhotos } from '../lib/sharePhotos';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowDown, ArrowUp, Camera, Play, UserCheck, Check, CheckSquare, Download, ExternalLink, FolderPlus, Grid3x3, Instagram, LayoutList, Pencil, Plus, RefreshCw, Search, Settings2, Star, Trash2, Upload, X,
+  ArrowDown, ArrowUp, Camera, Play, UserCheck, Check, CheckSquare, Download, ExternalLink, FolderPlus, Grid3x3, Instagram, LayoutList, Pencil, Plus, RefreshCw, Search, Settings2, Star, Trash2, Upload, X, Share2, CalendarHeart,
 } from 'lucide-react';
 import { EXTENSION_METHODS, EXTENSION_WORK, type TransformationDTO, type TransformationPhotoDTO, type TransformationPhotoKind } from '@addendum/shared';
 import { api } from '../api/client';
@@ -75,6 +77,29 @@ function Cover({ t, className, small, live = true }: { t: TransformationDTO; cla
     </span>
   );
 }
+/** Share a transformation's photos and videos (the phone's share sheet), or start a post with them in My Content. */
+function ShareButtons({ t }: { t: TransformationDTO }) {
+  const toast = useToast();
+  const go = useNavigate();
+  const canPlan = useCanDo()('content:personal');
+  const [busy, setBusy] = useState<'' | 'share' | 'plan'>('');
+  const share = async () => {
+    setBusy('share');
+    try { await sharePhotos(t.photos.map((p) => p.originalUrl), t.code); } catch (e) { toast((e as Error).message || 'Couldn’t share.', 'error'); } finally { setBusy(''); }
+  };
+  const plan = async () => {
+    setBusy('plan');
+    try { const r = await api.post<{ post: { id: string } }>('/my-content/from-transformation', { transformationId: t.id }); go(`/my-content?open=${r.post.id}`); }
+    catch (e) { toast((e as Error).message, 'error'); setBusy(''); }
+  };
+  return (
+    <span className="inline-flex flex-wrap gap-2">
+      <Button icon={<Share2 className="h-4 w-4" />} loading={busy === 'share'} onClick={share}>Share</Button>
+      {canPlan && <Button icon={<CalendarHeart className="h-4 w-4" />} loading={busy === 'plan'} onClick={plan}>Plan a post</Button>}
+    </span>
+  );
+}
+
 /** What was done, in a line: the services, and for extensions the method (hybrid: each method). */
 const doneOf = (t: TransformationDTO) => {
   const e = t.extension;
@@ -301,7 +326,8 @@ function Detail({ id, o, onClose, onEdit, onExport, onChanged }: { id: string; o
       footer={<>
         {t.canEdit && <Button variant="ghost" className="mr-auto" icon={<Trash2 className="h-4 w-4" />} onClick={del}>Delete</Button>}
         {t.canDownload && <a className={buttonClass('secondary')} href={`/api/transformations/${t.id}/details.csv`}><Download className="h-4 w-4" /><span className="btn-label">Details (CSV)</span></a>}
-        {t.canDownload && t.photos.length > 0 && <Button icon={<Download className="h-4 w-4" />} onClick={() => onExport({ preset: 'one', ids: [t.id] })}>Download all photos (ZIP)</Button>}
+        {t.canDownload && t.photos.length > 0 && <Button icon={<Download className="h-4 w-4" />} onClick={() => onExport({ preset: 'one', ids: [t.id] })}>Download all (ZIP)</Button>}
+        {t.canDownload && t.photos.length > 0 && <ShareButtons t={t} />}
         {t.canEdit && !t.stylistStaffId && me && <Button icon={<UserCheck className="h-4 w-4" />} onClick={() => api.patch(`/transformations/${t.id}`, { stylistStaffId: me.id }).then(() => { void refetch(); onChanged(); toast('Now in your work'); }).catch((x) => toast((x as Error).message, 'error'))}>This is my work</Button>}
         {t.canEdit && <Button variant="primary" icon={<Pencil className="h-4 w-4" />} onClick={() => onEdit(t)}>Edit</Button>}
       </>}>
@@ -615,7 +641,7 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
 
   return (
     <Modal open wide onClose={() => onClose(cur?.id)} title={cur ? `Edit ${cur.code}` : appt ? 'Confirm transformation' : 'New transformation'}
-      footer={<><Button variant="ghost" onClick={() => onClose(cur?.id)}>Cancel</Button><Button variant="primary" loading={busy} onClick={save}>{cur ? 'Save' : appt ? 'Confirm' : 'Save'}</Button></>}>
+      footer={<>{cur && cur.canDownload && cur.photos.length > 0 && <span className="mr-auto"><ShareButtons t={cur} /></span>}<Button variant="ghost" onClick={() => onClose(cur?.id)}>Cancel</Button><Button variant="primary" loading={busy} onClick={save}>{cur ? 'Save' : appt ? 'Confirm' : 'Save'}</Button></>}>
       <div className="space-y-4">
         {/* Administrators say whose work it is first (and can fix it later); stylists' own work is theirs. */}
         {o.can.manage && !appt && (

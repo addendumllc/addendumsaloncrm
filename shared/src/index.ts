@@ -2536,7 +2536,9 @@ export const CONTENT_STATUSES: { value: ContentStatus; label: string }[] = [
 ];
 export interface ContentMediaDTO { id: string; mime: string; name: string | null; size: number; url: string; title?: string | null; tags?: string[]; account?: ContentAccountId | null; approved?: boolean; createdAt?: string;
   /** Shared with stylists to download (My Content → Salon downloads), as a post or a story. */
-  stylistShare?: 'post' | 'story' | null }
+  stylistShare?: 'post' | 'story' | null;
+  /** Organising assets: the type of post it's for, and an optional group (a carousel set, a campaign…). */
+  postType?: 'post' | 'story' | 'reel' | 'carousel' | null; group?: string | null }
 /** Reach, views… — imported from the platform, or entered by hand (metricsSource says which). */
 export interface ContentMetrics { reach?: number; impressions?: number; views?: number; likes?: number; comments?: number; saves?: number; shares?: number; clicks?: number; bookingInquiries?: number; productClicks?: number; salesCents?: number;
   /** Email (from Flodesk's report, entered by hand): recipients, delivered, opens, unsubscribes, bounces; clicks and salesCents as above. */

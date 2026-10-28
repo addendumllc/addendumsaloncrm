@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Camera, Download, ExternalLink, Info, Link2, Share2, CalendarDays, ChevronLeft, ChevronRight, Copy, Film, Grid3x3, ImagePlus, Instagram, LayoutList, Lock, Play, Plus, Send, Trash2, Upload, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { useCanDo } from '../api/hooks';
 import { TransformationsDue } from '../components/domain/TransformationsDue';
@@ -12,7 +12,7 @@ type Format = 'post' | 'reel' | 'story' | 'carousel';
 interface Draft { date: string | null; title?: string; caption?: string; hashtags?: string; notes?: string; format?: Format }
 type Status = 'idea' | 'draft' | 'ready' | 'posted';
 interface Media { id: string; thumbUrl: string; originalUrl: string; mime: string; fromTransformation: boolean }
-interface Post { id: string; date: string | null; time: string | null; format: Format; status: Status; title: string; caption: string | null; hashtags: string | null; notes: string | null; media: Media[]; updatedAt: string }
+interface Post { id: string; date: string | null; time: string | null; format: Format; status: Status; title: string; caption: string | null; hashtags: string | null; notes: string | null; media: Media[]; updatedAt: string; sharedWithTeam?: boolean }
 const FORMATS: { value: Format; label: string }[] = [{ value: 'post', label: 'Post' }, { value: 'carousel', label: 'Carousel' }, { value: 'reel', label: 'Reel' }, { value: 'story', label: 'Story' }];
 const STATUSES: { value: Status; label: string; tone: 'neutral' | 'amber' | 'plum' | 'sage' }[] = [
   { value: 'idea', label: 'Idea', tone: 'neutral' }, { value: 'draft', label: 'Draft', tone: 'amber' }, { value: 'ready', label: 'Ready', tone: 'plum' }, { value: 'posted', label: 'Posted', tone: 'sage' },
@@ -44,6 +44,14 @@ export function MyContentPage() {
   const { data, isLoading, error, refetch } = useMonth(month);
   const [edit, setEdit] = useState<Post | Draft | null>(null);
   const [handleOpen, setHandleOpen] = useState(false);
+  // ?open=<post> (e.g. "Plan a post" from a transformation): open it.
+  const [params, setParams] = useSearchParams();
+  const openId = params.get('open');
+  useEffect(() => {
+    if (!openId) return;
+    api.get<{ post: Post }>(`/my-content/${openId}`).then((r) => setEdit(r.post)).catch(() => undefined);
+    setParams((p) => { const n = new URLSearchParams(p); n.delete('open'); return n; }, { replace: true });
+  }, [openId]); // eslint-disable-line react-hooks/exhaustive-deps
   const refresh = () => void qc.invalidateQueries({ queryKey: ['my-content'] });
   const posts = data?.posts ?? [];
   const ideas = posts.filter((p) => !p.date);
@@ -106,6 +114,7 @@ export function MyContentPage() {
       )}
 
       <SalonIdeas onUse={(d) => setEdit(d)} />
+      <TeamIdeas onUse={(d) => setEdit(d)} />
 
       <SalonDownloads />
 
@@ -230,14 +239,14 @@ function PostEditor({ initial, handle, onClose }: { initial: Post | Draft; handl
   const [post, setPost] = useState<Post | null>(existing);
   const [d, setD] = useState({
     date: existing?.date ?? initial.date ?? '', time: existing?.time ?? '', format: existing?.format ?? (initial as Draft).format ?? 'post' as Format, status: existing?.status ?? (initial.date ? 'draft' : 'idea') as Status,
-    title: existing?.title ?? (initial as Draft).title ?? '', caption: existing?.caption ?? (initial as Draft).caption ?? '', hashtags: existing?.hashtags ?? (initial as Draft).hashtags ?? '', notes: existing?.notes ?? (initial as Draft).notes ?? '',
+    shared: !!existing?.sharedWithTeam, title: existing?.title ?? (initial as Draft).title ?? '', caption: existing?.caption ?? (initial as Draft).caption ?? '', hashtags: existing?.hashtags ?? (initial as Draft).hashtags ?? '', notes: existing?.notes ?? (initial as Draft).notes ?? '',
   });
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(0);
   const [picking, setPicking] = useState(false);
   const [sharing, setSharing] = useState(false);
   const file = useRef<HTMLInputElement>(null);
-  const body = () => ({ date: d.date || null, time: d.time || null, format: d.format, status: d.status, title: d.title, caption: d.caption || null, hashtags: d.hashtags || null, notes: d.notes || null });
+  const body = () => ({ date: d.date || null, time: d.time || null, format: d.format, status: d.status, title: d.title, caption: d.caption || null, hashtags: d.hashtags || null, notes: d.notes || null, sharedWithTeam: d.shared });
   /** Saves (creating it the first time) and returns the post. */
   const save = async (): Promise<Post> => {
     const r = post ? await api.patch<{ post: Post }>(`/my-content/${post.id}`, body()) : await api.post<{ post: Post }>('/my-content', body());
@@ -304,6 +313,8 @@ function PostEditor({ initial, handle, onClose }: { initial: Post | Draft; handl
           <Field label="Status"><select className="field" value={d.status} onChange={(e) => setD({ ...d, status: e.target.value as Status })}>{STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}</select></Field>
         </div>
         <Field label="Notes"><textarea className="field min-h-[56px]" value={d.notes} onChange={(e) => setD({ ...d, notes: e.target.value })} placeholder="Song, cover photo, who to tag…" /></Field>
+        <label className="flex items-start gap-2 text-[14px]"><input type="checkbox" className="mt-0.5 h-4 w-4 accent-plum" checked={d.shared} onChange={(e) => setD({ ...d, shared: e.target.checked })} />
+          <span>Share this idea with the team<span className="block text-[12px] text-stone">Everyone sees its name, caption, hashtags and notes — not your photos or dates.</span></span></label>
 
         <div className="flex flex-wrap gap-2 rounded-xl border border-line bg-mist/40 p-3">
           <Button variant="primary" icon={<Send className="h-4 w-4" />} disabled={!media.length} onClick={() => setSharing(true)}>Post to Instagram</Button>
@@ -422,7 +433,7 @@ function MyWork() {
   );
 }
 
-interface SalonFile { id: string; kind: 'post' | 'story'; title: string | null; mime: string; size: number; url: string; createdAt: string }
+interface SalonFile { id: string; kind: 'post' | 'story'; group: string | null; title: string | null; mime: string; size: number; url: string; createdAt: string }
 /** Posts and stories the salon provides, to download (or share straight to Instagram from a phone). */
 function SalonDownloads() {
   const toast = useToast();
@@ -459,7 +470,7 @@ function SalonDownloads() {
           {shownLinks.map((l) => (
             <div key={l.id} className="panel flex items-center gap-3 px-3 py-2.5">
               <span className={cx('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[12px] font-semibold', isCanva(l.url) ? 'bg-[#7d2ae8] text-white' : 'bg-mist text-stone')}>{isCanva(l.url) ? 'C' : <Link2 className="h-4 w-4" />}</span>
-              <span className="min-w-0 flex-1"><span className="block truncate text-[14px] text-ink">{l.title}</span><span className="block truncate text-[12px] text-stone">{isCanva(l.url) ? 'Canva' : new URL(l.url).hostname} · {l.kind === 'both' ? 'Posts & stories' : l.kind === 'story' ? 'Stories' : 'Posts'}</span></span>
+              <span className="min-w-0 flex-1"><span className="block truncate text-[14px] text-ink">{l.title}</span><span className="block truncate text-[12px] text-stone">{[isCanva(l.url) ? 'Canva' : new URL(l.url).hostname, l.group, l.kind === 'both' ? 'Posts & stories' : l.kind === 'story' ? 'Stories' : 'Posts'].filter(Boolean).join(' · ')}</span></span>
               <a className={buttonClass('secondary', 'sm')} href={l.url} target="_blank" rel="noreferrer noopener"><ExternalLink className="h-3.5 w-3.5" /><span className="btn-label">{isCanva(l.url) ? 'Open in Canva' : 'Open'}</span></a>
               {canManage && <button type="button" className="rounded p-2 text-stone hover:bg-mist hover:text-rose sm:p-1.5" aria-label={`Remove ${l.title}`} onClick={() => removeLink(l)}><Trash2 className="h-4 w-4" /></button>}
             </div>
@@ -469,8 +480,11 @@ function SalonDownloads() {
       )}
       {adding && <AddLink kind={kind} onClose={() => { setAdding(false); void qc.invalidateQueries({ queryKey: ['my-content-links'] }); }} />}
       {!data ? <PageLoading /> : !list.length ? (!shownLinks.length && <p className="text-[13px] text-stone">Nothing here yet — the salon adds {kind === 'post' ? 'posts' : 'stories'} for you to share.</p>) : (
+        <div className="space-y-4">{[...new Set(list.map((x) => x.group ?? ''))].map((g) => (
+          <div key={g || 'other'}>
+            {g && <h3 className="mb-1.5 text-[13px] font-semibold text-ink">{g}</h3>}
         <div className={cx('grid gap-3', kind === 'story' ? 'grid-cols-3 sm:grid-cols-5 lg:grid-cols-6' : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-5')}>
-          {list.map((f) => (
+          {list.filter((x) => (x.group ?? '') === g).map((f) => (
             <div key={f.id} className="panel overflow-hidden !p-0">
               {f.mime.startsWith('video/')
                 ? <video src={f.url} muted playsInline preload="metadata" controls className={cx('w-full bg-black object-cover', kind === 'story' ? 'aspect-[9/16]' : 'aspect-[4/5]')} />
@@ -485,6 +499,8 @@ function SalonDownloads() {
             </div>
           ))}
         </div>
+          </div>
+        ))}</div>
       )}
     </section>
   );
@@ -548,7 +564,7 @@ function SalonIdeas({ onUse }: { onUse: (d: Draft) => void }) {
   );
 }
 
-interface SharedLink { id: string; title: string; url: string; kind: 'post' | 'story' | 'both'; addedAt: string }
+interface SharedLink { id: string; title: string; url: string; kind: 'post' | 'story' | 'both'; group?: string | null; addedAt: string }
 const isCanva = (url: string) => { try { return /(^|\.)canva\.(com|link)$/i.test(new URL(url).hostname); } catch { return false; } };
 
 /** Content Calendar managers: share a link (a Canva design or template) with every stylist. */
@@ -572,5 +588,41 @@ function AddLink({ kind, onClose }: { kind: 'post' | 'story'; onClose: () => voi
         </Field>
       </div>
     </Modal>
+  );
+}
+
+interface TeamIdea { id: string; title: string; format: Format; caption: string | null; hashtags: string | null; notes: string | null; author: string; mine: boolean; sharedAt: string }
+/** Ideas stylists shared with the team — use one to start your own post. */
+function TeamIdeas({ onUse }: { onUse: (d: Draft) => void }) {
+  const { data } = useQuery({ queryKey: ['my-content-team-ideas'], queryFn: () => api.get<{ ideas: TeamIdea[] }>('/my-content/team-ideas').then((r) => r.ideas), staleTime: 60_000 });
+  const [open, setOpen] = useState<string | null>(null);
+  if (!data?.length) return null;
+  return (
+    <section className="mt-8">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <h2 className="h-display text-[20px]">Ideas from the team</h2>
+        <span className="text-[13px] text-stone">Shared by stylists — tick “Share this idea with the team” on one of yours</span>
+      </div>
+      <div className="panel divide-y divide-line !p-0">
+        {data.map((i) => (
+          <div key={i.id}>
+            <div className="flex items-center gap-3 px-3 py-2.5">
+              <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setOpen(open === i.id ? null : i.id)} aria-expanded={open === i.id}>
+                <span className="block text-[15px] text-ink">{i.title || i.caption?.slice(0, 60) || 'Idea'}</span>
+                <span className="block truncate text-[12px] text-stone">{FORMATS.find((f) => f.value === i.format)?.label} · {i.mine ? 'You' : i.author}</span>
+              </button>
+              {!i.mine && <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => onUse({ date: null, title: i.title, format: i.format, caption: i.caption ?? '', hashtags: i.hashtags ?? '', notes: i.notes ?? '' })}>Use this idea</Button>}
+            </div>
+            {open === i.id && (i.caption || i.notes || i.hashtags) && (
+              <div className="space-y-1 bg-mist/40 px-3 pb-3 pt-1 text-[13px] text-ink-soft">
+                {i.caption && <p className="whitespace-pre-wrap">{i.caption}</p>}
+                {i.hashtags && <p className="text-plum">{i.hashtags}</p>}
+                {i.notes && <p className="whitespace-pre-wrap"><span className="text-stone">Notes:</span> {i.notes}</p>}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
