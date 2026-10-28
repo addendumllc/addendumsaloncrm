@@ -304,7 +304,7 @@ function Detail({ id, o, onClose, onEdit, onExport, onChanged }: { id: string; o
           {t.photos.length > 0 && <p className="mt-2 text-[12px] text-stone">{t.photos.length} photo{t.photos.length === 1 ? '' : 's'} / video{t.photos.length === 1 ? '' : 's'}, originals kept in the CRM{t.canDownload ? ' — full quality when downloaded.' : '.'}</p>}
 
           {t.instagram.length > 0 && <Section title="On Instagram (external)">
-            <div className="space-y-2">{t.instagram.map((i) => <InstagramCard key={i.id} i={i} />)}</div>
+            <div className="space-y-2">{t.instagram.map((i, k) => <InstagramCard key={i.id} i={i} defaultOpen={k === 0 && !t.photos.length} />)}</div>
             <p className="mt-1.5 text-[12px] text-stone">Instagram content stays on Instagram — it isn’t copied into the CRM and may not be downloadable. A public post isn’t consent for other marketing.</p>
           </Section>}
         </div>
@@ -348,10 +348,12 @@ function Detail({ id, o, onClose, onEdit, onExport, onChanged }: { id: string; o
   );
 }
 
-function InstagramCard({ i, actions }: { i: TransformationDTO['instagram'][number]; actions?: ReactNode }) {
+function InstagramCard({ i, actions, defaultOpen = false }: { i: TransformationDTO['instagram'][number]; actions?: ReactNode; defaultOpen?: boolean }) {
   const [broken, setBroken] = useState(false);
+  const [show, setShow] = useState(defaultOpen);
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-line p-2.5">
+    <div className="rounded-lg border border-line">
+    <div className="flex flex-wrap items-center gap-3 p-2.5">
       {i.thumbnailUrl && !broken ? <img src={i.thumbnailUrl} alt="" className="h-14 w-14 shrink-0 rounded object-cover" onError={() => setBroken(true)} referrerPolicy="no-referrer" />
         : <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded bg-mist"><Instagram className="h-5 w-5 text-stone" /></span>}
       <span className="min-w-0 flex-1 text-[13px]">
@@ -361,7 +363,17 @@ function InstagramCard({ i, actions }: { i: TransformationDTO['instagram'][numbe
         <span className="block truncate text-[11px] text-stone">Added{i.addedBy ? ` by ${i.addedBy}` : ''} {new Date(i.addedAt).toLocaleDateString()}</span>
       </span>
       {actions}
+      <Button size="sm" variant={show ? 'primary' : 'secondary'} onClick={() => setShow(!show)}>{show ? 'Hide post' : 'Show post'}</Button>
       <a className={buttonClass('secondary', 'sm')} href={i.url} target="_blank" rel="noreferrer noopener"><ExternalLink className="h-3.5 w-3.5" /><span className="btn-label">Open on Instagram</span></a>
+    </div>
+    {/* Instagram's own embed of the post (photos, carousels and Reels, as Instagram shows them) — nothing is copied into the
+        CRM. Private or deleted posts show Instagram's own message instead. */}
+    {show && (
+      <div className="flex justify-center border-t border-line bg-mist/40 p-2">
+        <iframe title="Instagram post" src={`${i.url.replace(/\/?$/, '/')}embed/captioned/`} loading="lazy" className="h-[620px] w-full max-w-[420px] rounded border-0 bg-white"
+          sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerPolicy="strict-origin-when-cross-origin" />
+      </div>
+    )}
     </div>
   );
 }

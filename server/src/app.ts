@@ -61,6 +61,8 @@ export function createApp() {
             'https://*.cdninstagram.com', 'https://*.fbcdn.net'],
           'font-src': ["'self'", 'data:'],
           'connect-src': ["'self'"],
+          // Instagram's own embed (a public post shown in place on Transformations; nothing is copied).
+          'frame-src': ["'self'", 'https://www.instagram.com'],
           'frame-ancestors': ["'self'", ...embedOrigins],
           'form-action': ["'self'"],
           'upgrade-insecure-requests': c.COOKIE_SECURE ? [] : null,
