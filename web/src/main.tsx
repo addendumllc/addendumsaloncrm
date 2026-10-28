@@ -1,4 +1,14 @@
 import React from 'react';
+
+// After an update, a page's old files are gone: Vite says so with this event — reload once for the new version.
+window.addEventListener('vite:preloadError', (e) => {
+  try {
+    if (sessionStorage.getItem('addendum:reloaded-for-update')) return;
+    sessionStorage.setItem('addendum:reloaded-for-update', '1');
+  } catch { return; }
+  e.preventDefault();
+  window.location.reload();
+});
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';

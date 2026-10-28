@@ -171,6 +171,7 @@ export function createApp() {
       maxAge: '1h',
       setHeaders: (res, p) => {
         if (p.includes('/assets/')) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        if (p.endsWith(`${path.sep}index.html`)) res.setHeader('Cache-Control', 'no-cache');
         // The embed script is loaded by the salon website (another origin), so it must be cross-origin loadable.
         if (p.endsWith(`${path.sep}embed.js`)) {
           res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
@@ -178,7 +179,10 @@ export function createApp() {
         }
       },
     }));
-    app.get('*', (_req, res) => res.sendFile(path.join(webDist, 'index.html')));
+    // The page itself is never cached, so after an update browsers load the new file names (the files are cached forever).
+    // A missing app file (an old name after an update) is "not found", not the page — so the app can tell and reload.
+    app.get('/assets/*', (_req, res) => res.status(404).type('text/plain').send('Not found'));
+    app.get('*', (_req, res) => { res.setHeader('Cache-Control', 'no-cache'); res.sendFile(path.join(webDist, 'index.html')); });
   }
 
   // Friendly errors only — technical details stay in the server log.
