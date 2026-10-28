@@ -96,7 +96,8 @@ export async function saveMedia(bytes: Buffer, mime: string, name: string | null
   if (!MEDIA_TYPES.test(type)) throw badRequest('Photos (JPG, PNG, WebP, HEIC) or videos (MP4, MOV) only.');
   if (!bytes.length) throw badRequest('That file is empty.');
   if (bytes.length > (type.startsWith('video/') ? MEDIA_LIMITS.video : MEDIA_LIMITS.image)) throw badRequest(`Too big — ${type.startsWith('video/') ? 'videos up to 100 MB' : 'photos up to 15 MB'}.`);
-  const r = (await db().one<any>('INSERT INTO content_media(mime, name, bytes, size, created_by_staff_id, account, title) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, mime, name, size, title, tags, account, approved, stylist_share, post_type, group_name, description, position, created_at',
+  // Shared with stylists (My Content → Salon downloads) unless it's for another account or turned off.
+  const r = (await db().one<any>('INSERT INTO content_media(mime, name, bytes, size, created_by_staff_id, account, title, stylist_share) VALUES ($1,$2,$3,$4,$5,$6,$7, CASE WHEN $6::text IS NULL OR $6::text = \'a1\' THEN \'post\' ELSE NULL END) RETURNING id, mime, name, size, title, tags, account, approved, stylist_share, post_type, group_name, description, position, created_at',
     [type, name?.slice(0, 200) ?? null, bytes, bytes.length, staffId, ACCOUNT_IDS.includes(account as ContentAccountId) ? account : null, name ? name.replace(/\.[a-z0-9]+$/i, '').slice(0, 120) : null]))!;
   return mediaDTO(r);
 }

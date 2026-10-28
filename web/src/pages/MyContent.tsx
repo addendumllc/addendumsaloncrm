@@ -43,6 +43,9 @@ export function MyContentPage() {
     return window.matchMedia?.('(max-width: 639px)').matches ? 'list' : 'month';
   });
   useEffect(() => { try { localStorage.setItem('mc-view', view); } catch { /* private window */ } }, [view]);
+  // On a phone the month grid is too small to read: the list shows instead.
+  const phone = typeof window !== 'undefined' && !!window.matchMedia?.('(max-width: 639px)').matches;
+  const shownView = phone && view === 'month' ? 'list' : view;
   const { data, isLoading, error, refetch } = useMonth(month);
   const [edit, setEdit] = useState<Post | Draft | null>(null);
   const [handleOpen, setHandleOpen] = useState(false);
@@ -76,11 +79,11 @@ export function MyContentPage() {
       <PageHeader title="My Content" subtitle={<span className="inline-flex items-center gap-1.5"><Lock className="h-3.5 w-3.5" />Your own Instagram plan — only you can see it.</span>}
         actions={<>
           {handle ? <a className={buttonClass('secondary')} href={`https://www.instagram.com/${handle}/`} target="_blank" rel="noreferrer noopener"><Instagram className="h-4 w-4" /><span className="btn-label">@{handle}</span></a>
-            : <Button icon={<Instagram className="h-4 w-4" />} onClick={() => setHandleOpen(true)}>Add your Instagram</Button>}
+            : <Button icon={<Instagram className="h-4 w-4" />} onClick={() => setHandleOpen(true)} aria-label="Add your Instagram"><span className="hidden sm:inline">Add your Instagram</span></Button>}
           <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setEdit({ date: null })}>New post</Button>
         </>} />
 
-      <p className="mb-5 flex items-start gap-2 rounded-xl2 border border-line bg-mist/50 px-4 py-3 text-[13px] text-ink-soft">
+      <p className="mb-4 flex items-start gap-2 rounded-xl2 border border-line bg-mist/50 px-3 py-2.5 text-[12px] text-ink-soft sm:mb-5 sm:px-4 sm:py-3 sm:text-[13px]">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-stone" />
         <span><b className="font-medium text-ink">For planning purposes only.</b> Nothing here is posted to Instagram for you — you post it yourself. Follow the salon’s guidelines and only share clients’ photos they’ve agreed to.</span>
       </p>
@@ -91,14 +94,14 @@ export function MyContentPage() {
       {tab === 'plan' && <MyWork />}
 
       {tab === 'plan' && <div className="mb-4 flex flex-wrap items-center gap-2">
-        {view !== 'grid' && <>
+        {shownView !== 'grid' && <>
           <Button size="icon" icon={<ChevronLeft className="h-4 w-4" />} aria-label="Previous month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} />
           <span className="min-w-[9rem] text-center text-[15px] font-medium text-ink">{month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</span>
           <Button size="icon" icon={<ChevronRight className="h-4 w-4" />} aria-label="Next month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} />
         </>}
         {handle && <button type="button" className="text-[12px] text-stone underline" onClick={() => setHandleOpen(true)}>Change Instagram</button>}
-        <Segmented className="ml-auto" value={view} onChange={setView} options={[
-          { value: 'month', label: <span className="flex items-center gap-1"><CalendarDays className="h-4 w-4" /><span className="hidden sm:inline">Month</span></span> },
+        <Segmented className="ml-auto" value={shownView} onChange={setView} options={[
+          ...(phone ? [] : [{ value: 'month' as const, label: <span className="flex items-center gap-1"><CalendarDays className="h-4 w-4" /><span className="hidden sm:inline">Month</span></span> }]),
           { value: 'list', label: <span className="flex items-center gap-1"><LayoutList className="h-4 w-4" /><span className="hidden sm:inline">List</span></span> },
           { value: 'grid', label: <span className="flex items-center gap-1"><Grid3x3 className="h-4 w-4" /><span className="hidden sm:inline">Grid</span></span> },
         ]} />
@@ -106,9 +109,9 @@ export function MyContentPage() {
 
       {tab === 'plan' && (error ? <ErrorNote error={error} onRetry={() => refetch()} /> : isLoading ? <PageLoading /> : (
         <>
-          {view === 'month' && <MonthView month={month} posts={dated} onOpen={setEdit} onNew={(d) => setEdit({ date: d })} />}
-          {view === 'list' && <ListView month={month} posts={dated} onOpen={setEdit} />}
-          {view === 'grid' && <GridView posts={dated} handle={handle} onOpen={setEdit} onSwap={swapDates} />}
+          {shownView === 'month' && <MonthView month={month} posts={dated} onOpen={setEdit} onNew={(d) => setEdit({ date: d })} />}
+          {shownView === 'list' && <ListView month={month} posts={dated} onOpen={setEdit} />}
+          {shownView === 'grid' && <GridView posts={dated} handle={handle} onOpen={setEdit} onSwap={swapDates} />}
           <section className="mt-6">
             <div className="mb-2 flex items-center gap-2">
               <h2 className="h-display text-[20px]">Ideas</h2><span className="text-[13px] text-stone">No date yet</span>
@@ -480,7 +483,8 @@ function SalonDownloads() {
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <h2 className="h-display text-[20px]">Salon downloads</h2>
         <span className="text-[13px] text-stone">Posts and stories from the salon to share</span>
-        <Segmented size="sm" className="ml-auto" value={kind} onChange={setKind} options={[{ value: 'post', label: `Posts (${(data ?? []).filter((x) => x.kind === 'post').length})` }, { value: 'story', label: `Stories (${(data ?? []).filter((x) => x.kind === 'story').length})` }]} />
+        <Segmented className="w-full sm:ml-auto sm:w-auto [&>button]:flex-1" value={kind} onChange={setKind} options={(['post', 'story'] as const).map((k) => ({ value: k,
+          label: `${k === 'post' ? 'Posts' : 'Stories'} (${(data ?? []).filter((x) => x.kind === k).length + (posts ?? []).filter((x) => x.kind === k).length + (links ?? []).filter((l) => l.kind === 'both' || l.kind === k).length})` }))} />
       </div>
       {/* Links the salon shares — Canva designs and templates to open, edit and download there. */}
       {(shownLinks.length > 0 || canManage) && (
@@ -500,9 +504,9 @@ function SalonDownloads() {
         <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {shownPosts.map((p) => (
             <article key={p.name} className="panel overflow-hidden !p-0">
-              <div className="flex gap-0.5 overflow-x-auto bg-mist scrollbar-none">
+              <div className="flex snap-x snap-mandatory gap-0.5 overflow-x-auto bg-mist scrollbar-none">
                 {p.files.map((f, i) => (
-                  <span key={f.id} className="relative w-[46%] shrink-0">
+                  <span key={f.id} className={cx('relative shrink-0 snap-start', p.files.length > 1 ? 'w-[82%] sm:w-[46%]' : 'w-full')}>
                     {f.mime.startsWith('video/') ? <video src={f.url} muted playsInline preload="metadata" className={cx('w-full object-cover', p.kind === 'story' ? 'aspect-[9/16]' : 'aspect-[4/5]')} />
                       : <img src={f.url} alt="" loading="lazy" className={cx('w-full object-cover', p.kind === 'story' ? 'aspect-[9/16]' : 'aspect-[4/5]')} />}
                     {p.files.length > 1 && <span className="absolute left-1.5 top-1.5 rounded-full bg-ink/80 px-1.5 text-[11px] text-white">{i + 1}</span>}
@@ -514,10 +518,10 @@ function SalonDownloads() {
                 {p.caption && <p className="line-clamp-3 whitespace-pre-wrap text-[13px] text-ink-soft">{p.caption}</p>}
                 {p.hashtags && <p className="truncate text-[12px] text-plum">{p.hashtags}</p>}
                 {p.notes && <p className="text-[12px] text-stone">{p.notes}</p>}
-                <div className="flex flex-wrap gap-1.5 pt-1">
+                <div className="grid grid-cols-2 gap-1.5 pt-1 sm:flex sm:flex-wrap">
                   <a className={buttonClass('secondary', 'sm')} href={`/api/my-content/downloads/group?group=${encodeURIComponent(p.name)}`}><Download className="h-3.5 w-3.5" /><span className="btn-label">Download post</span></a>
                   {(p.caption || p.hashtags) && <Button size="sm" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copyCaption(p)}>Copy caption</Button>}
-                  <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} loading={planning === p.name} onClick={() => plan(p)}>Plan this post</Button>
+                  <Button size="sm" variant="primary" className="col-span-2 sm:col-span-1" icon={<Plus className="h-3.5 w-3.5" />} loading={planning === p.name} onClick={() => plan(p)}>Plan this post</Button>
                 </div>
               </div>
             </article>
@@ -578,8 +582,8 @@ function SalonIdeas({ onUse }: { onUse: (d: Draft) => void }) {
         <span className="text-[13px] text-stone">Use one to start a post of your own</span>
       </div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <input className="field h-10 min-w-[10rem] flex-1 sm:max-w-xs" placeholder="Search ideas" value={q} onChange={(e) => setQ(e.target.value)} />
-        <div className="flex flex-wrap gap-1.5">{([['', 'All'], ['post', 'Posts'], ['carousel', 'Carousels'], ['reel', 'Reels'], ['story', 'Stories']] as const).map(([v, l]) => (
+        <input className="field h-10 w-full sm:max-w-xs" placeholder="Search ideas" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 scrollbar-none">{([['', 'All'], ['post', 'Posts'], ['carousel', 'Carousels'], ['reel', 'Reels'], ['story', 'Stories']] as const).map(([v, l]) => (
           <button key={v} type="button" aria-pressed={format === v} className={chipClass(format === v)} onClick={() => setFormat(v)}>{l}</button>
         ))}</div>
       </div>
@@ -587,12 +591,12 @@ function SalonIdeas({ onUse }: { onUse: (d: Draft) => void }) {
         <div className="panel divide-y divide-line !p-0">
           {(all ? list : list.slice(0, 12)).map((i) => (
             <div key={i.id}>
-              <div className="flex items-center gap-3 px-3 py-2.5">
-                <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setOpen(open === i.id ? null : i.id)} aria-expanded={open === i.id}>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2.5">
+                <button type="button" className="min-w-0 flex-1 basis-48 text-left" onClick={() => setOpen(open === i.id ? null : i.id)} aria-expanded={open === i.id}>
                   <span className="block text-[15px] text-ink">{i.title}</span>
                   <span className="block truncate text-[12px] text-stone">{FORMATS.find((f) => f.value === i.format)?.label}{i.alsoStory ? ' · also a Story' : ''} · {i.pillar}</span>
                 </button>
-                <Button size="sm" variant="primary" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => use(i)}>Use this idea</Button>
+                <Button size="sm" variant="primary" className="w-full sm:w-auto" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => use(i)}>Use this idea</Button>
               </div>
               {open === i.id && (
                 <div className="space-y-1 bg-mist/40 px-3 pb-3 pt-1 text-[13px] text-ink-soft">

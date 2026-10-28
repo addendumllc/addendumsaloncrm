@@ -87,6 +87,8 @@ describe('My Content (a stylist’s own Instagram plan)', () => {
     const a = await up('Fall promo.png');
     const b = await up('Story - holiday.png');
     const hidden = await up('Not shared.png');
+    expect(hidden.stylistShare).toBe('post'); // shared with stylists by default…
+    await owner.patch(`/api/content/assets/${hidden.id}`, { stylistShare: null }); // …unless turned off
     expect((await owner.patch(`/api/content/assets/${a.id}`, { stylistShare: 'post' })).status).toBe(200);
     await owner.patch(`/api/content/assets/${b.id}`, { stylistShare: 'story' });
     expect((await jen.patch(`/api/content/assets/${a.id}`, { stylistShare: null })).status).toBe(403); // stylists can't share or unshare
