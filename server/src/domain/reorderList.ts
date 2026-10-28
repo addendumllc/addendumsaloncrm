@@ -16,22 +16,54 @@ import { createPurchaseOrders, defaultSupplier, stockForecast } from './stock.js
  */
 export type Plan = 'normal' | '30' | '60' | '90';
 export const PLANS: Plan[] = ['normal', '30', '60', '90'];
-export type HairType = 'weft' | 'ktip';
+export type HairType = 'weft' | 'ktip' | 'tape' | 'clipin';
 export const LOW_UNITS = 5;
 export const SOON_DAYS = 14;
 /** Production at or above this many days gets "Long production lead". */
 export const LONG_LEAD_DAYS = 45;
 
-export const hairTypeOf = (i: Pick<StockForecastDTO, 'label' | 'collections'> & { collection?: string | null }): HairType | null => {
-  const text = [i.label, i.collection ?? '', ...i.collections].join(' ');
-  if (/\b[ik][\s-]?tips?\b/i.test(text)) return 'ktip';
-  if (/\bwefts?\b/i.test(text)) return 'weft';
+export const hairTypeOf = (i: Pick<StockForecastDTO, 'label' | 'collections'> & { collection?: string | null; sku?: string | null }): HairType | null => {
+  // Sample swatches aren't reordered here.
+  if (/sample swatch/i.test(i.label) || /^swatch-/i.test(i.sku ?? '')) return null;
+  // The product's own name first (a K-tip in a "Hair Extensions" collection is a K-tip), then its collections.
+  for (const text of [i.label, [i.collection ?? '', ...i.collections].join(' ')]) {
+    if (/\b[ik][\s-]?tips?\b/i.test(text)) return 'ktip';
+    if (/\bclip[\s-]?ins?\b/i.test(text)) return 'clipin';
+    if (/\btape[\s-]?ins?\b|\btapes?\b/i.test(text)) return 'tape';
+    if (/\bwefts?\b/i.test(text)) return 'weft';
+  }
   return null;
 };
+/** Lisa's sections, in the order she orders them; anything else follows by type. */
+export const GROUP_ORDER = ['18" Redefined Wefts', '22" Redefined Wefts', '24" Redefined Wefts', '18" K-Tips', '22" K-Tips', '22" Tapes', '18" Tapes', 'Clip-Ins'];
+const LINE: Record<HairType, string> = { weft: 'Wefts', ktip: 'K-Tips', tape: 'Tapes', clipin: 'Clip-Ins' };
+export function groupOf(label: string, type: HairType, length: string | null) {
+  if (type === 'clipin') return 'Clip-Ins';
+  const line = type === 'weft' && /redefined/i.test(label) ? 'Redefined Wefts' : LINE[type];
+  return length ? `${length.replace(/[”″]/g, '"')} ${line}` : line;
+}
+const groupRank = (g: string, type: HairType) => {
+  const i = GROUP_ORDER.indexOf(g);
+  return i >= 0 ? i : 100 + ['weft', 'ktip', 'tape', 'clipin'].indexOf(type) * 10;
+};
+/** The colour name alone ("Aperol Spritz Redefined Weft · 24\" Weft" → "Aperol Spritz"). */
+export function shadeOf(label: string) {
+  for (const part of label.split(/\s+·\s+/)) {
+    const s = clean(part);
+    if (s) return s;
+  }
+  return label;
+}
+function clean(first: string) {
+  return first.replace(/\b\d+(\.\d+)?\s*("|”|″|inch(es)?|in)(?=\s|$)/gi, '')
+    .replace(/\b(redefined|signature|hand[\s-]?tied|addendum)\b/gi, '')
+    .replace(/\b(wefts?|[ik][\s-]?tips?|tape[\s-]?ins?|tapes?|clip[\s-]?ins?|extensions?)\b/gi, '')
+    .replace(/\s{2,}/g, ' ').replace(/^[\s\-–·]+|[\s\-–·]+$/g, '').trim();
+}
 
 export interface Prefs { typicalQty: number | null; preferredPlan: Plan | null; safetyUnits: number | null; notes: string | null; updatedAt: string | null }
 export interface ReorderRow {
-  key: string; label: string; sku: string | null; length: string | null; type: HairType; supplier: string | null; collection: string | null;
+  key: string; label: string; shade: string; group: string; sku: string | null; length: string | null; type: HairType; supplier: string | null; collection: string | null;
   available: number; committed: number; incoming: number; ratePerDay: number; units30: number; noSales: boolean;
   daysUntilStockout: number | null; stockoutOn: string | null; productionDays: number; shippingDays: number; leadDays: number; leadMissing: boolean;
   moq: number | null; moqMissing: boolean; caseSize: number | null; costCents: number | null;
@@ -77,7 +109,7 @@ async function orderHistory(keys: string[]) {
   return m;
 }
 
-export async function reorderList(plan: Plan, opts: { type?: HairType; collection?: string; supplier?: string } = {}) {
+export async function reorderList(plan: Plan, opts: { type?: HairType; group?: string; collection?: string; supplier?: string } = {}) {
   const f = await stockForecast();
   const today = new Date().toISOString().slice(0, 10);
   const fallback = await defaultSupplier();
@@ -156,7 +188,7 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; collectio
     if (!out && !beforeArrival && i.incoming > 0 && qty === 0) why.push('Covered by what’s already on order.');
     if (own === 'normal' && i.incoming > 0 && qty > 0) why.push(`${i.incoming} already on order — lower the amount if that covers it.`);
     rows.push({
-      key: i.key, label: i.label, sku: i.sku, length: hairLengthOf(i.label, i.sku), type, supplier: i.supplier ?? fallback, collection: i.collection ?? i.collections[0] ?? null,
+      key: i.key, label: i.label, shade: shadeOf(i.label), group: groupOf(i.label, type, hairLengthOf(i.label, i.sku)), sku: i.sku, length: hairLengthOf(i.label, i.sku), type, supplier: i.supplier ?? fallback, collection: i.collection ?? i.collections[0] ?? null,
       available: i.stock, committed, incoming: i.incoming, ratePerDay: rate, units30: i.units30, noSales: rate <= 0,
       daysUntilStockout: days == null ? null : Math.round(days), stockoutOn, productionDays: i.productionDays, shippingDays: i.shippingDays, leadDays: lead, leadMissing: i.leadSource.kind === 'missing',
       moq: i.moq, moqMissing, caseSize: i.caseSize, costCents: i.costCents,
@@ -166,13 +198,14 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; collectio
   }
   // Wefts first, then K-tips; in each: out of stock, then runs out before an order could arrive, then the rest —
   // soonest stock-out first, longer lead first.
-  const typeRank = (t: HairType) => (t === 'weft' ? 0 : 1);
-  rows.sort((a, b) => typeRank(a.type) - typeRank(b.type) || a.tier - b.tier
+  // Lisa's sections in her order (18" / 22" / 24" Redefined Wefts, K-Tips, Tapes, Clip-Ins); in each, the most urgent first.
+  rows.sort((a, b) => groupRank(a.group, a.type) - groupRank(b.group, b.type) || a.group.localeCompare(b.group) || a.tier - b.tier
     || (a.daysUntilStockout ?? 9999) - a.leadDays - ((b.daysUntilStockout ?? 9999) - b.leadDays) || b.leadDays - a.leadDays || a.label.localeCompare(b.label));
-  const filtered = rows.filter((r) => (!opts.type || r.type === opts.type) && (!opts.collection || r.collection === opts.collection) && (!opts.supplier || r.supplier === opts.supplier));
+  const filtered = rows.filter((r) => (!opts.type || r.type === opts.type) && (!opts.group || r.group === opts.group) && (!opts.collection || r.collection === opts.collection) && (!opts.supplier || r.supplier === opts.supplier));
   const suppliers = await supplierRules();
   return {
     plan, items: filtered,
+    groups: [...new Set(rows.map((r) => r.group))],
     filters: { collections: [...new Set(rows.map((r) => r.collection).filter((x): x is string => !!x))].sort(), suppliers: [...new Set(rows.map((r) => r.supplier).filter((x): x is string => !!x))].sort() },
     supplierRules: Object.fromEntries([...suppliers].filter(([n]) => rows.some((r) => r.supplier === n))),
     // K-tips that can't wait for the end of the list (they'd run out before a new order arrives).
@@ -184,6 +217,14 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; collectio
 async function supplierRules() {
   const rows = await db().query<any>('SELECT name, min_order_cents, min_order_units FROM suppliers');
   return new Map(rows.map((r) => [r.name as string, { minOrderCents: r.min_order_cents as number | null, minOrderUnits: r.min_order_units as number | null }]));
+}
+
+/** One product's usual-order preferences and its recent orders (the product settings popup). */
+export async function productPrefs(key: string) {
+  const p = (await allPrefs()).get(key) ?? { typicalQty: null, preferredPlan: null, safetyUnits: null, notes: null, updatedAt: null };
+  const history = (await orderHistory([key])).get(key) ?? [];
+  const usual = median(history.map((h) => h.quantity));
+  return { prefs: p, history, usualFromHistory: usual };
 }
 
 export async function savePrefs(key: string, p: { typicalQty: number | null; preferredPlan: Plan | null; safetyUnits: number | null; notes: string | null }, staffId: string | null) {

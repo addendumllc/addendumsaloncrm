@@ -1,3 +1,4 @@
+import { PERMISSION_KEYS } from '@addendum/shared';
 import type { NextFunction, Request, Response } from 'express';
 import type { CurrentUser, Role } from '@addendum/shared';
 import { config } from '../config.js';
@@ -70,7 +71,13 @@ export async function loadUser(req: Request, res: Response, next: NextFunction) 
           res.cookie(SESSION_COOKIE, token, cookieOptions(days * 86400_000));
         }
         req.user = {
-          id: row.id, name: row.name, email: row.email, role: row.role as Role, permissions: computeEffective(row.role_perms ?? [], overrides),
+          id: row.id, name: row.name, email: row.email, role: row.role as Role,
+          // The salon owner (OWNER_EMAIL) always has every permission, so they can also give any of them out. Away-from-the-salon
+          // access and the time clock stay as set for them (the network rule still applies; no clock-in prompt) — the owner
+          // can hand those out without holding them.
+          permissions: isOwnerEmail(row.email)
+            ? PERMISSION_KEYS.filter((k) => !(k.startsWith('timeclock:') || k.startsWith('location:')) || computeEffective(row.role_perms ?? [], overrides).includes(k))
+            : computeEffective(row.role_perms ?? [], overrides),
           calendarStaffIds: row.calendar_staff_ids ?? null,
         };
       }
@@ -104,3 +111,6 @@ export const requireAnyPermission = (...permissions: string[]) => (req: Request,
   if (!req.user || !permissions.some((p) => can(req.user, p))) return next(forbidden());
   next();
 };
+
+/** The salon owner's account (OWNER_EMAIL). */
+export const isOwnerEmail = (email: string | null | undefined) => !!email && email.toLowerCase() === config().OWNER_EMAIL.trim().toLowerCase();

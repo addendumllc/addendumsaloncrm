@@ -602,12 +602,12 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
             <input className="field h-9 text-[13px]" defaultValue={p.caption ?? ''} placeholder="Photo caption (optional)" onBlur={(e) => e.target.value !== (p.caption ?? '') && photoAction(() => api.patch(`/transformations/photos/${p.id}`, { caption: e.target.value || null }))} />
           </div>
           <div className="flex shrink-0 flex-col">
-            <button type="button" className="rounded p-1 text-stone hover:bg-mist disabled:opacity-30" disabled={i === 0} onClick={() => move(i, -1)} aria-label="Move up"><ArrowUp className="h-4 w-4" /></button>
-            <button type="button" className="rounded p-1 text-stone hover:bg-mist disabled:opacity-30" disabled={i === photos.length - 1} onClick={() => move(i, 1)} aria-label="Move down"><ArrowDown className="h-4 w-4" /></button>
+            <button type="button" className="rounded p-2 text-stone hover:bg-mist sm:p-1 disabled:opacity-30" disabled={i === 0} onClick={() => move(i, -1)} aria-label="Move up"><ArrowUp className="h-4 w-4" /></button>
+            <button type="button" className="rounded p-2 text-stone hover:bg-mist sm:p-1 disabled:opacity-30" disabled={i === photos.length - 1} onClick={() => move(i, 1)} aria-label="Move down"><ArrowDown className="h-4 w-4" /></button>
           </div>
           <div className="flex shrink-0 flex-col">
-            <button type="button" className="rounded p-1 text-stone hover:bg-mist" onClick={() => replace(p)} aria-label="Replace" title="Replace"><RefreshCw className="h-4 w-4" /></button>
-            <button type="button" className="rounded p-1 text-stone hover:bg-mist hover:text-rose" onClick={() => window.confirm('Remove this photo?') && photoAction(() => api.del(`/transformations/photos/${p.id}`))} aria-label="Remove" title="Remove"><Trash2 className="h-4 w-4" /></button>
+            <button type="button" className="rounded p-2 text-stone hover:bg-mist sm:p-1" onClick={() => replace(p)} aria-label="Replace" title="Replace"><RefreshCw className="h-4 w-4" /></button>
+            <button type="button" className="rounded p-2 text-stone hover:bg-mist sm:p-1 hover:text-rose" onClick={() => window.confirm('Remove this photo?') && photoAction(() => api.del(`/transformations/photos/${p.id}`))} aria-label="Remove" title="Remove"><Trash2 className="h-4 w-4" /></button>
           </div>
         </li>
       ))}
@@ -623,7 +623,7 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
           </div>
           <div className="flex shrink-0 flex-col items-center gap-1">
             {q.status === 'failed' && cur && <Button size="sm" onClick={() => uploadOne(cur.id, q).then(async (ok) => { if (ok) setCur((await api.get<{ transformation: TransformationDTO }>(`/transformations/${cur.id}`)).transformation); })}>Retry</Button>}
-            {q.status !== 'uploading' && <button type="button" className="rounded p-1 text-stone hover:bg-mist" onClick={() => { URL.revokeObjectURL(q.preview); setQueue((x) => x.filter((y) => y.key !== q.key)); }} aria-label="Remove"><X className="h-4 w-4" /></button>}
+            {q.status !== 'uploading' && <button type="button" className="rounded p-2 text-stone hover:bg-mist sm:p-1" onClick={() => { URL.revokeObjectURL(q.preview); setQueue((x) => x.filter((y) => y.key !== q.key)); }} aria-label="Remove"><X className="h-4 w-4" /></button>}
             {q.status === 'uploading' && <Spinner />}
           </div>
         </li>
@@ -635,6 +635,19 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
     <Modal open wide onClose={() => onClose(cur?.id)} title={cur ? `Edit ${cur.code}` : appt ? 'Confirm transformation' : 'New transformation'}
       footer={<><Button variant="ghost" onClick={() => onClose(cur?.id)}>Cancel</Button><Button variant="primary" loading={busy} onClick={save}>{cur ? 'Save' : appt ? 'Confirm' : 'Save'}</Button></>}>
       <div className="space-y-4">
+        {/* Administrators say whose work it is first (and can fix it later); stylists' own work is theirs. */}
+        {o.can.manage && !appt && (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Stylist">
+              <select className="field" value={d.stylistStaffId || (cur?.stylistStaffId ?? '')} onChange={(e) => setD({ ...d, stylistStaffId: e.target.value })}>
+                {!cur && <option value="">Me</option>}
+                {cur && !cur.stylistStaffId && <option value="">Unknown — choose…</option>}
+                {o.stylists.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Date"><input type="date" className="field" value={d.serviceDate} onChange={(e) => setD({ ...d, serviceDate: e.target.value })} /></Field>
+          </div>
+        )}
         {appt && <p className="rounded-lg bg-mist px-3 py-2 text-[14px] text-ink-soft">{fmtDate(appt.date)}{appt.clientName ? ` · ${appt.clientName}` : ''} · {appt.services.join(', ') || 'Appointment'}</p>}
 
         <Field label="Photos & videos">
@@ -689,17 +702,7 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
           <summary className="cursor-pointer text-[13px] font-medium text-ink">More details (optional)</summary>
           <div className="mt-3 space-y-4">
             <Field label="Title" hint={`Blank = “${d.mainService || 'the service'}”`}><input className="field" value={d.title} onChange={(e) => setD({ ...d, title: e.target.value })} placeholder="e.g. Copper balayage with face-framing" /></Field>
-            {!appt && <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Stylist">
-                {o.can.manage ? (
-                  <select className="field" value={d.stylistStaffId} onChange={(e) => setD({ ...d, stylistStaffId: e.target.value })}>
-                    {!cur && <option value="">Me</option>}
-                    {o.stylists.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                ) : <span className="field flex h-10 items-center text-ink-soft">{cur?.stylistName ?? 'Me'}</span>}
-              </Field>
-              <Field label="Service date"><input type="date" className="field" value={d.serviceDate} onChange={(e) => setD({ ...d, serviceDate: e.target.value })} /></Field>
-            </div>}
+            {!appt && !o.can.manage && <Field label="Service date"><input type="date" className="field" value={d.serviceDate} onChange={(e) => setD({ ...d, serviceDate: e.target.value })} /></Field>}
             {!appt && <ClientPicker value={d.clientId ? { id: d.clientId, name: d.clientName } : null} onChange={(c) => setD({ ...d, clientId: c?.id ?? null, clientName: c?.name ?? '' })} />}
             {!allServices.some(isExt) && <Toggle checked={d.hasExtensions} onChange={(v) => setD({ ...d, hasExtensions: v })} label="Client has extensions" />}
             {extRelevant && (
@@ -721,9 +724,9 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
               {cur ? (
                 <div className="space-y-2">
                   {cur.instagram.map((i) => <InstagramCard key={i.id} i={i} actions={<span className="flex shrink-0 flex-col">
-                    {!i.isPrimary && <button type="button" className="rounded p-1 text-stone hover:bg-mist" title="Use as the main reference" onClick={() => photoAction(() => api.patch(`/transformations/instagram/${i.id}`, { isPrimary: true }))}><Star className="h-4 w-4" /></button>}
-                    {i.previewStatus !== 'ok' && <button type="button" className="rounded p-1 text-stone hover:bg-mist" title="Try the preview again" onClick={() => photoAction(() => api.post(`/transformations/instagram/${i.id}/refresh`))}><RefreshCw className="h-4 w-4" /></button>}
-                    <button type="button" className="rounded p-1 text-stone hover:bg-mist hover:text-rose" title="Remove link" onClick={() => photoAction(() => api.del(`/transformations/instagram/${i.id}`))}><Trash2 className="h-4 w-4" /></button>
+                    {!i.isPrimary && <button type="button" className="rounded p-2 text-stone hover:bg-mist sm:p-1" title="Use as the main reference" onClick={() => photoAction(() => api.patch(`/transformations/instagram/${i.id}`, { isPrimary: true }))}><Star className="h-4 w-4" /></button>}
+                    {i.previewStatus !== 'ok' && <button type="button" className="rounded p-2 text-stone hover:bg-mist sm:p-1" title="Try the preview again" onClick={() => photoAction(() => api.post(`/transformations/instagram/${i.id}/refresh`))}><RefreshCw className="h-4 w-4" /></button>}
+                    <button type="button" className="rounded p-2 text-stone hover:bg-mist sm:p-1 hover:text-rose" title="Remove link" onClick={() => photoAction(() => api.del(`/transformations/instagram/${i.id}`))}><Trash2 className="h-4 w-4" /></button>
                   </span>} />)}
                   <div className="flex gap-2"><input className="field" value={igUrl} onChange={(e) => setIgUrl(e.target.value)} placeholder="https://www.instagram.com/p/…" /><Button onClick={addIg} disabled={!igUrl.trim()}>Add</Button></div>
                 </div>

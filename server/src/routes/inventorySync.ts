@@ -1,4 +1,4 @@
-import { createReorderPOs, PLANS, reorderList, reviewOrder, saveList, savePrefs, savedList } from '../domain/reorderList.js';
+import { createReorderPOs, PLANS, productPrefs, reorderList, reviewOrder, saveList, savePrefs, savedList } from '../domain/reorderList.js';
 import { Router, type Request } from 'express';
 import { can } from '../auth/permissions.js';
 import { z } from 'zod';
@@ -457,12 +457,13 @@ const plan = z.enum(PLANS as [string, ...string[]]).catch('normal') as unknown a
 const reorderLines = z.array(z.object({ key: z.string().min(1).max(200), qty: z.number().int().min(0).max(1_000_000) })).max(1000);
 inventorySyncRouter.get('/reorder-list', ah(async (req, res) => {
   const q = req.query as Record<string, string | undefined>;
-  res.json({ ...(await reorderList(parse(plan, q.plan), { type: q.type === 'weft' || q.type === 'ktip' ? q.type : undefined, collection: q.collection || undefined, supplier: q.supplier || undefined })), saved: await savedList() });
+  res.json({ ...(await reorderList(parse(plan, q.plan), { type: (['weft', 'ktip', 'tape', 'clipin'] as const).find((t) => t === q.type), group: q.group || undefined, collection: q.collection || undefined, supplier: q.supplier || undefined })), saved: await savedList() });
 }));
 inventorySyncRouter.put('/reorder-list/saved', ah(async (req, res) => {
   const b = parse(z.object({ plan, lines: z.array(z.object({ key: z.string().min(1).max(200), include: z.boolean(), qty: z.number().int().min(0).max(1_000_000) })).max(2000) }), req.body);
   res.json({ saved: await saveList(b.plan, b.lines, req.user!.name) });
 }));
+inventorySyncRouter.get('/reorder-list/prefs', ah(async (req, res) => res.json(await productPrefs(String(req.query.key ?? '').slice(0, 200)))));
 inventorySyncRouter.put('/reorder-list/prefs', ah(async (req, res) => {
   const b = parse(z.object({
     key: z.string().min(1).max(200), typicalQty: z.number().int().min(1).max(100_000).nullable(), preferredPlan: plan.nullable(), safetyUnits: z.number().int().min(0).max(100_000).nullable(), notes: z.string().max(1000).nullable(),

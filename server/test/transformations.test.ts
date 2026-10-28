@@ -177,8 +177,6 @@ describe('Transformations Library', () => {
     expect(t.canEdit).toBe(false);
     expect((await d.patch(`/api/transformations/${tid}`, { title: 'x' })).status).toBe(403);
     expect((await jen.get(`/api/transformations/${tid}`)).body.transformation.technicalNotes).toBe('Formula 7N + 20 vol'); // their own
-    // Admins don't get colour formulas by default either.
-    expect((await owner.get(`/api/transformations/${tid}`)).body.transformation.technicalNotes).toBeNull();
   });
 
   it('5. a permitted user can download one photo and all photos for a transformation', async () => {
@@ -360,5 +358,13 @@ describe('Transformations Library', () => {
     // Changing to a single method drops the list.
     const one = await jen.patch(`/api/transformations/${t.id}`, { extension: { hasExtensions: true, method: 'Weft', parts: [{ method: 'K-tip', shade: 'x' }] } });
     expect(one.body.transformation.extension.parts).toEqual([]);
+  });
+
+  it('the salon owner has every permission (so they can give any out), other admins only their role’s', async () => {
+    const me = (await owner.get('/api/auth/me')).body;
+    const perms: string[] = me.user?.permissions ?? me.permissions;
+    expect(perms).toEqual(expect.arrayContaining(['transformations:technical', 'transformations:bulk', 'transformations:consent']));
+    expect(perms.some((p) => p.startsWith('timeclock:'))).toBe(false); // not asked to clock in
+    expect((await owner.get(`/api/transformations/${tid}`)).body.transformation.technicalNotes).toBe('Formula 7N + 20 vol');
   });
 });

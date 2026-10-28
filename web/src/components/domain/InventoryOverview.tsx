@@ -1,12 +1,13 @@
+import { ProductSettingsButton, ProductSettingsModal } from './ProductSettings';
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Search } from 'lucide-react';
-import type { PurchaseOrderDTO, StockForecastDTO, StockForecastResponse, StockProductDTO, StockProductStatus, StockTxnDTO, SupplierDTO } from '@addendum/shared';
+import type { PurchaseOrderDTO, StockForecastDTO, StockForecastResponse, StockProductDTO, StockTxnDTO } from '@addendum/shared';
 import { api } from '../../api/client';
 import { dateShort, labelOfKey } from '../../lib/format';
 import { useStoreNames } from '../../lib/storeNames';
 import { collectionFilter, useInternalCollections, collectionLabel } from './Collections';
-import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, cx, useToast } from '../ui';
+import { Badge, Button, EmptyState, ErrorNote, Modal, PageLoading, cx, useToast } from '../ui';
 
 type Store = 'all' | 'salon' | 'hair';
 type Sales = {
@@ -193,7 +194,7 @@ export function InventoryOverview({ store, onOpenTab }: { store: Store; onOpenTa
                   return (
                     <tr key={p.key} className="cursor-pointer hover:bg-mist/40" onClick={() => setOpen(p.key)}>
                       <td className="pl-3" onClick={(e) => e.stopPropagation()}><input type="checkbox" className="h-4 w-4 accent-plum" checked={picked.has(p.key)} onChange={() => togglePick(p.key)} aria-label={`Select ${p.label}`} /></td>
-                      <td className="px-3 py-2 text-ink">{p.label}{p.collection && <span className="ml-2 text-[11px] text-stone">{p.collection}</span>}</td>
+                      <td className="px-3 py-2 text-ink">{p.label}<ProductSettingsButton productKey={p.key} className="ml-1 align-middle" />{p.collection && <span className="ml-2 text-[11px] text-stone">{p.collection}</span>}</td>
                       <td className="px-2 py-2 font-mono text-[12px] text-stone">{p.sku ?? '—'}</td>
                       {salonCol && <td className="num px-2 py-2 text-right">{p.squareQty ?? '—'}</td>}
                       {onlineCol && <td className="num px-2 py-2 text-right">{p.shopifyQty ?? '—'}</td>}
@@ -379,7 +380,7 @@ function ProductPanel({ p, f, status, orders, onClose, onOpenTab }: {
           )}
         </section>
       </div>
-      {editing && <EditSettings p={p} onClose={() => setEditing(false)} />}
+      {editing && <ProductSettingsModal productKey={p.key} onClose={() => setEditing(false)} />}
     </Modal>
   );
 }
@@ -388,69 +389,3 @@ function ProductPanel({ p, f, status, orders, onClose, onOpenTab }: {
  * A product's purchasing settings, kept in the CRM (the stores' own data — name, SKU, prices, stock — isn't changed here).
  * Blank lead and transit times use the supplier's defaults, so a change to the supplier carries through.
  */
-function EditSettings({ p, onClose }: { p: StockProductDTO; onClose: () => void }) {
-  const toast = useToast();
-  const qc = useQueryClient();
-  const { data: suppliers } = useQuery({ queryKey: ['stock-suppliers'], queryFn: () => api.get<{ suppliers: SupplierDTO[] }>('/inventory-sync/stock/suppliers').then((r) => r.suppliers), staleTime: 30_000 });
-  const str = (v: number | string | null | undefined) => (v == null ? '' : String(v));
-  const [d, setD] = useState({
-    collection: str(p.collection), supplier: str(p.supplier), supplierSku: str(p.supplierSku), cost: p.costCents != null ? (p.costCents / 100).toFixed(2) : '',
-    lead: str(p.leadTimeDays), ship: str(p.shippingDays), moq: str(p.moq), caseSize: str(p.caseSize), safety: str(p.safetyDays), note: str(p.orderNote), status: p.status,
-  });
-  const [busy, setBusy] = useState(false);
-  const sup = suppliers?.find((x) => x.name === (d.supplier || suppliers.find((y) => y.isDefault)?.name));
-  const num = (v: string) => (v.trim() === '' ? null : Number(v));
-  const bad = ['cost', 'lead', 'ship', 'moq', 'caseSize', 'safety'].filter((k) => { const n = num(d[k as keyof typeof d] as string); return n != null && !(n >= 0); });
-  const f = (k: keyof typeof d) => ({ value: d[k] as string, onChange: (e: { target: { value: string } }) => setD({ ...d, [k]: e.target.value }) });
-  const save = async () => {
-    setBusy(true);
-    try {
-      await api.put('/inventory-sync/stock/products/settings', { rows: [{
-        key: p.key, collection: d.collection.trim() || null, supplier: d.supplier.trim() || null, supplierSku: d.supplierSku.trim() || null,
-        costCents: num(d.cost) == null ? null : Math.round(num(d.cost)! * 100), leadTimeDays: num(d.lead) == null ? null : Math.round(num(d.lead)!), shippingDays: num(d.ship) == null ? null : Math.round(num(d.ship)!),
-        moq: num(d.moq) == null ? null : Math.round(num(d.moq)!), caseSize: num(d.caseSize) ? Math.round(num(d.caseSize)!) : null, safetyDays: num(d.safety) == null ? null : Math.round(num(d.safety)!),
-        orderNote: d.note.trim() || null, status: d.status,
-      }] });
-      for (const k of ['stock-products', 'stock-forecast', 'stock-prices', 'stock-suppliers']) void qc.invalidateQueries({ queryKey: [k] });
-      toast('Saved');
-      onClose();
-    } catch (e) {
-      toast((e as Error).message, 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
-  const g = 'mb-1 mt-3 text-[12px] font-semibold uppercase tracking-wide text-stone first:mt-0';
-  return (
-    <Modal open onClose={onClose} title={`Settings · ${p.label}`} footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} disabled={bad.length > 0} onClick={save}>Save</Button></>}>
-      <div className="text-[14px]">
-        <p className={g}>Collection &amp; supplier</p>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Purchasing collection" hint="Groups it in To order and suggested orders. Blank = the store collections."><input className="field" {...f('collection')} /></Field>
-          <Field label="Supplier"><input className="field" list="edit-supplier-names" {...f('supplier')} placeholder={suppliers?.find((y) => y.isDefault)?.name ?? ''} /><datalist id="edit-supplier-names">{(suppliers ?? []).map((x) => <option key={x.name} value={x.name} />)}</datalist></Field>
-          <Field label="Supplier SKU"><input className="field font-mono" {...f('supplierSku')} /></Field>
-          <Field label="Our cost ($)" hint="What we pay. Never shown to customers."><input className="field num" inputMode="decimal" {...f('cost')} /></Field>
-        </div>
-        <p className={g}>Lead times</p>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Production (days)" hint={sup?.leadTimeDays != null ? `Blank = ${sup.name}’s ${sup.leadTimeDays}` : 'Blank = the default'}><input className="field num" inputMode="numeric" placeholder={str(sup?.leadTimeDays)} {...f('lead')} /></Field>
-          <Field label="Transit (days)" hint={sup?.shippingDays != null ? `Blank = ${sup.name}’s ${sup.shippingDays}` : 'Blank = none'}><input className="field num" inputMode="numeric" placeholder={str(sup?.shippingDays)} {...f('ship')} /></Field>
-          <Field label="Total lead time"><p className="py-2 text-ink">{(num(d.lead) ?? sup?.leadTimeDays) == null ? <span className="text-stone">The forecast default (Forecast settings){(num(d.ship) ?? sup?.shippingDays) ? ` + ${num(d.ship) ?? sup?.shippingDays} transit` : ''}</span> : `${(num(d.lead) ?? sup!.leadTimeDays!) + (num(d.ship) ?? sup?.shippingDays ?? 0)} days`}</p></Field>
-        </div>
-        <p className={g}>Ordering</p>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Minimum order" hint={sup?.defaultMoq != null ? `Blank = ${sup.defaultMoq}` : undefined}><input className="field num" inputMode="numeric" placeholder={str(sup?.defaultMoq)} {...f('moq')} /></Field>
-          <Field label="Case size"><input className="field num" inputMode="numeric" {...f('caseSize')} /></Field>
-          <Field label="Safety stock (days)"><input className="field num" inputMode="numeric" {...f('safety')} /></Field>
-        </div>
-        <Field label="Ordering note" className="mt-3"><input className="field" maxLength={500} {...f('note')} /></Field>
-        <Field label="Status" className="mt-3">
-          <select className="field w-auto" value={d.status} onChange={(e) => setD({ ...d, status: e.target.value as StockProductStatus })}>
-            <option value="active">Active</option><option value="discontinued">Discontinued</option><option value="not_tracked">Not tracked</option>
-          </select>
-        </Field>
-        {bad.length > 0 && <p className="mt-2 text-[13px] text-rose">Numbers can’t be negative.</p>}
-      </div>
-    </Modal>
-  );
-}
