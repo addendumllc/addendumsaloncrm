@@ -32,11 +32,12 @@ ssh $SSH_OPTS -t "$TARGET" 'command -v rsync >/dev/null || { echo "Installing rs
 
 echo "==> Copying the CRM to the server"
 rsync -az --delete -e "ssh $SSH_OPTS" \
-  --exclude node_modules --exclude dist --exclude data --exclude backups \
+  --exclude node_modules --exclude dist --exclude data --exclude backups --exclude /media \
   --exclude .git --exclude .DS_Store --exclude '*.log' \
   ./ "$TARGET:addendum-crm/"
 
 echo "==> Starting it (the first run installs Docker and takes 5–10 minutes)"
 # First run on a fresh server: install Docker, firewall, swap and backups.
-ssh $SSH_OPTS -t "$TARGET" 'cd addendum-crm && (command -v docker >/dev/null || sudo bash deploy/server-setup.sh) && sudo docker compose up -d --build && sudo docker image prune -f'
+# The photos folder belongs to the app's user (1000) inside the container; nightly backups are (re)installed every deploy.
+ssh $SSH_OPTS -t "$TARGET" 'cd addendum-crm && (command -v docker >/dev/null || sudo bash deploy/server-setup.sh) && sudo mkdir -p media && sudo chown 1000:1000 media && sudo bash deploy/backups.sh && sudo docker compose up -d --build && sudo docker image prune -f'
 echo "Deployed. Check https://addendumsalon.info/api/health"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # One-time setup of a fresh Ubuntu 24.04 VPS for the CRM. Run on the server, from the app folder:
 #   sudo bash deploy/server-setup.sh
-# Installs Docker, opens only SSH + web ports, adds swap (builds need memory) and nightly database backups.
+# Installs Docker, opens only SSH + web ports, adds swap (builds need memory) and nightly backups (deploy/backups.sh).
 set -euo pipefail
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -26,10 +26,6 @@ if ! swapon --show | grep -q /swapfile; then
   echo '/swapfile none swap sw 0 0' >> /etc/fstab
 fi
 
-echo "==> Nightly database backup at 3:15, kept 14 days, in $APP_DIR/backups"
-mkdir -p "$APP_DIR/backups"
-cat > /etc/cron.d/addendum-backup <<EOF
-15 3 * * * root cd $APP_DIR && docker compose exec -T db pg_dump -U addendum addendum | gzip > backups/addendum-\$(date +\%F).sql.gz && find backups -name '*.sql.gz' -mtime +14 -delete
-EOF
+bash "$APP_DIR/deploy/backups.sh"
 
 echo "Done. Start the CRM with: sudo docker compose up -d --build"
