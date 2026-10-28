@@ -646,6 +646,12 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
         {photoList}
 
         <Field label="Service"><select className="field" value={d.mainService} onChange={(e) => setD({ ...d, mainService: e.target.value, services: d.services.filter((s) => s !== e.target.value) })}><option value="">Choose…</option>{serviceOptions.map((s) => <option key={s}>{s}</option>)}</select></Field>
+        <Field label="Also performed" hint="Tap any other services done in this visit.">
+          <div className="flex flex-wrap gap-1.5">{serviceOptions.filter((s) => s !== d.mainService).map((s) => {
+            const on = d.services.includes(s);
+            return <button key={s} type="button" onClick={() => setD({ ...d, services: on ? d.services.filter((x) => x !== s) : [...d.services, s] })} className={chipClass(on)}>{on && <Check className="h-3 w-3" />}{s}</button>;
+          })}</div>
+        </Field>
         {extRelevant && (
           <div className="grid gap-3 sm:grid-cols-3">
             <Field label="Extension method"><select className="field" {...ex('method')}><option value="">—</option>{[...new Set([...EXTENSION_METHODS, ...o.methods])].map((m) => <option key={m}>{m}</option>)}</select></Field>
@@ -672,12 +678,6 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
               </Field>
               <Field label="Service date"><input type="date" className="field" value={d.serviceDate} onChange={(e) => setD({ ...d, serviceDate: e.target.value })} /></Field>
             </div>}
-            <Field label="Also performed">
-              <div className="flex flex-wrap gap-1.5">{serviceOptions.filter((s) => s !== d.mainService).map((s) => {
-                const on = d.services.includes(s);
-                return <button key={s} type="button" onClick={() => setD({ ...d, services: on ? d.services.filter((x) => x !== s) : [...d.services, s] })} className={chipClass(on)}>{on && <Check className="h-3 w-3" />}{s}</button>;
-              })}</div>
-            </Field>
             {!appt && <ClientPicker value={d.clientId ? { id: d.clientId, name: d.clientName } : null} onChange={(c) => setD({ ...d, clientId: c?.id ?? null, clientName: c?.name ?? '' })} />}
             {!allServices.some(isExt) && <Toggle checked={d.hasExtensions} onChange={(v) => setD({ ...d, hasExtensions: v })} label="Client has extensions" />}
             {extRelevant && (
