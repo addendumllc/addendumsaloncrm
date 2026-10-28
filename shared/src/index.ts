@@ -2538,7 +2538,11 @@ export interface ContentMediaDTO { id: string; mime: string; name: string | null
   /** Shared with stylists to download (My Content → Salon downloads), as a post or a story. */
   stylistShare?: 'post' | 'story' | null;
   /** Organising assets: the type of post it's for, and an optional group (a carousel set, a campaign…). */
-  postType?: 'post' | 'story' | 'reel' | 'carousel' | null; group?: string | null }
+  postType?: 'post' | 'story' | 'reel' | 'carousel' | null; group?: string | null;
+  /** What it is and what it's for. */
+  description?: string | null;
+  /** Its place in its group (a carousel's slide order); null = after the ordered ones, oldest first. */
+  position?: number | null }
 /** Reach, views… — imported from the platform, or entered by hand (metricsSource says which). */
 export interface ContentMetrics { reach?: number; impressions?: number; views?: number; likes?: number; comments?: number; saves?: number; shares?: number; clicks?: number; bookingInquiries?: number; productClicks?: number; salesCents?: number;
   /** Email (from Flodesk's report, entered by hand): recipients, delivered, opens, unsubscribes, bounces; clicks and salesCents as above. */

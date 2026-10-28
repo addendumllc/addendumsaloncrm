@@ -169,4 +169,24 @@ describe('My Content (a stylist’s own Instagram plan)', () => {
     await jen.patch(`/api/my-content/${p.body.post.id}`, { sharedWithTeam: false });
     expect((await mike.get('/api/my-content/team-ideas')).body.ideas.map((i: any) => i.id)).not.toContain(p.body.post.id);
   });
+
+  it('a carousel downloads in the order set (admins and stylists), with descriptions; single files download with their title', async () => {
+    const png = (n: number) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(60, n)]);
+    const up = async (name: string, n: number) => (await (owner as any).raw.post('/api/content/media').set(H).set('content-type', 'image/png').set('x-file-name', name).send(png(n))).body.media;
+    const [a, b, c] = [await up('First.png', 3), await up('Second.png', 4), await up('Third.png', 5)];
+    for (const m of [a, b, c]) await owner.patch(`/api/content/assets/${m.id}`, { group: 'Spring carousel', postType: 'carousel', stylistShare: 'post', description: `Slide ${m.title}` });
+    // Order: Third, First, Second.
+    expect((await owner.post('/api/content/assets/order', { ids: [c.id, a.id, b.id] })).status).toBe(200);
+    const listed = (await owner.get('/api/content/assets')).body.assets.filter((m: any) => m.group === 'Spring carousel');
+    expect(listed.map((m: any) => [m.title, m.position, m.description])).toEqual([['Third', 1, 'Slide Third'], ['First', 2, 'Slide First'], ['Second', 3, 'Slide Second']]);
+    const zip = (await owner.file(`/api/content/assets/group-download?group=${encodeURIComponent('Spring carousel')}`)).body.toString('latin1');
+    expect(zip.indexOf('01_Third.png')).toBeGreaterThan(-1);
+    expect(zip.indexOf('01_Third.png')).toBeLessThan(zip.indexOf('02_First.png'));
+    expect(zip.indexOf('02_First.png')).toBeLessThan(zip.indexOf('03_Second.png'));
+    const forJen = (await jen.file(`/api/my-content/downloads/group?group=${encodeURIComponent('Spring carousel')}`)).body.toString('latin1');
+    expect(forJen).toContain('01_Third.png');
+    expect((await jen.get('/api/my-content/downloads')).body.downloads.filter((d: any) => d.group === 'Spring carousel').map((d: any) => d.title)).toEqual(['Third', 'First', 'Second']);
+    const one = await owner.file(`/api/content/media/${a.id}?download`);
+    expect(one.headers['content-disposition']).toContain('First.png');
+  });
 });

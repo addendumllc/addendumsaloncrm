@@ -6,7 +6,7 @@ import {
   accountsFor, addComment, analytics, campaignTimeline, companionBlog, createLaunch, crossPost, comments, contentAccounts, contentSettings, createPosts, deleteAsset, deleteCampaign, deleteIdea, deletePost, favoriteIdea, generate,
   getPost, importMetrics, keepIdea, suggestIdeas, linkOptions, listAssets, listCampaigns, listIdeas, listPosts, MEDIA_LIMITS, planning, readMedia, repurpose, reschedule, saveCampaign,
   saveContentAccounts, saveContentSettings, saveIdea, saveMedia, setMetrics, transition, updateAsset, updatePost,
-  assetGroupZip,
+  assetGroupZip, orderAssets,
 } from '../domain/content.js';
 import { can } from '../auth/permissions.js';
 import { forbidden, notFound } from '../lib/errors.js';
@@ -159,6 +159,11 @@ contentRouter.get('/media/:id', ah(async (req, res) => {
   if (!m) throw notFound('File not found');
   res.setHeader('Content-Type', m.mime);
   res.setHeader('Cache-Control', 'private, max-age=86400');
+  // ?download: saved under its title (or its file name).
+  if ('download' in req.query) {
+    const ext = m.name?.match(/\.[A-Za-z0-9]+$/)?.[0] ?? `.${m.mime.split('/')[1]?.replace('jpeg', 'jpg').replace('quicktime', 'mov') ?? 'bin'}`;
+    res.attachment(m.title ? `${m.title.replace(/[^A-Za-z0-9 ._-]+/g, '').trim() || 'asset'}${ext}` : m.name ?? `asset${ext}`);
+  }
   res.send(m.bytes);
 }));
 contentRouter.get('/assets', ah(async (req, res) => {
@@ -168,6 +173,7 @@ contentRouter.get('/assets', ah(async (req, res) => {
 // Links as assets (Canva designs and templates…), organised like files; shared with stylists unless turned off.
 const linkBody = z.object({ title: z.string().max(120).optional(), postType: z.enum(['post', 'story', 'reel', 'carousel']).nullable().optional(), group: z.string().max(80).nullable().optional(), stylists: z.boolean().optional() });
 // A whole asset group as a ZIP (photos and videos, plus its links in Links.txt).
+contentRouter.post('/assets/order', ah(async (req, res) => { await orderAssets(parse(z.object({ ids: z.array(z.string().uuid()).min(1).max(200) }), req.body).ids); res.json({ ok: true }); }));
 contentRouter.get('/assets/group-download', ah(async (req, res) => {
   const z1 = await assetGroupZip(String(req.query.group ?? '').slice(0, 80));
   await logAction(req, 'content.asset_group_download', undefined, undefined, { group: req.query.group });
@@ -181,7 +187,7 @@ contentRouter.patch('/asset-links/:lid', ah(async (req, res) => res.json({ links
 contentRouter.delete('/asset-links/:lid', ah(async (req, res) => res.json({ links: await removeSharedLink(req.params.lid) })));
 contentRouter.patch('/assets/:id', ah(async (req, res) => {
   await updateAsset(who(req), req.params.id, parse(z.object({ title: text(200).optional(), tags: z.array(z.string().max(40)).max(30).optional(), account: account.nullable().optional(), approved: z.boolean().optional(), stylistShare: z.enum(['post', 'story']).nullable().optional(),
-    postType: z.enum(['post', 'story', 'reel', 'carousel']).nullable().optional(), group: z.string().max(80).nullable().optional() }), req.body) as any);
+    postType: z.enum(['post', 'story', 'reel', 'carousel']).nullable().optional(), group: z.string().max(80).nullable().optional(), description: z.string().max(2000).nullable().optional() }), req.body) as any);
   res.json({ ok: true });
 }));
 contentRouter.delete('/assets/:id', ah(async (req, res) => { await deleteAsset(req.params.id); res.json({ ok: true }); }));

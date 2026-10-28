@@ -38,6 +38,14 @@ myContentRouter.delete(`/links/:lid${ID}`, ah(async (req, res) => {
   res.json({ links: await removeSharedLink(req.params.lid) });
 }));
 myContentRouter.get('/downloads', ah(async (_req, res) => res.json({ downloads: await salonDownloads() })));
+// A shared group (e.g. a carousel) as a ZIP, in the salon's order — only what's shared with stylists.
+myContentRouter.get('/downloads/group', ah(async (req, res) => {
+  const { assetGroupZip } = await import('../domain/content.js');
+  const z1 = await assetGroupZip(String(req.query.group ?? '').slice(0, 80), true);
+  res.setHeader('Cache-Control', 'no-store');
+  res.attachment(z1.name);
+  res.sendFile(z1.file, () => void z1.remove());
+}));
 myContentRouter.get(`/downloads/:did${ID}`, ah(async (req, res) => {
   const m = await salonDownload(req.params.did);
   res.setHeader('Cache-Control', 'private, max-age=3600');

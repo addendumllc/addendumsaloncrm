@@ -163,9 +163,9 @@ export async function setHandle(u: Who, raw: string | null) {
 // ---------------- salon downloads ----------------
 /** Posts and stories the salon shares with stylists (Content Calendar → Assets → "Stylists can download"). */
 export async function salonDownloads() {
-  const rows = await db().query<any>(`SELECT id, mime, name, size, title, tags, stylist_share, group_name, created_at FROM content_media WHERE stylist_share IS NOT NULL ORDER BY group_name NULLS LAST, created_at DESC LIMIT 300`);
+  const rows = await db().query<any>(`SELECT id, mime, name, size, title, tags, stylist_share, group_name, description, created_at FROM content_media WHERE stylist_share IS NOT NULL ORDER BY group_name NULLS LAST, position NULLS LAST, created_at LIMIT 300`);
   return rows.map((m) => ({ id: m.id as string, kind: m.stylist_share as 'post' | 'story', title: (m.title ?? m.name ?? null) as string | null, mime: m.mime as string, size: m.size as number,
-    group: (m.group_name ?? null) as string | null, url: `/api/my-content/downloads/${m.id}`, createdAt: new Date(m.created_at).toISOString() }));
+    group: (m.group_name ?? null) as string | null, description: (m.description ?? null) as string | null, url: `/api/my-content/downloads/${m.id}`, createdAt: new Date(m.created_at).toISOString() }));
 }
 /** A shared file (only ones the salon has shared). */
 export async function salonDownload(id: string) {

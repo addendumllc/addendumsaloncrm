@@ -433,7 +433,7 @@ function MyWork() {
   );
 }
 
-interface SalonFile { id: string; kind: 'post' | 'story'; group: string | null; title: string | null; mime: string; size: number; url: string; createdAt: string }
+interface SalonFile { id: string; kind: 'post' | 'story'; group: string | null; description?: string | null; title: string | null; mime: string; size: number; url: string; createdAt: string }
 /** Posts and stories the salon provides, to download (or share straight to Instagram from a phone). */
 function SalonDownloads() {
   const toast = useToast();
@@ -482,7 +482,8 @@ function SalonDownloads() {
       {!data ? <PageLoading /> : !list.length ? (!shownLinks.length && <p className="text-[13px] text-stone">Nothing here yet — the salon adds {kind === 'post' ? 'posts' : 'stories'} for you to share.</p>) : (
         <div className="space-y-4">{[...new Set(list.map((x) => x.group ?? ''))].map((g) => (
           <div key={g || 'other'}>
-            {g && <h3 className="mb-1.5 text-[13px] font-semibold text-ink">{g}</h3>}
+            {g && <div className="mb-1.5 flex items-center gap-2"><h3 className="text-[13px] font-semibold text-ink">{g}</h3>
+              <a className={buttonClass('secondary', 'sm', 'ml-auto')} href={`/api/my-content/downloads/group?group=${encodeURIComponent(g)}`}><Download className="h-3.5 w-3.5" /><span className="btn-label">Download all (in order)</span></a></div>}
         <div className={cx('grid gap-3', kind === 'story' ? 'grid-cols-3 sm:grid-cols-5 lg:grid-cols-6' : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-5')}>
           {list.filter((x) => (x.group ?? '') === g).map((f) => (
             <div key={f.id} className="panel overflow-hidden !p-0">
@@ -491,6 +492,7 @@ function SalonDownloads() {
                 : <img src={f.url} alt={f.title ?? ''} loading="lazy" className={cx('w-full bg-mist object-cover', kind === 'story' ? 'aspect-[9/16]' : 'aspect-[4/5]')} />}
               <div className="space-y-1.5 p-2">
                 {f.title && <p className="truncate text-[13px] text-ink">{f.title}</p>}
+                {f.description && <p className="line-clamp-2 text-[12px] leading-snug text-stone">{f.description}</p>}
                 <div className="flex gap-1.5">
                   <a className={buttonClass('secondary', 'sm', 'flex-1')} href={`${f.url}?download`}><Download className="h-3.5 w-3.5" /><span className="btn-label">Download</span></a>
                   <Button size="sm" icon={<Share2 className="h-3.5 w-3.5" />} aria-label="Share" onClick={() => share(f)} />
