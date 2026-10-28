@@ -206,7 +206,7 @@ async function dtos(rows: Row[], u: Who): Promise<TransformationDTO[]> {
     const a = access(r, u);
     const e = ex.get(r.id)?.[0];
     const extension: TransformationExtensionDTO | null = e ? {
-      hasExtensions: e.has_extensions, method: e.method, brand: e.brand, length: e.length, shade: e.shade, quantity: e.quantity, workType: e.work_type,
+      hasExtensions: e.has_extensions, method: e.method, parts: Array.isArray(e.parts) ? e.parts : [], brand: e.brand, length: e.length, shade: e.shade, quantity: e.quantity, workType: e.work_type,
       blending: e.blending, customization: e.customization, maintenanceNotes: e.maintenance_notes, nextAppointment: e.next_appointment,
     } : null;
     const photos: TransformationPhotoDTO[] = (md.get(r.id) ?? []).map((m) => ({
@@ -275,7 +275,7 @@ function where(f: ListFilter, u: Who) {
     add(`(lower(t.title) LIKE ? OR lower(COALESCE(s.name,'')) LIKE ? OR lower(t.main_service) LIKE ? OR lower(array_to_string(t.tags, ' ')) LIKE ?
       OR lower(COALESCE(t.caption,'')) LIKE ? OR lower(t.details::text) LIKE ?
       OR EXISTS (SELECT 1 FROM transformation_services x WHERE x.transformation_id = t.id AND lower(x.service) LIKE ?)
-      OR EXISTS (SELECT 1 FROM transformation_extensions e WHERE e.transformation_id = t.id AND lower(COALESCE(e.method,'') || ' ' || COALESCE(e.shade,'') || ' ' || COALESCE(e.brand,'') || ' ' || COALESCE(e.length,'')) LIKE ?)${client}
+      OR EXISTS (SELECT 1 FROM transformation_extensions e WHERE e.transformation_id = t.id AND lower(COALESCE(e.method,'') || ' ' || COALESCE(e.shade,'') || ' ' || COALESCE(e.brand,'') || ' ' || COALESCE(e.length,'') || ' ' || e.parts::text) LIKE ?)${client}
       ${n ? `OR t.number = ${Number(n[1])}` : ''})`, ...Array(client ? 9 : 8).fill(like));
   }
   return { sql: w.length ? `WHERE ${w.join(' AND ')}` : '', params: p };
@@ -296,7 +296,7 @@ export async function listTransformations(f: ListFilter, u: Who) {
 }
 
 // ---------------- create / edit ----------------
-export interface ExtensionInput { hasExtensions: boolean; method?: string | null; brand?: string | null; length?: string | null; shade?: string | null; quantity?: string | null; workType?: string | null; blending?: boolean | null; customization?: string | null; maintenanceNotes?: string | null; nextAppointment?: string | null }
+export interface ExtensionInput { hasExtensions: boolean; method?: string | null; parts?: { method: string; shade?: string | null; length?: string | null }[]; brand?: string | null; length?: string | null; shade?: string | null; quantity?: string | null; workType?: string | null; blending?: boolean | null; customization?: string | null; maintenanceNotes?: string | null; nextAppointment?: string | null }
 export interface TransformationInput {
   title?: string; stylistStaffId?: string | null; serviceDate?: string; clientId?: string | null; mainService: string; services?: string[];
   details?: Record<string, string | null>; extension?: ExtensionInput | null; technicalNotes?: string | null; internalNotes?: string | null;
@@ -322,11 +322,14 @@ async function saveServices(q: { query: (s: string, p?: unknown[]) => Promise<un
 async function saveExtension(q: { query: (s: string, p?: unknown[]) => Promise<unknown> }, id: string, e: ExtensionInput | null | undefined, services: string[]) {
   const needed = services.some(isExtensionService);
   if (!e || (!e.hasExtensions && !needed)) { await q.query('DELETE FROM transformation_extensions WHERE transformation_id = $1', [id]); return; }
-  await q.query(`INSERT INTO transformation_extensions(transformation_id, has_extensions, method, brand, length, shade, quantity, work_type, blending, customization, maintenance_notes, next_appointment)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT (transformation_id) DO UPDATE SET has_extensions = $2, method = $3, brand = $4, length = $5, shade = $6,
-    quantity = $7, work_type = $8, blending = $9, customization = $10, maintenance_notes = $11, next_appointment = $12`,
+  // Hybrid: the methods and colours used, each kept (blank rows dropped); other methods have none.
+  const parts = /hybrid/i.test(e.method ?? '') ? (e.parts ?? []).filter((x) => x.method?.trim() || x.shade?.trim())
+    .map((x) => ({ method: x.method?.trim() ?? '', shade: x.shade?.trim() || null, length: x.length?.trim() || null })).slice(0, 12) : [];
+  await q.query(`INSERT INTO transformation_extensions(transformation_id, has_extensions, method, brand, length, shade, quantity, work_type, blending, customization, maintenance_notes, next_appointment, parts)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (transformation_id) DO UPDATE SET has_extensions = $2, method = $3, brand = $4, length = $5, shade = $6,
+    quantity = $7, work_type = $8, blending = $9, customization = $10, maintenance_notes = $11, next_appointment = $12, parts = $13`,
   [id, e.hasExtensions || needed, e.method ?? null, e.brand ?? null, e.length ?? null, e.shade ?? null, e.quantity ?? null, e.workType ?? null, e.blending ?? null,
-    e.customization ?? null, e.maintenanceNotes ?? null, e.nextAppointment ?? null]);
+    e.customization ?? null, e.maintenanceNotes ?? null, e.nextAppointment ?? null, JSON.stringify(parts)]);
 }
 
 export async function createTransformation(b: TransformationInput, u: Who) {
@@ -749,7 +752,7 @@ const MANIFEST_HEAD = ['Transformation ID', 'Title', 'Stylist', 'Service date', 
   'Photo files', 'Instagram links'];
 function manifestRow(t: TransformationDTO, files: string[], technical: boolean) {
   const e = t.extension;
-  const row: unknown[] = [t.code, t.title, t.stylistName, t.serviceDate, t.mainService, t.services.join('; '), e?.hasExtensions ? 'Yes' : 'No', e?.method, e?.length, e?.shade,
+  const row: unknown[] = [t.code, t.title, t.stylistName, t.serviceDate, t.mainService, t.services.join('; '), e?.hasExtensions ? 'Yes' : 'No', e?.parts?.length ? `${e.method} (${e.parts.map((x) => [x.method, x.shade, x.length].filter(Boolean).join(' ')).join('; ')})` : e?.method, e?.length, e?.shade,
     t.details.techniques, t.details.products, t.details.styling, t.caption, t.hashtags, t.tags.join(' '), t.consent.status, t.consent.clientConsent,
     t.consent.socialPermission ? 'Yes' : 'No', t.consent.marketingPermission ? 'Yes' : 'No', t.consent.expiresOn, files.join('; '), t.instagram.map((i) => i.url).join(' ')];
   // Technical notes only when asked for and allowed; client names are never included.

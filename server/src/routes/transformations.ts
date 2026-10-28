@@ -25,7 +25,8 @@ const sendFile = (res: Response, f: { path: string; mime?: string; name: string 
 };
 
 const extension = z.object({
-  hasExtensions: z.boolean(), method: text(60), brand: text(120), length: text(40), shade: text(120), quantity: text(120), workType: text(60), blending: z.boolean().nullable().optional(),
+  hasExtensions: z.boolean(), method: text(60),
+  parts: z.array(z.object({ method: z.string().trim().max(60), shade: text(120), length: text(40) })).max(12).optional(), brand: text(120), length: text(40), shade: text(120), quantity: text(120), workType: text(60), blending: z.boolean().nullable().optional(),
   customization: text(2000), maintenanceNotes: text(2000), nextAppointment: text(200),
 }).nullable();
 const details = z.object({

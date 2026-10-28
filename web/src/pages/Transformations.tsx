@@ -318,7 +318,7 @@ function Detail({ id, o, onClose, onEdit, onExport, onChanged }: { id: string; o
             ]} />
           </Section>
           {e?.hasExtensions && <Section title="Extensions">
-            <Rows rows={[['Method', e.method], ['Brand / source', e.brand], ['Length', e.length], ['Shade', e.shade], ['Rows / packs', e.quantity], ['Work', e.workType],
+            <Rows rows={[['Method', e.method], ['Methods & colours', e.parts?.length ? e.parts.map((x) => [x.method, x.shade, x.length].filter(Boolean).join(' · ')).join('\n') : null], ['Brand / source', e.brand], ['Length', e.length], ['Shade', e.shade], ['Rows / packs', e.quantity], ['Work', e.workType],
               ['Blending / cutting', e.blending ? 'Yes' : null], ['Customization', e.customization], ['Maintenance', e.maintenanceNotes], ['Next appointment', e.nextAppointment]]} />
           </Section>}
           <Section title="Details">
@@ -485,7 +485,7 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
     services: t?.services.filter((s) => s !== t.mainService) ?? appt?.services.slice(1) ?? [] as string[],
     details: { ...(t?.details ?? {}) } as Record<string, string | null | undefined>, technicalNotes: t?.technicalNotes ?? '', internalNotes: t?.internalNotes ?? '',
     caption: t?.caption ?? '', hashtags: t?.hashtags ?? '', tags: (t?.tags ?? []).join(', '), consentStatus: 'pending', instagramUrl: '',
-    hasExtensions: !!t?.extension?.hasExtensions, ext: { method: '', brand: '', length: '', shade: '', quantity: '', workType: '', blending: false, customization: '', maintenanceNotes: '', nextAppointment: '', ...Object.fromEntries(Object.entries(t?.extension ?? {}).map(([k, v]) => [k, v ?? ''])) } as Record<string, any>,
+    hasExtensions: !!t?.extension?.hasExtensions, ext: { method: '', parts: [], brand: '', length: '', shade: '', quantity: '', workType: '', blending: false, customization: '', maintenanceNotes: '', nextAppointment: '', ...Object.fromEntries(Object.entries(t?.extension ?? {}).map(([k, v]) => [k, v ?? ''])) } as Record<string, any>,
   }));
   const [queue, setQueue] = useState<Queued[]>([]);
   const [busy, setBusy] = useState(false);
@@ -495,6 +495,9 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
   useEffect(() => () => queue.forEach((q) => URL.revokeObjectURL(q.preview)), []); // eslint-disable-line react-hooks/exhaustive-deps
   const allServices = [d.mainService, ...d.services];
   const extRelevant = allServices.some(isExt) || d.hasExtensions;
+  const isHybrid = /hybrid/i.test(d.ext.method ?? '');
+  const parts: { method: string; shade: string | null; length: string | null }[] = Array.isArray(d.ext.parts) ? d.ext.parts : [];
+  const setParts = (p: typeof parts) => setD({ ...d, ext: { ...d.ext, parts: p } });
   const canTech = !cur || cur.canSeeTechnical;
   // Instagram links, captions, hashtags and tags are for social posts: administrators only (the server checks too).
   const social = o.can.manage || o.can.consent;
@@ -532,7 +535,7 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
     details: Object.fromEntries(Object.entries(d.details).map(([k, v]) => [k, v || null])),
     ...(canTech ? { technicalNotes: d.technicalNotes || null, internalNotes: d.internalNotes || null } : {}),
     ...(social ? { caption: d.caption || null, hashtags: d.hashtags || null, tags: d.tags.split(',').map((x) => x.trim()).filter(Boolean) } : {}),
-    extension: extRelevant ? { hasExtensions: true, ...Object.fromEntries(Object.entries(d.ext).map(([k, v]) => [k, k === 'blending' ? !!v : v || null])) } : null,
+    extension: extRelevant ? { hasExtensions: true, ...Object.fromEntries(Object.entries(d.ext).map(([k, v]) => [k, k === 'blending' ? !!v : k === 'parts' ? (isHybrid ? v : []) : v || null])) } : null,
   });
 
   const save = async () => {
@@ -660,6 +663,23 @@ function Editor({ t, o, appt, onClose }: { t: TransformationDTO | null; o: Optio
             <Field label="Length"><input className="field" {...ex('length')} placeholder='e.g. 22"' /></Field>
             <Field label="Shade"><input className="field" {...ex('shade')} /></Field>
           </div>
+        )}
+        {extRelevant && isHybrid && (
+          <Field label="Hybrid: methods and colours used" hint="One row for each method and colour, e.g. Weft · #60 Platinum · 22″.">
+            <div className="space-y-2">
+              {parts.map((p, i) => (
+                <div key={i} className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+                  <select className="field sm:w-40" aria-label="Method" value={p.method} onChange={(e) => setParts(parts.map((x, k) => (k === i ? { ...x, method: e.target.value } : x)))}>
+                    <option value="">Method…</option>{[...new Set([...EXTENSION_METHODS.filter((m) => m !== 'Hybrid'), ...o.methods.filter((m) => !/hybrid/i.test(m))])].map((m) => <option key={m}>{m}</option>)}
+                  </select>
+                  <input className="field min-w-0 flex-1" aria-label="Colour" placeholder="Colour / shade" value={p.shade ?? ''} onChange={(e) => setParts(parts.map((x, k) => (k === i ? { ...x, shade: e.target.value } : x)))} />
+                  <input className="field sm:w-24" aria-label="Length" placeholder='Length' value={p.length ?? ''} onChange={(e) => setParts(parts.map((x, k) => (k === i ? { ...x, length: e.target.value } : x)))} />
+                  <button type="button" className="rounded p-1.5 text-stone hover:bg-mist hover:text-rose" aria-label="Remove" onClick={() => setParts(parts.filter((_, k) => k !== i))}><X className="h-4 w-4" /></button>
+                </div>
+              ))}
+              <Button size="sm" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setParts([...parts, { method: '', shade: null, length: null }])}>{parts.length ? 'Add another' : 'Add method & colour'}</Button>
+            </div>
+          </Field>
         )}
         {canTech && <Field label="Notes" hint="Formula, products, anything to remember. Private — never in captions or exports.">
           <textarea className="field min-h-[96px]" value={d.technicalNotes} onChange={(e) => setD({ ...d, technicalNotes: e.target.value })} />

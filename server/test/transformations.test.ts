@@ -349,4 +349,16 @@ describe('Transformations Library', () => {
     expect([claimed.status, claimed.body.transformation.stylistName]).toEqual([200, 'Jennifer']);
     expect((await mike.get(`/api/transformations/${orphan.id}`)).status).toBe(404); // now Jennifer's
   });
+
+  it('hybrid extensions keep each method and colour used', async () => {
+    const t = (await jen.post('/api/transformations', { mainService: 'Hair extension installation', extension: { hasExtensions: true, method: 'Hybrid',
+      parts: [{ method: 'Weft', shade: '#60 Platinum', length: '22"' }, { method: 'K-tip', shade: '#18 Ash', length: null }, { method: '', shade: '' }] } })).body.transformation;
+    expect(t.extension.parts).toEqual([{ method: 'Weft', shade: '#60 Platinum', length: '22"' }, { method: 'K-tip', shade: '#18 Ash', length: null }]);
+    expect((await jen.get('/api/transformations?q=18 ash')).body.items.map((x: any) => x.id)).toContain(t.id);
+    const csv = (await jen.get(`/api/transformations/${t.id}/details.csv`)).text;
+    expect(csv).toContain('Hybrid (Weft #60 Platinum 22""; K-tip #18 Ash)');
+    // Changing to a single method drops the list.
+    const one = await jen.patch(`/api/transformations/${t.id}`, { extension: { hasExtensions: true, method: 'Weft', parts: [{ method: 'K-tip', shade: 'x' }] } });
+    expect(one.body.transformation.extension.parts).toEqual([]);
+  });
 });
