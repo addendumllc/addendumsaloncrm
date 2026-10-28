@@ -2407,8 +2407,11 @@ export interface SupplierDTO {
   defaultMoq: number | null;
   /** Used for products and orders that don't name a supplier. */
   isDefault: boolean;
+  /** Supplier-level minimums for one purchase order (Reorder List checks them; null = none recorded). */
+  minOrderCents?: number | null;
+  minOrderUnits?: number | null;
 }
-export interface SupplierInput { name: string; companyName?: string | null; email?: string | null; phone?: string | null; website?: string | null; notes?: string | null; leadTimeDays?: number | null; leadUntracked?: boolean; shippingDays?: number | null; defaultMoq?: number | null }
+export interface SupplierInput { name: string; companyName?: string | null; email?: string | null; phone?: string | null; website?: string | null; notes?: string | null; leadTimeDays?: number | null; leadUntracked?: boolean; shippingDays?: number | null; defaultMoq?: number | null; minOrderCents?: number | null; minOrderUnits?: number | null }
 /** Which products to give a supplier: chosen products, or every product in a store. */
 export type SupplierAssign = { supplier: string; keys: string[] } | { supplier: string; store: 'square' | 'shopify' | 'shopify2' | 'all'; onlyWithout: boolean };
 

@@ -1987,14 +1987,15 @@ export function SuppliersView() {
 function SupplierModal({ supplier, onClose, onSaved }: { supplier: SupplierDTO | null; onClose: () => void; onSaved: () => void }) {
   const toast = useToast();
   const details = useCanDo()('suppliers:details');
-  const [d, setD] = useState({ name: supplier?.name ?? '', company: supplier?.companyName ?? '', email: supplier?.email ?? '', phone: supplier?.phone ?? '', website: supplier?.website ?? '', notes: supplier?.notes ?? '', lead: supplier?.leadTimeDays != null ? String(supplier.leadTimeDays) : '', shipping: supplier?.shippingDays != null ? String(supplier.shippingDays) : '', moq: supplier?.defaultMoq != null ? String(supplier.defaultMoq) : '' });
+  const [d, setD] = useState({ name: supplier?.name ?? '', company: supplier?.companyName ?? '', email: supplier?.email ?? '', phone: supplier?.phone ?? '', website: supplier?.website ?? '', notes: supplier?.notes ?? '', lead: supplier?.leadTimeDays != null ? String(supplier.leadTimeDays) : '', shipping: supplier?.shippingDays != null ? String(supplier.shippingDays) : '', moq: supplier?.defaultMoq != null ? String(supplier.defaultMoq) : '' , minUnits: supplier?.minOrderUnits != null ? String(supplier.minOrderUnits) : '', minValue: supplier?.minOrderCents != null ? String(supplier.minOrderCents / 100) : '' });
   const [untracked, setUntracked] = useState(!!supplier?.leadUntracked);
   const [saving, setSaving] = useState(false);
   const save = async () => {
     setSaving(true);
     try {
       const body = { name: d.name, ...(details ? { companyName: d.company || null } : {}), email: d.email || null, phone: d.phone || null, website: d.website || null, notes: d.notes || null, leadTimeDays: d.lead.trim() === '' ? null : Math.round(Number(d.lead)), leadUntracked: untracked,
-        shippingDays: d.shipping.trim() === '' ? null : Math.round(Number(d.shipping)), defaultMoq: d.moq.trim() === '' ? null : Math.max(1, Math.round(Number(d.moq))) };
+        shippingDays: d.shipping.trim() === '' ? null : Math.round(Number(d.shipping)), defaultMoq: d.moq.trim() === '' ? null : Math.max(1, Math.round(Number(d.moq))),
+        minOrderUnits: d.minUnits.trim() === '' ? null : Math.max(1, Math.round(Number(d.minUnits))), minOrderCents: d.minValue.trim() === '' ? null : Math.max(1, Math.round(Number(d.minValue) * 100)) };
       if (supplier) await api.put('/inventory-sync/stock/suppliers/details', { ...body, previous: supplier.name });
       else await api.post('/inventory-sync/stock/suppliers', body);
       toast(supplier ? 'Saved' : `${d.name.trim()} added — now give it products`);
@@ -2021,6 +2022,8 @@ function SupplierModal({ supplier, onClose, onSaved }: { supplier: SupplierDTO |
         <Field label="Usual lead time (days)" hint={untracked ? 'Not tracked for this supplier.' : 'Given to its products that don’t have their own.'}><input className="field num" inputMode="numeric" disabled={untracked} {...f('lead')} /></Field>
         <Field label="Shipping (days)" hint={untracked ? 'Not tracked for this supplier.' : 'Days in transit, added to the lead time.'}><input className="field num" inputMode="numeric" disabled={untracked} {...f('shipping')} /></Field>
         <Field label="Default MOQ" hint="Minimum order for its products that don’t have their own."><input className="field num" inputMode="numeric" {...f('moq')} /></Field>
+        <Field label="Minimum units per order" hint="The whole purchase order (Reorder List checks it). Blank = none."><input className="field num" inputMode="numeric" {...f('minUnits')} /></Field>
+        <Field label="Minimum order value ($)" hint="The whole purchase order. Blank = none."><input className="field num" inputMode="decimal" {...f('minValue')} /></Field>
         <div className="sm:col-span-2"><Toggle checked={untracked} onChange={setUntracked} label="Lead time not tracked"
           description="For suppliers you buy from as needed: To order times reorders on safety stock alone (no lead time), and its orders get no expected date." /></div>
         {details && <Field label="Notes" className="sm:col-span-2"><textarea className="field min-h-[72px]" {...f('notes')} /></Field>}

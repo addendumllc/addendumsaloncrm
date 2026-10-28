@@ -1385,6 +1385,7 @@ export async function listSuppliers(): Promise<SupplierDTO[]> {
       receivedOrders: o?.received ?? 0, openOrders: o?.open ?? 0, spentCents: Number(o?.spent ?? 0),
       companyName: s?.company_name ?? null, email: s?.email ?? null, phone: s?.phone ?? null, website: s?.website ?? null, notes: s?.notes ?? null,
       leadTimeDays: s?.lead_time_days ?? null, leadUntracked: !!s?.lead_untracked, shippingDays: s?.shipping_days ?? null, defaultMoq: s?.default_moq ?? null, isDefault: !!s?.is_default,
+      minOrderCents: s?.min_order_cents ?? null, minOrderUnits: s?.min_order_units ?? null,
     };
   });
 }
@@ -1402,15 +1403,15 @@ export async function saveSupplier(input: SupplierInput, previous: string | null
   else if (!previous && await db().one('SELECT 1 FROM suppliers WHERE lower(name) = lower($1)', [name])) throw badRequest(`${name} is already a supplier.`);
   if (!details) {
     await db().query(
-      `INSERT INTO suppliers(name, lead_time_days, lead_untracked, shipping_days, default_moq) VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT (name) DO UPDATE SET lead_time_days = $2, lead_untracked = $3, shipping_days = $4, default_moq = $5, updated_at = now()`,
-      [name, input.leadTimeDays ?? null, !!input.leadUntracked, input.shippingDays ?? null, input.defaultMoq ?? null]);
+      `INSERT INTO suppliers(name, lead_time_days, lead_untracked, shipping_days, default_moq, min_order_cents, min_order_units) VALUES ($1,$2,$3,$4,$5,$6,$7)
+       ON CONFLICT (name) DO UPDATE SET lead_time_days = $2, lead_untracked = $3, shipping_days = $4, default_moq = $5, min_order_cents = $6, min_order_units = $7, updated_at = now()`,
+      [name, input.leadTimeDays ?? null, !!input.leadUntracked, input.shippingDays ?? null, input.defaultMoq ?? null, input.minOrderCents ?? null, input.minOrderUnits ?? null]);
     return;
   }
   await db().query(
-    `INSERT INTO suppliers(name, company_name, email, phone, website, notes, lead_time_days, lead_untracked, shipping_days, default_moq) VALUES ($1,$7,$2,$3,$4,$5,$6,$8,$9,$10)
-     ON CONFLICT (name) DO UPDATE SET company_name = $7, email = $2, phone = $3, website = $4, notes = $5, lead_time_days = $6, lead_untracked = $8, shipping_days = $9, default_moq = $10, updated_at = now()`,
-    [name, clean(input.email), clean(input.phone), clean(input.website), clean(input.notes), input.leadTimeDays ?? null, clean(input.companyName), !!input.leadUntracked, input.shippingDays ?? null, input.defaultMoq ?? null]);
+    `INSERT INTO suppliers(name, company_name, email, phone, website, notes, lead_time_days, lead_untracked, shipping_days, default_moq, min_order_cents, min_order_units) VALUES ($1,$7,$2,$3,$4,$5,$6,$8,$9,$10,$11,$12)
+     ON CONFLICT (name) DO UPDATE SET company_name = $7, email = $2, phone = $3, website = $4, notes = $5, lead_time_days = $6, lead_untracked = $8, shipping_days = $9, default_moq = $10, min_order_cents = $11, min_order_units = $12, updated_at = now()`,
+    [name, clean(input.email), clean(input.phone), clean(input.website), clean(input.notes), input.leadTimeDays ?? null, clean(input.companyName), !!input.leadUntracked, input.shippingDays ?? null, input.defaultMoq ?? null, input.minOrderCents ?? null, input.minOrderUnits ?? null]);
   forgetStockCache();
 }
 

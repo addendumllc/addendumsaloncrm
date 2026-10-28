@@ -1,3 +1,4 @@
+import { ReorderList } from '../components/domain/ReorderList';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { StockProductDTO, InventorySeparateDTO, InventorySyncLinkDTO, InventorySyncOverviewDTO, InventorySyncRunDTO } from '@addendum/shared';
@@ -32,7 +33,7 @@ const result = (N: StoreNames): Record<InventorySyncRunDTO['details'][number]['r
  */
 const TABS = [
   // Inventory: the products with their stock — searchable by product, SKU or collection, counted or adjusted in place.
-  { value: 'stock', label: 'Inventory' }, { value: 'reorder', label: 'To order' }, { value: 'orders', label: 'Purchase orders' }, { value: 'items', label: 'Products' },
+  { value: 'stock', label: 'Inventory' }, { value: 'reorder', label: 'To order' }, { value: 'reorder-list', label: 'Reorder List' }, { value: 'orders', label: 'Purchase orders' }, { value: 'items', label: 'Products' },
   { value: 'pricing', label: 'Pricing' }, { value: 'suppliers', label: 'Suppliers' }, { value: 'activity', label: 'Activity' },
 ];
 const ABOUT: Record<string, string> = {
@@ -41,6 +42,7 @@ const ABOUT: Record<string, string> = {
   stock: 'Every product’s stock — search by product, SKU or collection, then count or adjust it. Every change is logged under Activity.',
   pricing: 'Unit cost and each store’s price.',
   reorder: 'What needs ordering, from sales, lead times and what’s on order.',
+  'reorder-list': 'Addendum Hair wefts and K-Tips that need ordering — wefts first, K-Tips second — with an amount for the plan you pick.',
   orders: 'Orders to suppliers. Receiving adds the stock.',
   suppliers: 'Who you order from, their lead times and minimum orders.',
   activity: 'Every count, adjustment, delivery, SKU change and sync.',
@@ -68,7 +70,7 @@ export function InventorySyncPage() {
   // Older links still land in the right place (?view=square / shopify / all / inventory = a store's products, etc.).
   const view = raw === 'stock' && params.get('part') === 'reorder' ? 'reorder'
     : ({ all: 'items', square: 'items', shopify: 'items', inventory: 'items', 'orders-online': 'orders', preorders: 'reorder', toorder: 'reorder' } as Record<string, string>)[raw]
-    ?? (['overview', 'items', 'pricing', 'orders', 'stock', 'reorder', 'products', 'suppliers', 'activity', 'sync'].includes(raw) ? raw : 'stock');
+    ?? (['overview', 'items', 'pricing', 'orders', 'stock', 'reorder', 'reorder-list', 'products', 'suppliers', 'activity', 'sync'].includes(raw) ? raw : 'stock');
   // The page's own choice (?for=), else the business workspace they're in.
   const ws = useWorkspace();
   const forHair = raw === 'shopify' || raw === 'orders-online' || raw === 'preorders' || pageBusiness(params, 'for', ws.current?.id ?? 'salon') === 'hair';
@@ -137,6 +139,7 @@ export function InventorySyncPage() {
       {view === 'products' && <div className="mb-3 flex flex-wrap justify-end gap-2"><CollectionsButton products={productList?.products ?? []} /><AddLengthButton /><AddToSquareButton /></div>}
       {view === 'products' && <ProductsView setup />}
       {view === 'stock' && <StockView key={params.get('q') ?? ''} store={storePick} initialQuery={params.get('q') ?? ''} />}
+      {view === 'reorder-list' && <ReorderList onOrders={() => setView('orders', { for: 'hair' })} />}
       {view === 'reorder' && <WaitingForStock store={storePick} />}
       {view === 'reorder' && <ReorderView key={storePick} store={storePick} initialFilter={params.get('show') === 'alerts' ? 'alerts' : params.get('show') === 'recount' ? 'recount' : 'reorder'} onOrders={() => setView('orders')} />}
       {view === 'orders' && (forHair ? <PurchaseOrdersView key="shopify" store="shopify" /> : <PurchaseOrdersView key="salon" store="salon" />)}

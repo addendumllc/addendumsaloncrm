@@ -1,3 +1,4 @@
+import { createReorderPOs, PLANS, reorderList, reviewOrder, saveList, savePrefs, savedList } from '../domain/reorderList.js';
 import { Router, type Request } from 'express';
 import { can } from '../auth/permissions.js';
 import { z } from 'zod';
@@ -408,6 +409,7 @@ const supplierBody = z.object({
   phone: z.string().trim().max(60).nullable().optional(), website: z.string().trim().max(300).nullable().optional(),
   notes: z.string().trim().max(2000).nullable().optional(), leadTimeDays: z.number().int().min(0).max(730).nullable().optional(),
   leadUntracked: z.boolean().optional(), shippingDays: z.number().int().min(0).max(365).nullable().optional(), defaultMoq: z.number().int().min(1).max(100_000).nullable().optional(),
+  minOrderCents: z.number().int().min(1).max(100_000_000).nullable().optional(), minOrderUnits: z.number().int().min(1).max(1_000_000).nullable().optional(),
 });
 inventorySyncRouter.post('/stock/suppliers', ah(async (req, res) => {
   const b = parse(supplierBody, req.body);
@@ -448,4 +450,34 @@ inventorySyncRouter.put('/stock/suppliers/rename', ah(async (req, res) => {
   await renameSupplier(b.from, b.to, req.user!.id);
   await logAction(req, 'stock.supplier_rename', 'stock', null, b);
   res.json({ ok: true });
+}));
+
+// Reorder List (Addendum Hair wefts & K-tips): the list for a plan, saved list, preferences, review and draft orders.
+const plan = z.enum(PLANS as [string, ...string[]]).catch('normal') as unknown as z.ZodType<'normal' | '30' | '60' | '90'>;
+const reorderLines = z.array(z.object({ key: z.string().min(1).max(200), qty: z.number().int().min(0).max(1_000_000) })).max(1000);
+inventorySyncRouter.get('/reorder-list', ah(async (req, res) => {
+  const q = req.query as Record<string, string | undefined>;
+  res.json({ ...(await reorderList(parse(plan, q.plan), { type: q.type === 'weft' || q.type === 'ktip' ? q.type : undefined, collection: q.collection || undefined, supplier: q.supplier || undefined })), saved: await savedList() });
+}));
+inventorySyncRouter.put('/reorder-list/saved', ah(async (req, res) => {
+  const b = parse(z.object({ plan, lines: z.array(z.object({ key: z.string().min(1).max(200), include: z.boolean(), qty: z.number().int().min(0).max(1_000_000) })).max(2000) }), req.body);
+  res.json({ saved: await saveList(b.plan, b.lines, req.user!.name) });
+}));
+inventorySyncRouter.put('/reorder-list/prefs', ah(async (req, res) => {
+  const b = parse(z.object({
+    key: z.string().min(1).max(200), typicalQty: z.number().int().min(1).max(100_000).nullable(), preferredPlan: plan.nullable(), safetyUnits: z.number().int().min(0).max(100_000).nullable(), notes: z.string().max(1000).nullable(),
+  }), req.body);
+  await savePrefs(b.key, b, req.user!.id);
+  await logAction(req, 'stock.reorder_prefs', 'stock', null, { product: b.key, typicalQty: b.typicalQty, preferredPlan: b.preferredPlan, safetyUnits: b.safetyUnits });
+  res.json({ ok: true });
+}));
+inventorySyncRouter.post('/reorder-list/review', ah(async (req, res) => {
+  const b = parse(z.object({ plan, lines: reorderLines }), req.body);
+  res.json(await reviewOrder(b.plan, b.lines));
+}));
+inventorySyncRouter.post('/reorder-list/purchase-orders', ah(async (req, res) => {
+  const b = parse(z.object({ plan, lines: reorderLines.min(1) }), req.body);
+  const out = await createReorderPOs(b.plan, b.lines, req.user!.id);
+  await logAction(req, 'stock.po_create', 'purchase_order', out.orders[0]?.id ?? null, { orders: out.orders.map((o) => o.number), from: 'reorder_list', plan: b.plan });
+  res.status(201).json(out);
 }));
