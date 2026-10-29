@@ -137,6 +137,7 @@ async function toDTO(rows: any[]): Promise<ContentPostDTO[]> {
   return rows.map((r) => ({
     id: r.id, account: r.account, platform: r.platform, type: r.post_type, title: r.title, scheduledAt: iso(r.scheduled_at), dueAt: iso(r.due_at),
     headline: r.headline, caption: r.caption, cta: r.cta, hashtags: r.hashtags, pillar: r.pillar, status: r.status, autoPost: r.auto_post,
+    creatorShare: r.creator_share ?? 'auto', sharedWithCreators: r.creator_share === 'yes' || ((r.creator_share ?? 'auto') === 'auto' && ['approved', 'scheduled', 'publishing', 'published'].includes(r.status)),
     media: (r.media_ids ?? []).map((id: string) => media.get(id)).filter(Boolean), externalLinks: r.external_links ?? [],
     link: r.link_kind ? { kind: r.link_kind, ref: r.link_ref, label: r.link_label ?? '' } : null,
     campaignId: r.campaign_id, campaignName: r.campaign_name ?? null, groupId: r.group_id, sourcePostId: r.source_post_id, ideaId: r.idea_id,
@@ -311,7 +312,7 @@ export async function deletePost(u: Who, id: string) {
 export async function comments(u: Who, id: string): Promise<ContentCommentDTO[]> {
   await getPost(u, id);
   return (await db().query<any>(`SELECT c.*, s.name AS staff_name FROM content_comments c LEFT JOIN staff s ON s.id = c.staff_id WHERE c.post_id = $1 ORDER BY c.created_at`, [id]))
-    .map((c) => ({ id: c.id, kind: c.kind, body: c.body, fromStatus: c.from_status, toStatus: c.to_status, staffName: c.staff_name ?? null, createdAt: iso(c.created_at)! }));
+    .map((c) => ({ id: c.id, kind: c.kind, body: c.body, fromStatus: c.from_status, toStatus: c.to_status, staffName: c.staff_name ?? c.author_name ?? null, createdAt: iso(c.created_at)! }));
 }
 export async function addComment(u: Who, id: string, body: string) {
   const p = await getPost(u, id);
@@ -883,4 +884,11 @@ export async function renameSet(from: string, to: string) {
 /** Caption.txt for a set's download: the caption, hashtags and how to use it. */
 export function captionText(i: AssetSetInfo) {
   return [i.caption, i.hashtags, i.notes && `---\nHow to use it: ${i.notes}`].filter(Boolean).join('\n\n');
+}
+
+/** A post's sharing with creators: automatic (once approved), always, or never — drafts stay private unless set to always. */
+export async function setCreatorShare(u: Who, id: string, mode: 'auto' | 'yes' | 'no') {
+  await getPost(u, id);
+  await db().query('UPDATE content_posts SET creator_share = $2 WHERE id = $1', [id, mode]);
+  return getPost(u, id);
 }

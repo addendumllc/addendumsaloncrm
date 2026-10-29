@@ -132,6 +132,19 @@ export function createApp() {
     next();
   });
   app.use('/api', rateLimit({ windowMs: 60_000, limit: 600, standardHeaders: true, legacyHeaders: false }));
+  // Content Calendar share links (creators without CRM accounts): only the link's shared posts, read-only plus notes.
+  // Before sign-in and the salon-network rule, since creators have neither; the token is the key.
+  app.get('/api/public/share/:token', (req, res, next) => (async () => {
+    const { sharedCalendar } = await import('./domain/contentShare.js');
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await sharedCalendar(req.params.token));
+  })().catch(next));
+  app.post('/api/public/share/:token/notes', (req, res, next) => (async () => {
+    const { addCreatorNote } = await import('./domain/contentShare.js');
+    const postId = String(req.body?.postId ?? ''), body = String(req.body?.body ?? '');
+    if (!/^[0-9a-f-]{36}$/i.test(postId)) return res.status(400).json({ error: { code: 'bad_request', message: 'Choose a post.' } });
+    res.json(await addCreatorNote(req.params.token, postId, body));
+  })().catch(next));
   app.use('/api', loadUser);
   app.use('/api', networkGate);
   app.use('/api/auth', authRouter);

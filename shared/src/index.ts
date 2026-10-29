@@ -2561,6 +2561,8 @@ export interface ContentPostDTO {
   headline: string | null; caption: string; cta: string | null; hashtags: string | null; pillar: string | null; status: ContentStatus;
   /** Posted by the CRM at the scheduled time (Instagram, connected accounts). */
   autoPost: boolean;
+  /** Sharing with creators (share links): auto = once approved, yes = always, no = never; sharedWithCreators = shown now. */
+  creatorShare: 'auto' | 'yes' | 'no'; sharedWithCreators: boolean;
   media: ContentMediaDTO[]; externalLinks: string[];
   /** What it promotes: a product (by product key) or a service. */
   link: { kind: 'product' | 'service'; ref: string; label: string } | null;

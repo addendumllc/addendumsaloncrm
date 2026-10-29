@@ -37,6 +37,7 @@ const InventorySyncPage = lazyPage(() => import('./pages/InventorySync').then((m
 const MyCommissionPage = lazyPage(() => import('./pages/Commission').then((m) => ({ default: m.MyCommissionPage })));
 const TeamCommissionPage = lazyPage(() => import('./pages/Commission').then((m) => ({ default: m.TeamCommissionPage })));
 import { ResetPasswordPage } from './pages/ResetPassword';
+import { SharePage } from './pages/SharePage';
 
 export function App() {
   const { data: me, isLoading, isError } = useMe();
@@ -47,7 +48,8 @@ export function App() {
   useEffect(() => {
     const out = () => {
       qc.clear();
-      if (!loc.pathname.startsWith('/login')) nav('/login');
+      // Share links are for people without an account: they never go to sign-in.
+      if (!loc.pathname.startsWith('/login') && !loc.pathname.startsWith('/share/')) nav('/login');
     };
     // A refused request may mean the role changed: re-check who's signed in so the right screens show.
     const recheck = () => void qc.invalidateQueries({ queryKey: ['me'] });
@@ -61,6 +63,8 @@ export function App() {
 
   // Password set-up / reset links work whether or not someone is signed in on this device.
   if (loc.pathname === '/reset-password') return <ResetPasswordPage />;
+  // Content Calendar share links (creators): no sign-in.
+  if (loc.pathname.startsWith('/share/')) return <SharePage />;
   if (isLoading) return <div className="flex h-screen items-center justify-center"><PageLoading /></div>;
   if (isError || !me) {
     return (

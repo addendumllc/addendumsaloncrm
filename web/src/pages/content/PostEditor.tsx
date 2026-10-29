@@ -120,6 +120,7 @@ export function PostEditor({ post, prefill, b, onClose }: { post: ContentPostDTO
           {current.permalink && <a className="ml-auto inline-flex items-center gap-1 text-plum hover:underline" href={current.permalink} target="_blank" rel="noreferrer">View post <ExternalLink className="h-3.5 w-3.5" /></a>}
         </div>
       )}
+      {current && <CreatorShare post={current} />}
       {post && <PageTabs value={tab} onChange={setTab} options={[{ value: 'content', label: 'Content' }, { value: 'workflow', label: 'Workflow & comments' }, { value: 'performance', label: 'Performance' }]} />}
       {tab === 'content' && (
         <div className="grid gap-5 text-[14px] lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
@@ -433,5 +434,34 @@ function Repurpose({ post, b, onClose, onDone }: { post: ContentPostDTO; b: Basi
         <Button size="sm" variant="ghost" onClick={() => setRows([...rows, { account: post.account, platform: 'tiktok', type: 'video' }])}>+ Another</Button>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * Sharing with creators (Content Calendar → Share links): automatic — shared once approved — always, or never. Drafts
+ * and unfinished posts stay hidden unless set to Always.
+ */
+function CreatorShare({ post }: { post: ContentPostDTO }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [mode, setMode] = useState(post.creatorShare ?? 'auto');
+  const [shown, setShown] = useState(post.sharedWithCreators);
+  const change = async (m: 'auto' | 'yes' | 'no') => {
+    const before = mode;
+    setMode(m);
+    try {
+      const r = await api.put<{ post: ContentPostDTO }>(`/content/posts/${post.id}/creator-share`, { mode: m });
+      setShown(r.post.sharedWithCreators);
+      void qc.invalidateQueries({ queryKey: ['content-posts'] });
+    } catch (e) { setMode(before); toast((e as Error).message, 'error'); }
+  };
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-mist/40 px-3 py-2 text-[13px]">
+      <span className="text-ink-soft">Creators:</span>
+      <select className="field h-9 w-auto py-1 text-[13px]" value={mode} onChange={(e) => change(e.target.value as 'auto' | 'yes' | 'no')} aria-label="Share with creators">
+        <option value="auto">Share once approved</option><option value="yes">Always share</option><option value="no">Never share</option>
+      </select>
+      <Badge tone={shown ? 'sage' : 'neutral'}>{shown ? 'Visible to creators' : 'Hidden from creators'}</Badge>
+    </div>
   );
 }

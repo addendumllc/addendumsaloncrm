@@ -6,9 +6,11 @@ import {
   accountsFor, addComment, analytics, campaignTimeline, companionBlog, createLaunch, crossPost, comments, contentAccounts, contentSettings, createPosts, deleteAsset, deleteCampaign, deleteIdea, deletePost, favoriteIdea, generate,
   getPost, importMetrics, keepIdea, suggestIdeas, linkOptions, listAssets, listCampaigns, listIdeas, listPosts, MEDIA_LIMITS, planning, readMedia, repurpose, reschedule, saveCampaign,
   saveContentAccounts, saveContentSettings, saveIdea, saveMedia, setMetrics, transition, updateAsset, updatePost,
-  assetGroupZip, orderAssets, renameSet, saveSetInfo, setInfo,
+  assetGroupZip, orderAssets, renameSet, saveSetInfo, setCreatorShare, setInfo,
 } from '../domain/content.js';
+import { createShareLink, deleteShareLink, listShareLinks, updateShareLink } from '../domain/contentShare.js';
 import { can } from '../auth/permissions.js';
+import { config } from '../config.js';
 import { forbidden, notFound } from '../lib/errors.js';
 import { ah, logAction, parse } from './util.js';
 
@@ -63,6 +65,24 @@ contentRouter.post('/posts', ah(async (req, res) => {
   await logAction(req, 'content.create', 'content_post', posts[0].id, { accounts });
   res.status(201).json({ posts });
 }));
+contentRouter.put('/posts/:id/creator-share', ah(async (req, res) => {
+  const { mode } = parse(z.object({ mode: z.enum(['auto', 'yes', 'no']) }), req.body);
+  res.json({ post: await setCreatorShare(who(req), req.params.id, mode) });
+}));
+// Share links for creators (no CRM account): read-only calendar of shared posts.
+const linkBase = (req: express.Request) => config().APP_URL.replace(/\/+$/, '') || `${req.protocol}://${req.get('host')}`;
+contentRouter.get('/share-links', ah(async (req, res) => res.json({ links: await listShareLinks(linkBase(req)) })));
+contentRouter.post('/share-links', ah(async (req, res) => {
+  const b = parse(z.object({ name: z.string().max(80), accounts: z.array(account).max(3).default([]), expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().default(null), allowNotes: z.boolean().default(true) }), req.body);
+  const links = await createShareLink(b, req.user!.id, linkBase(req));
+  await logAction(req, 'content.share_link_create', undefined, undefined, { name: b.name, accounts: b.accounts });
+  res.status(201).json({ links });
+}));
+contentRouter.patch('/share-links/:lid', ah(async (req, res) => {
+  const b = parse(z.object({ name: z.string().max(80).optional(), accounts: z.array(account).max(3).optional(), expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(), active: z.boolean().optional(), allowNotes: z.boolean().optional() }), req.body);
+  res.json({ links: await updateShareLink(req.params.lid, b, linkBase(req)) });
+}));
+contentRouter.delete('/share-links/:lid', ah(async (req, res) => res.json({ links: await deleteShareLink(req.params.lid, linkBase(req)) })));
 contentRouter.put('/posts/:id', ah(async (req, res) => res.json({ post: await updatePost(who(req), req.params.id, parse(fields, req.body) as any) })));
 contentRouter.post('/posts/:id/status', ah(async (req, res) => {
   const b = parse(z.object({ status, comment: text(2000) }), req.body);

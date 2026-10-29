@@ -2,7 +2,7 @@ import { SectionPicker } from '../components/layout/subNav';
 import { useStoreNames } from '../lib/storeNames';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Plus } from 'lucide-react';
+import { Plus, Share2 } from 'lucide-react';
 import type { ContentPostDTO } from '@addendum/shared';
 import { api } from '../api/client';
 import { Button, PageHeader, PageLoading } from '../components/ui';
@@ -14,6 +14,7 @@ import { AnalyticsTab } from './content/Analytics';
 import { SettingsTab } from './content/SettingsTab';
 import { PostEditor, type Prefill } from './content/PostEditor';
 import { StudioTab } from './content/Studio';
+import { ShareLinks } from './content/ShareLinks';
 import { useCanDo } from '../api/hooks';
 
 type Tab = 'calendar' | 'studio' | 'ideas' | 'assets' | 'planning' | 'analytics' | 'settings';
@@ -36,6 +37,7 @@ function ContentCalendarPage() {
   // Planning now sits under the calendar (old ?tab=planning links open the calendar).
   const tab = ((params.get('tab') === 'planning' ? 'calendar' : params.get('tab')) as Tab) || 'calendar';
   const [editing, setEditing] = useState<{ post: ContentPostDTO | null; prefill?: Prefill } | null>(null);
+  const [sharing, setSharing] = useState(false);
   // Opened from a notification (?post=…).
   const focus = params.get('post');
   useEffect(() => {
@@ -55,7 +57,10 @@ function ContentCalendarPage() {
   return (
     <div>
       <PageHeader title="Content Calendar" subtitle={b.mine.map((a) => a.name).join(' · ')}
-        actions={<Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => create()}>New post</Button>} />
+        actions={<>
+          {canDo('content:manage') && <Button icon={<Share2 className="h-4 w-4" />} onClick={() => setSharing(true)}>Share with creators</Button>}
+          <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => create()}>New post</Button>
+        </>} />
       {/* Its pages: in the sidebar under Content Calendar, as tabs on tablets and phones (like every section). */}
       <SectionPicker path="/content" names={names} can={canDo} />
       {tab === 'calendar' && <CalendarTab b={b} onOpen={open} onNew={(date) => create({ date })} onUse={create} />}
@@ -64,6 +69,7 @@ function ContentCalendarPage() {
       {tab === 'assets' && <AssetsTab b={b} />}
       {tab === 'analytics' && <AnalyticsTab b={b} onOpen={open} />}
       {tab === 'settings' && b.isAdmin && b.settings && <SettingsTab b={b} />}
+      {sharing && <ShareLinks b={b} onClose={() => setSharing(false)} />}
       {editing && <PostEditor post={editing.post} prefill={editing.prefill} b={b} onClose={() => setEditing(null)} />}
     </div>
   );
