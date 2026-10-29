@@ -134,7 +134,7 @@ export function InventorySyncPage() {
       {view === 'pricing' && <PricingView store={storePick} />}
       {view === 'products' && <div className="mb-3 flex flex-wrap justify-end gap-2"><CollectionsButton products={productList?.products ?? []} /><AddLengthButton /><AddToSquareButton /></div>}
       {view === 'products' && <ProductsView setup />}
-      {view === 'stock' && <StockView key={params.get('q') ?? ''} store={storePick} initialQuery={params.get('q') ?? ''} />}
+      {view === 'stock' && <StockView key={`${params.get('q') ?? ''}-${params.get('low') ?? ''}`} store={storePick} initialQuery={params.get('q') ?? ''} initialLow={params.get('low') === '1'} />}
       {view === 'reorder-list' && <ReorderList onOrders={() => setView('orders', { for: 'hair' })} />}
       {view === 'reorder' && <WaitingForStock store={storePick} />}
       {view === 'reorder' && <ReorderView key={storePick} store={storePick} initialFilter={params.get('show') === 'alerts' ? 'alerts' : params.get('show') === 'recount' ? 'recount' : 'reorder'} onOrders={() => setView('orders')} />}

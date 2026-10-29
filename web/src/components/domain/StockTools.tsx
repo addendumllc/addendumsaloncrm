@@ -751,7 +751,12 @@ function SpreadsheetModal({ products, onClose }: { products: StockProductDTO[]; 
 
 // ---------------- Stock: counts, adjustments, history ----------------
 /** `store`: every product, or only those the salon (Square) or Addendum Hair (online) sells. */
-export function StockView({ store = 'all', initialQuery = '' }: { store?: 'all' | 'salon' | 'hair'; initialQuery?: string } = {}) {
+/** Lowest stock across the stores it's in (separate-stock products are low when either store is). */
+const lowestStock = (p: StockProductDTO) => Math.min(...[p.squareQty, p.shopifyQty, ...p.store2.map((e) => e.qty)].filter((q): q is number => q != null));
+const WEEK = 7 * 24 * 3600 * 1000;
+
+/** Stock counts. `initialLow`: open on the low-stock count (10 or less), as the "please count" alert does. */
+export function StockView({ store = 'all', initialQuery = '', initialLow = false }: { store?: 'all' | 'salon' | 'hair'; initialQuery?: string; initialLow?: boolean } = {}) {
   const N = useStoreNames();
   const { data, isLoading, error, refetch } = useProducts();
   const toast = useToast();
@@ -764,16 +769,40 @@ export function StockView({ store = 'all', initialQuery = '' }: { store?: 'all' 
   const [note, setNote] = useState('');
   const [fill, setFill] = useState('');
   const [busy, setBusy] = useState(false);
+  // Count low stock: everything at the level or under, to check the numbers are right ("Right" records a count as is).
+  const [low, setLow] = useState(initialLow);
+  const [lowAt, setLowAt] = useState('10');
+  const [hideCounted, setHideCounted] = useState(false);
+  const { data: lastCounts } = useQuery({ queryKey: ['stock-last-counts'], enabled: low, queryFn: () => api.get<{ counted: Record<string, string> }>('/inventory-sync/stock/last-counts').then((r) => r.counted), staleTime: 20_000 });
+  const qc = useQueryClient();
+  const countedRecently = (key: string) => !!lastCounts?.[key] && Date.now() - new Date(lastCounts[key]).getTime() < WEEK;
   // Search by product, SKU or collection, or pick a collection (the salon's inventory collections when it has any).
   const [coll, setColl] = useState('');
   const { data: internal } = useInternalCollections();
   const collFilter = useMemo(() => collectionFilter(internal, [...new Set((data?.products ?? []).flatMap((p) => p.collections))].sort((a, b) => a.localeCompare(b))), [internal, data]);
   const shown = useMemo(() => filterProducts(data?.products ?? [], q, 'active').filter((p) => (p.squareQty != null || p.shopifyQty != null)
     && (!coll || collFilter.matches(p, coll))
-    && (store === 'all' || (store === 'salon' ? !!p.squareVariationId : !!p.shopifyInventoryItemId || p.store2.length > 0))), [data, q, store, coll, collFilter]);
+    && (store === 'all' || (store === 'salon' ? !!p.squareVariationId : !!p.shopifyInventoryItemId || p.store2.length > 0))
+    && (!low || (lowestStock(p) <= (Number(lowAt) || 0) && (!hideCounted || !countedRecently(p.key))))), [data, q, store, coll, collFilter, low, lowAt, hideCounted, lastCounts]); // eslint-disable-line react-hooks/exhaustive-deps
   if (isLoading) return <PageLoading />;
   if (error || !data) return <ErrorNote error={error} onRetry={refetch} />;
   const entered = Object.entries(vals).filter(([, v]) => v.trim() !== '');
+  // The number in the stores is right: logged as a count without changing stock.
+  const right = async (keys: string[]) => {
+    if (!keys.length) return;
+    setBusy(true);
+    try {
+      await api.post('/inventory-sync/stock/recounted', { keys });
+      toast(keys.length === 1 ? 'Counted — the number is right' : `${keys.length} counted — the numbers are right`);
+      void qc.invalidateQueries({ queryKey: ['stock-last-counts'] });
+      refresh();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const countedNote = (key: string) => (low ? <span className={cx('text-[12px]', countedRecently(key) ? 'text-sage' : 'text-stone')}>{lastCounts?.[key] ? `Counted ${relative(lastCounts[key])}` : 'Not counted yet'}</span> : null);
   const save = async () => {
     const changes: StockChangeInput[] = [];
     for (const [key, v] of entered) {
@@ -785,6 +814,7 @@ export function StockView({ store = 'all', initialQuery = '' }: { store?: 'all' 
     try {
       report(await api.post<StockApplyResultDTO>('/inventory-sync/stock/apply', { kind: mode, reason, note: note || null, changes }));
       setVals({});
+      void qc.invalidateQueries({ queryKey: ['stock-last-counts'] });
       refresh();
     } catch (e) {
       toast((e as Error).message, 'error');
@@ -792,9 +822,18 @@ export function StockView({ store = 'all', initialQuery = '' }: { store?: 'all' 
       setBusy(false);
     }
   };
+  const unentered = shown.filter((p) => !vals[p.key]?.trim()).map((p) => p.key);
   return (
     <div className="space-y-6">
       <section>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <button type="button" className={chipClass(low)} aria-pressed={low} onClick={() => { setLow(!low); if (!low) setMode('count'); }}>Count low stock</button>
+          {low && <>
+            <label className="flex items-center gap-1.5 text-[13px] text-ink-soft">at or under <input inputMode="numeric" className="field num h-8 w-16 py-1 text-center" value={lowAt} onChange={(e) => setLowAt(e.target.value.replace(/\D/g, ''))} aria-label="Low stock level" /></label>
+            <button type="button" className={chipClass(hideCounted)} aria-pressed={hideCounted} onClick={() => setHideCounted(!hideCounted)}>Hide counted this week</button>
+          </>}
+        </div>
+        {low && <p className="mb-3 text-[13px] text-stone">Count each one: type the number if it’s different, or press <b className="font-medium text-ink-soft">Right</b> if the stores already have it right. Wefts, k-tips and tapes at {lowAt || 0} or less also send a “please count” alert.</p>}
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <Segmented value={mode} onChange={(m) => { setMode(m); setVals({}); setReason(m === 'count' ? 'Stock count' : 'Damaged'); }} options={[{ value: 'count', label: 'Enter counts' }, { value: 'adjust', label: 'Add or remove' }]} />
           <div className="relative min-w-[200px] flex-1">
@@ -817,7 +856,9 @@ export function StockView({ store = 'all', initialQuery = '' }: { store?: 'all' 
                 <p className="text-[15px] font-medium leading-snug text-ink">{productName(p.label, p.sku)}<ProductSettingsButton productKey={p.key} className="ml-1 align-middle" /></p>
                 <p className="truncate font-mono text-[12px] text-stone">{p.sku ?? 'No SKU'}{p.collections.length ? <span className="font-sans"> · {p.collections.slice(0, 2).join(' · ')}</span> : null}</p>
                 <div className="mt-1"><StockCell p={p} store2={data.store2} /></div>
+                {countedNote(p.key)}
               </div>
+              {low && !vals[p.key]?.trim() && <Button size="sm" variant="ghost" disabled={busy} onClick={() => right([p.key])}>Right</Button>}
               <input inputMode="numeric" className={cx('h-12 w-20 shrink-0 rounded-lg border border-line bg-white px-2 text-center text-[18px] num focus:border-plum focus:outline-none', vals[p.key]?.trim() && 'border-amber bg-amber-tint')}
                 placeholder={mode === 'count' ? 'Count' : '+/−'} value={vals[p.key] ?? ''} onChange={(e) => setVals((v) => ({ ...v, [p.key]: e.target.value }))} aria-label={`${mode === 'count' ? 'Count' : 'Change'} for ${p.label}`} />
             </li>
@@ -826,14 +867,15 @@ export function StockView({ store = 'all', initialQuery = '' }: { store?: 'all' 
         </ul>
         <div className="hidden max-h-[480px] overflow-auto rounded-xl2 border border-line bg-white sm:block">
           <table className="w-full text-left text-[13px]">
-            <thead className="sticky top-0 border-b border-line bg-mist text-[11px] uppercase tracking-wide text-stone"><tr><th className="px-3 py-2">Product</th><th className="px-2 py-2">SKU</th><th className="px-2 py-2">In stock</th><th className="w-28 px-2 py-2">{mode === 'count' ? 'Count' : '+ / −'}</th></tr></thead>
+            <thead className="sticky top-0 border-b border-line bg-mist text-[11px] uppercase tracking-wide text-stone"><tr><th className="px-3 py-2">Product</th><th className="px-2 py-2">SKU</th><th className="px-2 py-2">In stock</th><th className="w-28 px-2 py-2">{mode === 'count' ? 'Count' : '+ / −'}</th>{low && <th className="w-20 px-2 py-2" />}</tr></thead>
             <tbody className="divide-y divide-line">
               {shown.slice(0, 400).map((p) => (
                 <tr key={p.key}>
                   <td className="px-3 py-1.5 text-ink"><span className="flex items-center gap-2.5"><ProductThumb src={p.imageUrl} alt={p.label} size="sm" /><span>{productName(p.label, p.sku)}<ProductSettingsButton productKey={p.key} className="ml-1 align-middle" /><Collections p={p} /></span></span></td>
                   <td className="px-2 py-1.5 font-mono text-ink-soft">{p.sku}</td>
-                  <td className="px-2 py-1.5"><StockCell p={p} store2={data.store2} /></td>
+                  <td className="px-2 py-1.5"><StockCell p={p} store2={data.store2} />{low && <span className="block">{countedNote(p.key)}</span>}</td>
                   <td className="px-2 py-1.5"><input inputMode="numeric" className={cx('w-full rounded-md border border-line bg-white px-2 py-1 num', vals[p.key]?.trim() && 'border-amber bg-amber-tint')} value={vals[p.key] ?? ''} onChange={(e) => setVals((v) => ({ ...v, [p.key]: e.target.value }))} /></td>
+                  {low && <td className="px-2 py-1.5">{!vals[p.key]?.trim() && <Button size="sm" variant="ghost" disabled={busy} onClick={() => right([p.key])}>Right</Button>}</td>}
                 </tr>
               ))}
             </tbody>
@@ -842,6 +884,7 @@ export function StockView({ store = 'all', initialQuery = '' }: { store?: 'all' 
         <div className="mt-3 flex flex-wrap items-end gap-3">
           <Field label="Reason" className="w-48"><select className="field" value={reason} onChange={(e) => setReason(e.target.value)}>{STOCK_REASONS.map((r) => <option key={r}>{r}</option>)}</select></Field>
           <Field label="Note (optional)" className="min-w-[200px] flex-1"><input className="field" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+          {low && <Button disabled={busy || !unentered.length} onClick={() => right(unentered.slice(0, 500))}>{entered.length ? 'All others are right' : 'All shown are right'} ({unentered.length})</Button>}
           <Button variant="primary" loading={busy} disabled={!entered.length} onClick={save}>{mode === 'count' ? 'Save counts' : 'Save changes'}{entered.length ? ` (${entered.length})` : ''}</Button>
         </div>
         <p className="mt-1 text-[12px] text-stone">{mode === 'count' ? `A count sets ${N.square} and ${N.shopify} to that number.` : 'Each store moves by the amount (e.g. −2 for two damaged).'} Every change is logged under Activity.</p>

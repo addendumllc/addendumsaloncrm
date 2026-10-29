@@ -36,7 +36,7 @@ export async function checkRecounts() {
   if (!shopifyService()) return 0;
   return notifyRecounts(async (ids, title, body) => {
     for (const id of ids) {
-      await db().query('INSERT INTO notifications(staff_id, kind, title, body, link) VALUES ($1,$2,$3,$4,$5)', [id, 'stock', title, body, '/inventory-sync?view=reorder&show=recount']);
+      await db().query('INSERT INTO notifications(staff_id, kind, title, body, link) VALUES ($1,$2,$3,$4,$5)', [id, 'stock', title, body, '/inventory-sync?view=stock&low=1']);
     }
   }, inventoryManagers);
 }

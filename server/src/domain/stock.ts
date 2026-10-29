@@ -548,7 +548,7 @@ export async function stockHistory(f: { key?: string; kind?: string; q?: string;
 // ---------------- Sales and forecasts ----------------
 const SALES_KEY = 'stock.shopify-sales';
 const FORECAST_KEY = 'stock.forecast-settings';
-export const DEFAULT_FORECAST: StockForecastSettings = { leadTimeDays: 30, safetyDays: 14, coverageDays: 60, slowToUseDays: 120, soonDays: 7, watchDays: 21, defaultMoq: 0, discontinuedCollections: ['Classic'], recountAt: 3, recountCollections: [] };
+export const DEFAULT_FORECAST: StockForecastSettings = { leadTimeDays: 30, safetyDays: 14, coverageDays: 60, slowToUseDays: 120, soonDays: 7, watchDays: 21, defaultMoq: 0, discontinuedCollections: ['Classic'], recountAt: 10, recountCollections: [] };
 
 /**
  * What a product is counted in, from its name: "Prosecco Redefined Weft · 18\" Weft" → weft(s), "Black Magic Clip-Ins" →
@@ -1709,7 +1709,7 @@ const isExtension = (i: StockForecastDTO, s: StockForecastSettings) => (s.recoun
   ? s.recountCollections.some((c) => i.collection === c || !!i.collection?.startsWith(`${c} / `) || i.collections.includes(c))
   : EXTENSION_WORDS.test(i.label) && !NOT_HAIR_WORDS.test(i.label));
 /** Low enough to recount: an extension still sold, at or below the recount level. */
-const lowForRecount = (i: StockForecastDTO, s: StockForecastSettings) => i.status !== 'discontinued' && isExtension(i, s) && i.stock <= (s.recountAt ?? 3);
+const lowForRecount = (i: StockForecastDTO, s: StockForecastSettings) => i.status !== 'discontinued' && isExtension(i, s) && i.stock <= (s.recountAt ?? 10);
 
 /** When each product was last counted (a stock count), by product and by SKU (a SKU's other listings count too). */
 async function lastCounts() {
@@ -1721,6 +1721,14 @@ async function lastCounts() {
     if (norm(r.sku)) bySku.set(norm(r.sku), Math.max(bySku.get(norm(r.sku)) ?? 0, t));
   }
   return (i: { key: string; sku: string | null }) => Math.max(byKey.get(i.key) ?? 0, bySku.get(norm(i.sku)) ?? 0);
+}
+
+/** When each product was last counted (by it or another listing with its SKU), for the low-stock count. */
+export async function lastCountedAt() {
+  const counted = await lastCounts();
+  const out: Record<string, string> = {};
+  for (const r of (await live()).rows) { const t = counted(r); if (t) out[r.key] = new Date(t).toISOString(); }
+  return { counted: out };
 }
 
 /** Flags extensions that went low (seen by the alert check) and haven't been counted since. */
@@ -1753,7 +1761,7 @@ export async function notifyRecounts(notify: (staffIds: string[], title: string,
   if (!fresh.length) return 0;
   const ids = await recipients();
   if (!ids.length) return 0;
-  const title = `${fresh.length} extension${fresh.length === 1 ? '' : 's'} low — please recount`;
+  const title = `${fresh.length} extension${fresh.length === 1 ? '' : 's'} at ${f.settings.recountAt ?? 10} or less — please count to make sure it’s right`;
   const body = fresh.slice(0, 6).map((i) => `${i.label}: ${i.stock} in stock`).join('\n') + (fresh.length > 6 ? `\n…and ${fresh.length - 6} more` : '');
   await notify(ids, title, body);
   return fresh.length;

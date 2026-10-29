@@ -7,7 +7,7 @@ import {
   copyShopifySkuToSquare, editLinkedProduct, getRun, linkByIds, linkBySku, listLinks, listRuns, markSeparate, resolveLink, setProductKind, setShopifySync, skuCandidates, startInventorySync, syncOverview, unlink,
   unmarkSeparate,
 } from '../domain/inventorySync.js';
-import { addToSquare, confirmCounts, applyNewLength, applySwatches, moveSwatchesFirst, swatchPlan, applyPrices, applyProPrices, newLengthPlan, priceList, proPricePlan, squareCandidates,
+import { addToSquare, confirmCounts, lastCountedAt, applyNewLength, applySwatches, moveSwatchesFirst, swatchPlan, applyPrices, applyProPrices, newLengthPlan, priceList, proPricePlan, squareCandidates,
   applyStockChanges, assignCollection, createPurchaseOrders, deleteLeadRule, setSupplierLeadDefault, leadRules, leadTimesFor, saveLeadRule, internalCollections, mergeSuppliers, renameCollection, saveCollectionList, productSales, skipProducts, suggestPurchaseOrders, suggestedOrderPlan, deletePurchaseOrder, forecastSettings, updatePoLine, addPoLines, removePoLine, setDefaultSupplier, forgetStockCache, listPurchaseOrders, listSuppliers, movePurchaseOrder, preorderReport, receivePurchaseOrder, reopenPurchaseOrder, correctReceived, changePoLineProduct,
   assignSupplier, deleteSupplier, refreshShopifySales, renameSupplier, saveProductSettings, saveSupplier, setForecastSettings, setSupplierLeadTime, stockForecast, stockHistory, stockProducts, updatePurchaseOrder,
 } from '../domain/stock.js';
@@ -270,10 +270,12 @@ inventorySyncRouter.put('/stock/forecast/settings', ah(async (req, res) => {
   const b = parse(z.object({ leadTimeDays: z.number().int().min(0).max(730), safetyDays: z.number().int().min(0).max(365), coverageDays: z.number().int().min(7).max(365), slowToUseDays: z.number().int().min(7).max(730).default(120),
     soonDays: z.number().int().min(0).max(180).default(7), watchDays: z.number().int().min(0).max(365).default(21), defaultMoq: z.number().int().min(0).max(100_000).default(0), collectionLeadConflict: z.enum(['longest', 'shortest']).default('longest'),
     discontinuedCollections: z.array(z.string().trim().min(1).max(80)).max(50).default(['Classic']),
-    recountAt: z.number().int().min(0).max(1000).default(3), recountCollections: z.array(z.string().trim().min(1).max(200)).max(100).default([]) }).refine((x) => x.watchDays >= x.soonDays, 'the Watch window must be at least the Reorder soon window'), req.body);
+    recountAt: z.number().int().min(0).max(1000).default(10), recountCollections: z.array(z.string().trim().min(1).max(200)).max(100).default([]) }).refine((x) => x.watchDays >= x.soonDays, 'the Watch window must be at least the Reorder soon window'), req.body);
   await setForecastSettings(b);
   res.json({ settings: await forecastSettings() });
 }));
+// Count low stock: when each product was last counted.
+inventorySyncRouter.get('/stock/last-counts', ah(async (_req, res) => res.json(await lastCountedAt())));
 // Recount: the number was right (records a count without changing stock), which clears the Recount flag.
 inventorySyncRouter.post('/stock/recounted', ah(async (req, res) => {
   const b = parse(z.object({ keys: z.array(z.string().min(1).max(200)).min(1).max(500) }), req.body);

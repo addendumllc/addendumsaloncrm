@@ -423,7 +423,7 @@ describe('Suppliers', () => {
     const send = async (_ids: string[], title: string) => { sent.push(title); };
     const n = await notifyRecounts(send, async () => ['x']);
     expect(n).toBeGreaterThan(0);
-    expect(sent[0]).toMatch(/low — please recount/);
+    expect(sent[0]).toMatch(/at 1000 or less — please count/);
     let items = (await api.get('/api/inventory-sync/stock/forecast')).body.items;
     const flagged = items.filter((i: any) => i.recount);
     expect(flagged.length).toBeGreaterThan(0);
@@ -436,7 +436,16 @@ describe('Suppliers', () => {
     forgetStockCache();
     items = (await api.get('/api/inventory-sync/stock/forecast')).body.items;
     expect(items.find((i: any) => i.key === flagged[0].key).recount).toBeFalsy();
+    // Count low stock shows when it was last counted.
+    const last = (await api.get('/api/inventory-sync/stock/last-counts')).body.counted;
+    expect(Date.now() - new Date(last[flagged[0].key]).getTime()).toBeLessThan(60_000);
+    expect(last[flagged[1]?.key ?? 'none']).toBeUndefined();
     await api.put('/api/inventory-sync/stock/forecast/settings', { ...base, recountAt: 3 });
+  });
+
+  it('extensions get the "please count" alert at 10 or less by default', async () => {
+    const { DEFAULT_FORECAST } = await import('../src/domain/stock.js');
+    expect(DEFAULT_FORECAST.recountAt).toBe(10);
   });
 
   it('sub-collections sit under their collection; renaming or removing the collection takes them along', async () => {
