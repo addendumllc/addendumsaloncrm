@@ -300,7 +300,7 @@ function ToConfirm({ onConfirm, onDetails }: { onConfirm: (a: Appt) => void; onD
 
 // ---------------- detail ----------------
 function Section({ title, children, aside }: { title: string; children: ReactNode; aside?: ReactNode }) {
-  return <section className="mb-5"><div className="mb-2 flex items-center justify-between gap-2"><h3 className="text-[12px] font-semibold uppercase tracking-wide text-stone">{title}</h3>{aside}</div>{children}</section>;
+  return <section className="mb-5"><div className="mb-2 flex flex-wrap items-center justify-between gap-2"><h3 className="text-[12px] font-semibold uppercase tracking-wide text-stone">{title}</h3>{aside}</div>{children}</section>;
 }
 function Rows({ rows }: { rows: [string, ReactNode][] }) {
   const shown = rows.filter(([, v]) => v !== null && v !== undefined && v !== '' && v !== false);

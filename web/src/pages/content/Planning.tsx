@@ -72,16 +72,16 @@ export function PlanningTab({ b, onUse, embedded, onOpen }: { b: Basics; onUse: 
         )}
       </section>}
       <section>
-        <div className="mb-2 flex items-center gap-2"><h2 className="text-[15px] font-medium text-ink">Campaigns and launches</h2>
-          <Button size="sm" variant="primary" className="ml-auto" icon={<Rocket className="h-4 w-4" />} onClick={() => setLaunching(true)}>New launch</Button>
+        <div className="mb-2 flex flex-wrap items-center gap-2"><h2 className="w-full text-[15px] font-medium text-ink sm:w-auto">Campaigns and launches</h2>
+          <Button size="sm" variant="primary" className="sm:ml-auto" icon={<Rocket className="h-4 w-4" />} onClick={() => setLaunching(true)}>New launch</Button>
           <Button size="sm" variant="ghost" icon={<Plus className="h-4 w-4" />} onClick={() => setCampaign('new')}>New campaign</Button></div>
         {!b.campaigns.length ? <p className="text-[13px] text-stone">Group posts into campaigns (a launch, a promotion, a season) to plan and measure them together.</p> : (
           <ul className="panel divide-y divide-line">{b.campaigns.map((c) => (
-            <li key={c.id} className="flex items-center"><button type="button" className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-left text-[13px] hover:bg-mist/40" onClick={() => setCampaign(c)}>
-              {c.kind === 'launch' && <Badge tone="plum">Launch</Badge>}<span className="min-w-0 flex-1 font-medium text-ink">{c.name}</span>{c.accounts.map((a) => <AccountTag key={a} a={b.accountOf(a)} small />)}
+            <li key={c.id} className="flex flex-wrap items-center sm:flex-nowrap"><button type="button" className="flex min-w-0 flex-1 basis-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-left text-[13px] hover:bg-mist/40 sm:basis-0" onClick={() => setCampaign(c)}>
+              <span className="order-first min-w-0 basis-full text-[14px] font-medium text-ink sm:order-none sm:flex-1 sm:basis-0">{c.name}</span>{c.kind === 'launch' && <Badge tone="plum">Launch</Badge>}{c.accounts.map((a) => <AccountTag key={a} a={b.accountOf(a)} small />)}
               <span className="text-stone">{c.kind === 'launch' ? (c.startsOn ? `Release ${new Date(`${c.startsOn}T12:00`).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' })}` : 'Release date not set') : [c.startsOn, c.endsOn].filter(Boolean).join(' – ') || 'No dates'}</span>
               {c.posts ? <Badge>{c.posts} item{c.posts === 1 ? '' : 's'}</Badge> : <Badge tone="amber">Nothing yet</Badge>}
-            </button>{c.posts > 0 && <Button size="sm" variant="ghost" className="mr-2" icon={<GanttChart className="h-4 w-4" />} onClick={() => setTimeline(c)}>Timeline</Button>}</li>
+            </button>{c.posts > 0 && <Button size="sm" variant="ghost" className="mb-2 ml-2 sm:mb-0 sm:mr-2" icon={<GanttChart className="h-4 w-4" />} onClick={() => setTimeline(c)}>Timeline</Button>}</li>
           ))}</ul>
         )}
       </section>

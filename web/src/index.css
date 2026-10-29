@@ -164,3 +164,16 @@ input[type="color"].color-circle::-moz-color-swatch { border: 0; border-radius: 
 @supports (text-box: trim-both cap alphabetic) {
   .btn-label { display: inline-block; text-box: trim-both cap alphabetic; }
 }
+
+/*
+ * Rows that wrap (a title with tags, dates and buttons beside it): the title keeps room to be read — at least 12rem, or
+ * the whole line on a narrow screen — so the extras move to the next line instead of squeezing the title to nothing.
+ * On phones, a title that would be cut off gets up to two lines instead.
+ */
+.flex-wrap > .min-w-0.flex-1 { min-width: min(100%, 12rem); }
+@media (max-width: 639px) {
+  .flex-wrap > .min-w-0.flex-1.truncate,
+  .flex-wrap > .min-w-0.flex-1 > .truncate:first-child {
+    white-space: normal; text-overflow: clip; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+}

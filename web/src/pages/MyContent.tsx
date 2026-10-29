@@ -113,7 +113,7 @@ export function MyContentPage() {
           {shownView === 'list' && <ListView month={month} posts={dated} onOpen={setEdit} />}
           {shownView === 'grid' && <GridView posts={dated} handle={handle} onOpen={setEdit} onSwap={swapDates} />}
           <section className="mt-6">
-            <div className="mb-2 flex items-center gap-2">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
               <h2 className="h-display text-[20px]">Ideas</h2><span className="text-[13px] text-stone">No date yet</span>
               <Button size="sm" className="ml-auto" icon={<Plus className="h-3.5 w-3.5" />} onClick={() => setEdit({ date: null })}>Idea</Button>
             </div>
@@ -557,7 +557,7 @@ function SalonDownloads() {
       {!data ? <PageLoading /> : !list.length ? (!shownLinks.length && !shownPosts.length && <p className="text-[13px] text-stone">Nothing here yet — the salon adds {kind === 'post' ? 'posts' : 'stories'} for you to share.</p>) : (
         <div className="space-y-4">{[...new Set(list.map((x) => x.group ?? ''))].map((g) => (
           <div key={g || 'other'}>
-            {g && <div className="mb-1.5 flex items-center gap-2"><h3 className="text-[13px] font-semibold text-ink">{g}</h3>
+            {g && <div className="mb-1.5 flex flex-wrap items-center gap-2"><h3 className="text-[13px] font-semibold text-ink">{g}</h3>
               <a className={buttonClass('secondary', 'sm', 'ml-auto')} href={`/api/my-content/downloads/group?group=${encodeURIComponent(g)}`}><Download className="h-3.5 w-3.5" /><span className="btn-label">Download all (in order)</span></a></div>}
         <div className={cx('grid gap-2 sm:gap-3', kind === 'story' ? 'grid-cols-3 sm:grid-cols-5 lg:grid-cols-6' : 'grid-cols-3 sm:grid-cols-4 lg:grid-cols-5')}>
           {list.filter((x) => (x.group ?? '') === g).map((f) => (

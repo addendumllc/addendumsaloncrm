@@ -154,7 +154,7 @@ export function CalendarTab({ b, onOpen, onNew, onUse }: { b: Basics; onOpen: (p
           <ul className="panel divide-y divide-line">{ideas.map((p) => (
             <li key={p.id} draggable onDragStart={(e) => { e.dataTransfer.setData('text/x-post', p.id); setDragging(p.id); }} onDragEnd={() => setDragging(null)}>
               <button type="button" className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-left text-[13px] hover:bg-mist/40" onClick={() => onOpen(p)}>
-                <AccountTag a={b.accountOf(p.account)} /><span className="min-w-0 flex-1 truncate font-medium text-ink">{p.title}</span>
+                <span className="order-first min-w-0 basis-full font-medium text-ink sm:order-none sm:flex-1 sm:basis-0 sm:truncate">{p.title}</span><AccountTag a={b.accountOf(p.account)} />
                 <span className="text-stone">{platformLabel(p.platform)} · {formatLabel(p.type)}</span>{p.assignedName && <span className="text-stone">{p.assignedName}</span>}
                 <Badge tone={STATUS_TONE[p.status]}>{postStatusLabel(p)}</Badge>
               </button>
