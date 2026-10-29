@@ -971,6 +971,8 @@ export interface StaffPayDTO {
    * off (commission only). The wage and hours stay saved either way.
    */
   hourlyMode?: HourlyMode;
+  /** Their own Earnings page shows commission and tips only (no hours, wages, taxes or net); admins still see it all. */
+  commissionOnlyView?: boolean;
   payType: PayType;
   hourlyRateCents: number | null;
   /** Salary per salaryPeriod. */

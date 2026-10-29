@@ -145,6 +145,9 @@ export function WagesSection({ staffId, staffName, part }: { staffId: string; st
       <Toggle checked={d.tipEligible} disabled={!editable} onChange={(v) => setD({ ...d, tipEligible: v })} label="Tip eligible"
         description={d.tipEligible ? `Tips on ${first}’s work go to ${first}.` : `Tips on ${first}’s work go to Needs review on Team Payroll, to be credited by hand.`} />
       {/* Saved right away (not with Save pay). */}
+      <Toggle checked={!!saved.commissionOnlyView} disabled={!editable} label="Show only commission"
+        onChange={async (v) => { try { await api.put(`/commission/pay/${staffId}/commission-only`, { on: v }); toast(v ? `${first} sees commission only` : `${first} sees hours, wages and taxes again`); reload(); } catch (e) { toast((e as Error).message, 'error'); } }}
+        description={saved.commissionOnlyView ? `${first}’s Earnings page shows commission and tips only. Admins still see ${first}’s hours, wages and taxes.` : `${first} sees their hours worked, wages, estimated taxes and net pay. Turn on to show commission and tips only.`} />
       {(d.payType === 'hourly' || saved.rates.some((r) => r.payType === 'hourly')) && (
         <Field label="Hourly pay" hint={HOURLY_HINT[saved.hourlyMode ?? 'all'](first)}>
           {editable ? <Segmented value={saved.hourlyMode ?? 'all'} options={[{ value: 'all', label: 'All hours' }, { value: 'not_servicing', label: 'Not with a client' }, { value: 'off', label: 'Off' }]}

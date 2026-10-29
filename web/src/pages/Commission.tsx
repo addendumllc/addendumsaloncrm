@@ -46,7 +46,7 @@ function MyCommissionContent() {
   const names = useStoreNames();
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['commission-me', dr.range],
-    queryFn: () => api.get<{ summary: CommissionSummaryDTO; entries: CommissionEntryDTO[]; squareLinked: boolean; pay: PaySummaryDTO | null; taxes: TaxEstimateDTO | null }>(`/commission/me?from=${dr.range.from}&to=${dr.range.to}`),
+    queryFn: () => api.get<{ summary: CommissionSummaryDTO; entries: CommissionEntryDTO[]; squareLinked: boolean; pay: PaySummaryDTO | null; taxes: TaxEstimateDTO | null; commissionOnly?: boolean }>(`/commission/me?from=${dr.range.from}&to=${dr.range.to}`),
     enabled: !!dr.range.from && !!dr.range.to,
   });
   return (
@@ -61,7 +61,7 @@ function MyCommissionContent() {
       {error && (error instanceof ApiError && error.code === 'reauth_required'
         ? <Button className="mt-2" onClick={() => qc.invalidateQueries({ queryKey: ['pay-unlock'] })}>Locked again — enter your password</Button>
         : <ErrorNote error={error} onRetry={refetch} />)}
-      {view === 'taxes' && data && <TaxesPanel taxes={data.taxes} />}
+      {view === 'taxes' && data && (data.commissionOnly ? <Notice>Your Earnings page shows commission and tips. Ask an administrator about hours, wages or taxes.</Notice> : <TaxesPanel taxes={data.taxes} />)}
       {view === 'commission' && data && (
         <>
           {data.pay && <HoursWagesCard pay={data.pay} taxes={data.taxes} />}

@@ -26,6 +26,7 @@ async function signIn(email: string, locked = false) {
   return {
     get: (url: string) => agent.get(url),
     post: (url: string, body: object = {}) => agent.post(url).set('X-Requested-With', 'addendum-crm').send(body),
+    put: (url: string, body: object = {}) => agent.put(url).set('X-Requested-With', 'addendum-crm').send(body),
   };
 }
 const entries = (where = 'true', p: unknown[] = []) => db().query<any>(`SELECT * FROM commission_entries WHERE status <> 'void' AND ${where}`, p);
@@ -550,6 +551,25 @@ describe('Wages, hours and tips', () => {
     expect(after.manual[day]).toBeUndefined();
     const jen = await signIn('jennifer@addendumsalon.com');
     expect((await jen.post('/api/commission/timesheet/clear', { staffId: michaelId, from: daysAgo(6), to: today() })).status).toBe(403);
+  });
+
+  it('Show only commission: the person sees commission and tips only; admins still see their hours', async () => {
+    const range = `from=${daysAgo(13)}&to=${today()}`;
+    const jen = await signIn('jennifer@addendumsalon.com');
+    expect((await jen.get(`/api/commission/me?${range}`)).body.pay).not.toBeNull(); // hours worked show by default
+    expect((await admin.put(`/api/commission/pay/${jenId}/commission-only`, { on: true })).body.pay.commissionOnlyView).toBe(true);
+    const me = (await jen.get(`/api/commission/me?${range}`)).body;
+    expect([me.commissionOnly, me.pay, me.taxes]).toEqual([true, null, null]);
+    expect(me.summary).toBeTruthy();
+    const year = (await jen.get(`/api/commission/me/year?year=${today().slice(0, 4)}`)).body;
+    expect(year.commissionOnly).toBe(true);
+    for (const r of year.rows) expect(Object.keys(r).sort()).toEqual(['commissionCents', 'from', 'payDate', 'tipsCents', 'to']);
+    // Admins: everything, hours included.
+    const adminView = (await admin.get(`/api/commission/pay/${jenId}?${range}`)).body;
+    expect(adminView.summary).toHaveProperty('minutes');
+    // A stylist can't change it.
+    expect((await jen.put(`/api/commission/pay/${jenId}/commission-only`, { on: false })).status).toBe(403);
+    await admin.put(`/api/commission/pay/${jenId}/commission-only`, { on: false });
   });
 
   it('a time clock shift kept only in the CRM isn’t added on top of Square’s hours for the same day', async () => {

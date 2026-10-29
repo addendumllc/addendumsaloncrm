@@ -122,7 +122,7 @@ export function YearTable({ url, showPaid = true, staffId }: { url: string; show
   // Columns chosen in the dropdown (remembered on this device). Until someone chooses, columns that are zero all year are hidden.
   const [chosen, setChosen] = useState<Optional[] | null>(() => { try { const v = localStorage.getItem(COLS_KEY); return v ? JSON.parse(v) : null; } catch { return null; } });
   const choose = (v: Optional[] | null) => { setChosen(v); try { if (v) localStorage.setItem(COLS_KEY, JSON.stringify(v)); else localStorage.removeItem(COLS_KEY); } catch { /* private window */ } };
-  const { data, isLoading } = useQuery({ queryKey: ['pay-year', url, year], queryFn: () => api.get<{ rows: PayPeriodRowDTO[]; showTaxBreakdown?: boolean }>(`${url}?year=${year}`) });
+  const { data, isLoading } = useQuery({ queryKey: ['pay-year', url, year], queryFn: () => api.get<{ rows: PayPeriodRowDTO[]; showTaxBreakdown?: boolean; commissionOnly?: boolean }>(`${url}?year=${year}`) });
   const today = dayKey(new Date());
   const rows = data?.rows ?? [];
   const sum = (k: keyof PayPeriodRowDTO) => rows.reduce((a, r) => a + ((r[k] as number) ?? 0), 0);
@@ -135,6 +135,23 @@ export function YearTable({ url, showPaid = true, staffId }: { url: string; show
   const shown = new Set<Optional>(chosen ?? (rows.length ? auto : OPTIONAL.map(([k]) => k)));
   const toggle = (k: Optional) => { const next = new Set(shown); if (next.has(k)) next.delete(k); else next.add(k); choose(OPTIONAL.map(([x]) => x).filter((x) => next.has(x))); };
   const val = (r: PayPeriodRowDTO | null, k: Optional) => { const n = r ? (r[k] as number) ?? 0 : sum(k); return k === 'minutes' ? hrs(n) : usd(n); };
+  // "Show only commission": commission and tips per pay period, nothing else.
+  if (data?.commissionOnly) return (
+    <div>
+      <div className="mb-3 flex items-center gap-2">
+        <Button size="sm" variant="ghost" onClick={() => setYear(year - 1)}>‹ {year - 1}</Button><span className="font-display text-xl">{year}</span><Button size="sm" variant="ghost" onClick={() => setYear(year + 1)}>{year + 1} ›</Button>
+      </div>
+      <div className="overflow-x-auto rounded-xl2 border border-line bg-white">
+        <table className="w-full text-left text-[14px]">
+          <thead className="border-b border-line bg-mist text-[11px] uppercase tracking-wide text-stone"><tr><th className="px-3 py-2">Pay period</th><th className="px-3 py-2">Paid</th><th className="px-3 py-2 text-right">Commission</th><th className="px-3 py-2 text-right">Tips</th></tr></thead>
+          <tbody className="divide-y divide-line">
+            {rows.map((r) => <tr key={r.from}><td className="px-3 py-2">{labelOfKey(r.from, { month: 'short', day: 'numeric' })} – {labelOfKey(r.to, { month: 'short', day: 'numeric' })}</td><td className="px-3 py-2 text-stone">{labelOfKey(r.payDate, { month: 'short', day: 'numeric' })}</td><td className={cell}>{usd(r.commissionCents)}</td><td className={cell}>{usd(r.tipsCents)}</td></tr>)}
+            {rows.length > 0 && <tr className="bg-mist/50 font-medium"><td className="px-3 py-2" colSpan={2}>{year}</td><td className={cell}>{usd(sum('commissionCents'))}</td><td className={cell}>{usd(sum('tipsCents'))}</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-1">

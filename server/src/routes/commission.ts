@@ -60,6 +60,8 @@ commissionRouter.get('/status', ah(async (req, res) => {
 }));
 
 // ---------- My Commission ----------
+const commissionOnly = async (staffId: string) => (await db().one<{ c: boolean }>('SELECT commission_only_view AS c FROM staff WHERE id = $1', [staffId]))?.c === true;
+
 /** Wages and estimated taxes for one person over a range, given their commission records for it. */
 async function payAndTaxes(staffId: string, from: string, to: string, summary: CommissionSummaryDTO) {
   const pay = (await paySummaries([staffId], from, to)).get(staffId) ?? null;
@@ -96,6 +98,10 @@ commissionRouter.get('/me/year', requirePermission('commission:own'), requirePay
   const { year } = parse(yearQuery, req.query);
   // The tax breakdown shows when it's turned on for them (Users & Permissions → Taxes).
   const showTaxBreakdown = (await taxDetails([req.user!.id])).get(req.user!.id)?.showBreakdown ?? true;
+  // "Show only commission": just the commission and tips per pay period.
+  if (await commissionOnly(req.user!.id)) {
+    return res.json({ commissionOnly: true, showTaxBreakdown: false, rows: (await yearByPayPeriod(req.user!.id, year)).map((r) => ({ from: r.from, to: r.to, payDate: r.payDate, commissionCents: r.commissionCents, tipsCents: r.tipsCents })) });
+  }
   res.json({ rows: await yearByPayPeriod(req.user!.id, year), showTaxBreakdown });
 }));
 
@@ -112,6 +118,8 @@ commissionRouter.get('/me', requirePermission('commission:own'), requirePayUnloc
   const entries = await listEntries({ staffId: req.user!.id, ...r });
   // Their own hours, estimated wages and estimated taxes.
   const summary = summarize(entries, r.from, r.to, req.user!.id);
+  // "Show only commission": no hours, wages, taxes or net on their own page (admins still see them).
+  if (await commissionOnly(req.user!.id)) return res.json({ summary, entries, squareLinked: !!me?.square_team_member_id, pay: null, taxes: null, commissionOnly: true });
   const pt = await payAndTaxes(req.user!.id, r.from, r.to, summary);
   // Hours with and without clients are for admins: people see their hours worked, not the split.
   if (pt.pay && !can(req.user, 'commission:manage')) pt.pay = { ...pt.pay, servicingMinutes: undefined, basis: pt.pay.basis.replace(/ \([\d.]+ hours with clients paid as commission\)/g, '') };
@@ -259,6 +267,15 @@ commissionRouter.put('/pay/:staffId', requirePermission('commission:manage'), ah
   // Audit records which fields changed, never the amounts.
   await logAction(req, 'commission.pay_update', 'staff', req.params.staffId, { payType: b.payType, tipEligible: b.tipEligible, workerType: b.taxes.workerType });
   if (r.tipEligibilityChanged && (await getSettings()).commission.enabled) await rebuildCommission();
+  res.json({ pay: await getPay(req.params.staffId) });
+}));
+
+/** Their own Earnings page: commission and tips only, or everything (admins always see it all). */
+commissionRouter.put('/pay/:staffId/commission-only', requirePermission('commission:manage'), ah(async (req, res) => {
+  const b = parse(z.object({ on: z.boolean() }), req.body);
+  const r = await db().query('UPDATE staff SET commission_only_view = $2, updated_at = now() WHERE id = $1 RETURNING id', [req.params.staffId, b.on]);
+  if (!r.length) throw notFound('That team member');
+  await logAction(req, 'commission.view_update', 'staff', req.params.staffId, { commissionOnly: b.on });
   res.json({ pay: await getPay(req.params.staffId) });
 }));
 
