@@ -205,6 +205,13 @@ function SetViewer({ name, files, onClose, onRenamed, onOpenSlide, onAddPhotos, 
     const kind = (order[0]?.postType === 'story' ? 'story' : 'post') as 'post' | 'story';
     try { for (const m of order) await api.patch(`/content/assets/${m.id}`, { stylistShare: on ? kind : null }); onChanged(); toast(on ? 'Stylists can now download this set' : 'Hidden from stylists'); } catch (e) { toast((e as Error).message, 'error'); }
   };
+  // Tags for the whole set (stylists search by them): added to every photo in it.
+  const setTags = [...new Set(order.flatMap((m) => m.tags ?? []))];
+  const saveTags = async (v: string) => {
+    const tags = [...new Set(v.split(',').map((t) => t.trim().replace(/^#/, '').toLowerCase()).filter(Boolean))];
+    if (tags.join(',') === setTags.join(',')) return;
+    try { for (const m of order) await api.patch(`/content/assets/${m.id}`, { tags }); onChanged(); } catch (e) { toast((e as Error).message, 'error'); }
+  };
   const takeOut = async (m: ContentMediaDTO) => {
     if (!window.confirm(`Take ${m.title || 'this photo'} out of the set? It stays in Assets on its own.`)) return;
     try { await api.patch(`/content/assets/${m.id}`, { group: null }); onChanged(); } catch (e) { toast((e as Error).message, 'error'); }
@@ -225,6 +232,7 @@ function SetViewer({ name, files, onClose, onRenamed, onOpenSlide, onAddPhotos, 
           <Field label="Caption" className="sm:col-span-2"><textarea className="field min-h-[90px]" maxLength={2200} defaultValue={info.caption ?? ''} onBlur={(e) => saveInfo('caption', e.target.value)} placeholder="The caption stylists post with it" /></Field>
           <Field label="Hashtags"><input className="field" defaultValue={info.hashtags ?? ''} onBlur={(e) => saveInfo('hashtags', e.target.value)} placeholder="#addendumsalon" /></Field>
           <Field label="How to use it"><input className="field" defaultValue={info.notes ?? ''} onBlur={(e) => saveInfo('notes', e.target.value)} placeholder="e.g. Post Fri–Sun, tag @addendum.salon" /></Field>
+          <Field label="Tags" hint="Stylists can search by these — separate with commas" className="sm:col-span-2"><input className="field" defaultValue={setTags.join(', ')} onBlur={(e) => saveTags(e.target.value)} placeholder="e.g. brushes, holiday, extensions" /></Field>
         </div>
       )}
       <p className="mb-2 text-[13px] text-stone">Drag to rearrange (or use the arrows) — downloads and stylists’ copies follow this order. Tap a photo for its details.</p>

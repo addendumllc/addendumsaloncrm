@@ -165,7 +165,7 @@ export async function setHandle(u: Who, raw: string | null) {
 export async function salonDownloads() {
   const rows = await db().query<any>(`SELECT id, mime, name, size, title, tags, stylist_share, group_name, description, created_at FROM content_media WHERE stylist_share IS NOT NULL AND group_name IS NULL ORDER BY created_at DESC LIMIT 300`);
   return rows.map((m) => ({ id: m.id as string, kind: m.stylist_share as 'post' | 'story', title: (m.title ?? m.name ?? null) as string | null, mime: m.mime as string, size: m.size as number,
-    group: (m.group_name ?? null) as string | null, description: (m.description ?? null) as string | null, url: `/api/my-content/downloads/${m.id}`, createdAt: new Date(m.created_at).toISOString() }));
+    group: (m.group_name ?? null) as string | null, description: (m.description ?? null) as string | null, tags: (m.tags ?? []) as string[], url: `/api/my-content/downloads/${m.id}`, createdAt: new Date(m.created_at).toISOString() }));
 }
 /** A shared file (only ones the salon has shared). */
 export async function salonDownload(id: string) {
@@ -256,7 +256,7 @@ export async function teamIdeas(u: Who) {
  * (Photos not in a set are listed with the downloads.)
  */
 export async function salonPosts() {
-  const files = await db().query<any>(`SELECT id, mime, title, group_name, stylist_share, post_type FROM content_media WHERE stylist_share IS NOT NULL AND group_name IS NOT NULL
+  const files = await db().query<any>(`SELECT id, mime, title, tags, description, group_name, stylist_share, post_type FROM content_media WHERE stylist_share IS NOT NULL AND group_name IS NOT NULL
     ORDER BY group_name, position NULLS LAST, created_at`);
   const names = [...new Set(files.map((f) => f.group_name as string))];
   const info = new Map((await db().query<any>('SELECT * FROM content_asset_sets WHERE name = ANY($1)', [names])).map((r) => [r.name as string, r]));
@@ -266,6 +266,8 @@ export async function salonPosts() {
     return {
       name: n, kind: (list[0].stylist_share === 'story' ? 'story' : 'post') as 'post' | 'story', postType: (list[0].post_type ?? null) as string | null,
       caption: (i?.caption ?? null) as string | null, hashtags: (i?.hashtags ?? null) as string | null, notes: (i?.notes ?? null) as string | null,
+      // Its tags (all its photos'), and a description (the first photo's) — to read and search.
+      tags: [...new Set(list.flatMap((f) => (f.tags ?? []) as string[]))].sort(), description: (list.find((f) => f.description)?.description ?? null) as string | null,
       files: list.map((f) => ({ id: f.id as string, mime: f.mime as string, url: `/api/my-content/downloads/${f.id}` })),
     };
   });

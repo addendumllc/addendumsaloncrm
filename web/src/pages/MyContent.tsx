@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Camera, Download, ExternalLink, Info, Link2, Share2, CalendarDays, ChevronLeft, ChevronRight, Copy, Film, Grid3x3, ImagePlus, Instagram, LayoutList, Lock, Play, Plus, Send, Trash2, Upload, X } from 'lucide-react';
+import { Camera, Download, ExternalLink, Info, Link2, Search, Share2, CalendarDays, ChevronLeft, ChevronRight, Copy, Film, Grid3x3, ImagePlus, Instagram, LayoutList, Lock, Play, Plus, Send, Trash2, Upload, X } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api/client';
 import { useCanDo } from '../api/hooks';
@@ -443,16 +443,22 @@ function MyWork() {
   );
 }
 
-interface SalonFile { id: string; kind: 'post' | 'story'; group: string | null; description?: string | null; title: string | null; mime: string; size: number; url: string; createdAt: string }
+interface SalonFile { id: string; kind: 'post' | 'story'; group: string | null; description?: string | null; tags?: string[]; title: string | null; mime: string; size: number; url: string; createdAt: string }
 /** Posts and stories the salon provides, to download (or share straight to Instagram from a phone). */
 function SalonDownloads() {
   const toast = useToast();
   const { data } = useQuery({ queryKey: ['my-content-downloads'], queryFn: () => api.get<{ downloads: SalonFile[] }>('/my-content/downloads').then((r) => r.downloads), staleTime: 5 * 60_000 });
   const [kind, setKind] = useState<'post' | 'story'>('post');
-  const list = (data ?? []).filter((x) => x.kind === kind);
+  // Search: name, caption, description and tags; tap a tag to filter by it.
+  const [q, setQ] = useState('');
+  const words = q.toLowerCase().replace(/#/g, '').split(/\s+/).filter(Boolean);
+  const hit = (...parts: (string | null | undefined | string[])[]) => words.every((w) => parts.flat().join(' ').toLowerCase().replace(/#/g, '').includes(w));
+  const list = (data ?? []).filter((x) => x.kind === kind && hit(x.title, x.description, x.group, x.tags));
   // Ready-made posts (the salon's sets): photos in order with a caption, to download, copy or plan.
   const { data: posts } = useQuery({ queryKey: ['my-content-salon-posts'], queryFn: () => api.get<{ posts: SalonPost[] }>('/my-content/salon-posts').then((r) => r.posts), staleTime: 5 * 60_000 });
-  const shownPosts = (posts ?? []).filter((p) => p.kind === kind);
+  const shownPosts = (posts ?? []).filter((p) => p.kind === kind && hit(p.name, p.caption, p.hashtags, p.notes, p.description, p.tags));
+  const allTags = [...new Set([...(posts ?? []).flatMap((p) => p.tags), ...(data ?? []).flatMap((f) => f.tags ?? [])])].sort();
+  const [details, setDetails] = useState<string | null>(null);
   const go = useNavigate();
   const [planning, setPlanning] = useState<string | null>(null);
   const plan = async (p: SalonPost) => {
@@ -464,7 +470,7 @@ function SalonDownloads() {
   const qc = useQueryClient();
   const canManage = useCanDo()('content:manage');
   const { data: links } = useQuery({ queryKey: ['my-content-links'], queryFn: () => api.get<{ links: SharedLink[] }>('/my-content/links').then((r) => r.links), staleTime: 5 * 60_000 });
-  const shownLinks = (links ?? []).filter((l) => l.kind === 'both' || l.kind === kind);
+  const shownLinks = (links ?? []).filter((l) => (l.kind === 'both' || l.kind === kind) && hit(l.title, l.group));
   const [adding, setAdding] = useState(false);
   const removeLink = async (l: SharedLink) => {
     if (!window.confirm(`Remove “${l.title}” for every stylist?`)) return;
@@ -486,6 +492,15 @@ function SalonDownloads() {
         <Segmented className="w-full sm:ml-auto sm:w-auto [&>button]:flex-1" value={kind} onChange={setKind} options={(['post', 'story'] as const).map((k) => ({ value: k,
           label: `${k === 'post' ? 'Posts' : 'Stories'} (${(data ?? []).filter((x) => x.kind === k).length + (posts ?? []).filter((x) => x.kind === k).length + (links ?? []).filter((l) => l.kind === 'both' || l.kind === k).length})` }))} />
       </div>
+      <div className="mb-3 space-y-2">
+        <label className="relative block sm:max-w-sm"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-stone" />
+          <input className="field h-10 pl-9" type="search" placeholder="Search tags, names, captions" value={q} onChange={(e) => setQ(e.target.value)} /></label>
+        {allTags.length > 0 && (
+          <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 scrollbar-none">
+            {allTags.map((t) => <button key={t} type="button" aria-pressed={q === t} className={chipClass(q === t, 'shrink-0')} onClick={() => setQ(q === t ? '' : t)}>#{t}</button>)}
+          </div>
+        )}
+      </div>
       {/* Links the salon shares — Canva designs and templates to open, edit and download there. */}
       {(shownLinks.length > 0 || canManage) && (
         <div className="mb-3 space-y-2">
@@ -504,20 +519,30 @@ function SalonDownloads() {
         <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {shownPosts.map((p) => (
             <article key={p.name} className="panel overflow-hidden !p-0">
-              <div className="flex snap-x snap-mandatory gap-0.5 overflow-x-auto bg-mist scrollbar-none">
+              {/* A short strip of small slides (swipe), so the card stays easy to scan on a phone. */}
+              <div className="flex h-44 snap-x snap-mandatory gap-1 overflow-x-auto bg-mist p-1 scrollbar-none sm:h-56">
                 {p.files.map((f, i) => (
-                  <span key={f.id} className={cx('relative shrink-0 snap-start', p.files.length > 1 ? 'w-[82%] sm:w-[46%]' : 'w-full')}>
-                    {f.mime.startsWith('video/') ? <video src={f.url} muted playsInline preload="metadata" className={cx('w-full object-cover', p.kind === 'story' ? 'aspect-[9/16]' : 'aspect-[4/5]')} />
-                      : <img src={f.url} alt="" loading="lazy" className={cx('w-full object-cover', p.kind === 'story' ? 'aspect-[9/16]' : 'aspect-[4/5]')} />}
-                    {p.files.length > 1 && <span className="absolute left-1.5 top-1.5 rounded-full bg-ink/80 px-1.5 text-[11px] text-white">{i + 1}</span>}
+                  <span key={f.id} className={cx('relative h-full shrink-0 snap-start overflow-hidden rounded-md', p.kind === 'story' ? 'aspect-[9/16]' : 'aspect-[4/5]')}>
+                    {f.mime.startsWith('video/') ? <video src={f.url} muted playsInline preload="metadata" className="h-full w-full object-cover" />
+                      : <img src={f.url} alt="" loading="lazy" className="h-full w-full object-cover" />}
+                    {p.files.length > 1 && <span className="absolute left-1 top-1 rounded-full bg-ink/80 px-1.5 text-[10px] text-white">{i + 1}</span>}
                   </span>
                 ))}
               </div>
               <div className="space-y-2 p-3">
                 <p className="text-[15px] font-medium text-ink">{p.name} <span className="text-[12px] font-normal text-stone">· {p.files.length} {p.files.length === 1 ? 'photo' : 'photos'}</span></p>
-                {p.caption && <p className="line-clamp-3 whitespace-pre-wrap text-[13px] text-ink-soft">{p.caption}</p>}
-                {p.hashtags && <p className="truncate text-[12px] text-plum">{p.hashtags}</p>}
-                {p.notes && <p className="text-[12px] text-stone">{p.notes}</p>}
+                {(p.description || p.caption) && <p className={cx('whitespace-pre-wrap text-[13px] text-ink-soft', details !== p.name && 'line-clamp-2')}>{p.description || p.caption}</p>}
+                {p.tags.length > 0 && <div className="flex flex-wrap gap-1">{p.tags.map((t) => <button key={t} type="button" className="text-[12px] text-plum hover:underline" onClick={() => setQ(t)}>#{t}</button>)}</div>}
+                {(p.caption || p.hashtags || p.notes) && (
+                  <button type="button" className="text-[12px] font-medium text-ink underline" onClick={() => setDetails(details === p.name ? null : p.name)}>{details === p.name ? 'Hide details' : 'Details'}</button>
+                )}
+                {details === p.name && (
+                  <div className="space-y-1.5 rounded-lg bg-mist/50 p-2.5 text-[13px]">
+                    {p.caption && p.description && <p className="whitespace-pre-wrap text-ink-soft"><span className="block text-[11px] uppercase tracking-wide text-stone">Caption</span>{p.caption}</p>}
+                    {p.hashtags && <p className="text-plum"><span className="block text-[11px] uppercase tracking-wide text-stone">Hashtags</span>{p.hashtags}</p>}
+                    {p.notes && <p className="text-ink-soft"><span className="block text-[11px] uppercase tracking-wide text-stone">How to use it</span>{p.notes}</p>}
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-1.5 pt-1 sm:flex sm:flex-wrap">
                   <a className={buttonClass('secondary', 'sm')} href={`/api/my-content/downloads/group?group=${encodeURIComponent(p.name)}`}><Download className="h-3.5 w-3.5" /><span className="btn-label">Download post</span></a>
                   {(p.caption || p.hashtags) && <Button size="sm" icon={<Copy className="h-3.5 w-3.5" />} onClick={() => copyCaption(p)}>Copy caption</Button>}
@@ -534,17 +559,18 @@ function SalonDownloads() {
           <div key={g || 'other'}>
             {g && <div className="mb-1.5 flex items-center gap-2"><h3 className="text-[13px] font-semibold text-ink">{g}</h3>
               <a className={buttonClass('secondary', 'sm', 'ml-auto')} href={`/api/my-content/downloads/group?group=${encodeURIComponent(g)}`}><Download className="h-3.5 w-3.5" /><span className="btn-label">Download all (in order)</span></a></div>}
-        <div className={cx('grid gap-3', kind === 'story' ? 'grid-cols-3 sm:grid-cols-5 lg:grid-cols-6' : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-5')}>
+        <div className={cx('grid gap-2 sm:gap-3', kind === 'story' ? 'grid-cols-3 sm:grid-cols-5 lg:grid-cols-6' : 'grid-cols-3 sm:grid-cols-4 lg:grid-cols-5')}>
           {list.filter((x) => (x.group ?? '') === g).map((f) => (
             <div key={f.id} className="panel overflow-hidden !p-0">
               {f.mime.startsWith('video/')
                 ? <video src={f.url} muted playsInline preload="metadata" controls className={cx('w-full bg-black object-cover', kind === 'story' ? 'aspect-[9/16]' : 'aspect-[4/5]')} />
                 : <img src={f.url} alt={f.title ?? ''} loading="lazy" className={cx('w-full bg-mist object-cover', kind === 'story' ? 'aspect-[9/16]' : 'aspect-[4/5]')} />}
-              <div className="space-y-1.5 p-2">
-                {f.title && <p className="truncate text-[13px] text-ink">{f.title}</p>}
+              <div className="space-y-1 p-1.5 sm:space-y-1.5 sm:p-2">
+                {f.title && <p className="truncate text-[12px] text-ink sm:text-[13px]">{f.title}</p>}
                 {f.description && <p className="line-clamp-2 text-[12px] leading-snug text-stone">{f.description}</p>}
+                {!!f.tags?.length && <p className="truncate text-[11px] text-plum">{f.tags.map((t) => `#${t}`).join(' ')}</p>}
                 <div className="flex gap-1.5">
-                  <a className={buttonClass('secondary', 'sm', 'flex-1')} href={`${f.url}?download`}><Download className="h-3.5 w-3.5" /><span className="btn-label">Download</span></a>
+                  <a className={buttonClass('secondary', 'sm', 'flex-1')} href={`${f.url}?download`} aria-label="Download"><Download className="h-3.5 w-3.5" /><span className="btn-label hidden sm:inline-block">Download</span></a>
                   <Button size="sm" icon={<Share2 className="h-3.5 w-3.5" />} aria-label="Share" onClick={() => share(f)} />
                 </div>
               </div>
@@ -679,4 +705,4 @@ function TeamIdeas({ onUse }: { onUse: (d: Draft) => void }) {
   );
 }
 
-interface SalonPost { name: string; kind: 'post' | 'story'; postType: string | null; caption: string | null; hashtags: string | null; notes: string | null; files: { id: string; mime: string; url: string }[] }
+interface SalonPost { name: string; kind: 'post' | 'story'; postType: string | null; caption: string | null; hashtags: string | null; notes: string | null; tags: string[]; description: string | null; files: { id: string; mime: string; url: string }[] }
