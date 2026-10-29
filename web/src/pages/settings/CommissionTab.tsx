@@ -116,6 +116,13 @@ function SettingsCard({ settings, editable }: { settings: CommissionSettings; ed
             const f = (k: string) => labelOfKey(k, { month: 'short', day: 'numeric', year: 'numeric' });
             return <p className="mt-1 text-[12px] text-stone">Current pay period: {f(p.from)} – {f(p.to)}, paid {f(p.payDate)}.</p>;
           })()}
+          <Field label="Overtime (hourly pay)" className="mt-3 sm:w-96" hint="Workweeks start on the pay period’s first weekday. Payroll does the official calculation (including California’s 7th-day rule).">
+            <select className="field" disabled={!editable} value={d.overtime ?? 'california'} onChange={(e) => set('overtime', e.target.value as NonNullable<CommissionSettings['overtime']>)}>
+              <option value="california">California — over 8 hrs/day or 40 hrs/week at 1.5×, over 12 hrs/day at 2×</option>
+              <option value="weekly">Over 40 hours a week at 1.5×</option>
+              <option value="none">No overtime</option>
+            </select>
+          </Field>
         </div>
         <div className="rounded-xl border border-line p-3">
           <p className="text-[14px] font-medium text-ink">Payroll tax rates (for estimates)</p>

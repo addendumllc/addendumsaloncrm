@@ -814,6 +814,8 @@ export interface CommissionSettings {
   };
   /** When pay periods run and when they're paid (My Commission and Team Commission default to the current one). */
   paySchedule: PaySchedule;
+  /** Overtime for hourly pay: California (daily over 8 / 12 and weekly over 40), weekly over 40 only, or none. Default California. */
+  overtime?: 'california' | 'weekly' | 'none';
 }
 
 /**
@@ -1145,6 +1147,10 @@ export interface PaySummaryDTO {
   wagesCents: number;
   /** Hours with clients (their appointments) left out of hourly pay ("Only when not with a client"). */
   servicingMinutes?: number;
+  /** Hourly time paid at the regular rate, at time and a half (overtime) and at double time. */
+  regularMinutes?: number;
+  overtimeMinutes?: number;
+  doubleMinutes?: number;
   /** How wagesCents was worked out, in plain words. */
   basis: string;
 }

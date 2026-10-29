@@ -202,11 +202,46 @@ function countedDays(rows: DayRow[]) {
   let squareMinutes = 0;
   let manualMinutes = 0;
   const counted = new Map<string, number>();
+  // Weekly totals typed in by payroll (no daily breakdown, so the daily overtime rule can't apply to them).
+  const weekly = new Map<string, number>();
   for (const [d, x] of days) {
+    if (x.week) weekly.set(d, x.week);
     // A weekly total always counts (a day's timesheet number never replaces it).
     if (x.timesheet != null) { manualMinutes += x.timesheet + x.week; counted.set(d, x.timesheet + x.week); } else { squareMinutes += x.square; manualMinutes += x.manual + x.week; counted.set(d, x.square + x.manual + x.week); }
   }
-  return { squareMinutes, manualMinutes, counted };
+  return { squareMinutes, manualMinutes, counted, weekly };
+}
+
+export type OvertimeRule = 'california' | 'weekly' | 'none';
+/**
+ * Splits hourly minutes into regular, overtime (1.5×) and double time (2×), day by day.
+ *  California: over 8 hours in a day is overtime, over 12 is double time; regular hours over 40 in the workweek are overtime.
+ *  Weekly (federal): hours over 40 in the workweek are overtime.
+ * `days`: [date, minutes, minutes from a weekly total] in date order; `weekStart`: the workweek's first weekday (0 = Sunday).
+ * California's seventh-consecutive-day rule isn't applied (payroll does the official calculation).
+ */
+export function overtimeSplit(days: [string, number, number][], weekStart: number, rule: OvertimeRule) {
+  const out = new Map<string, { regular: number; overtime: number; double: number }>();
+  let week = ''; let weekRegular = 0;
+  for (const [d, minutes, weeklyPart] of [...days].sort((a, b) => a[0].localeCompare(b[0]))) {
+    const dow = new Date(`${d}T12:00:00Z`).getUTCDay();
+    const ws = addDaysToDate(d, -((dow - weekStart + 7) % 7));
+    if (ws !== week) { week = ws; weekRegular = 0; }
+    let regular = minutes; let overtime = 0; let double = 0;
+    if (rule === 'california') {
+      const daily = Math.max(0, minutes - weeklyPart);
+      double = Math.max(0, daily - 720);
+      overtime = Math.max(0, Math.min(daily, 720) - 480);
+      regular = minutes - overtime - double;
+    }
+    if (rule !== 'none') {
+      const over = Math.max(0, weekRegular + regular - 2400);
+      regular -= over; overtime += over;
+    }
+    weekRegular += regular;
+    out.set(d, { regular, overtime, double });
+  }
+  return out;
 }
 
 /** Everyone active (and anyone with hours in the range), with hours per day split by where they came from. */
@@ -374,12 +409,20 @@ export async function paySummaries(staffIds: string[], from: string, to: string)
   const rates = await db().query<any>(
     `SELECT staff_id, to_char(effective_from, 'YYYY-MM-DD') AS f, pay_type, hourly_rate_cents, salary_cents, salary_period FROM staff_pay_rates
       WHERE staff_id = ANY($1::uuid[]) ORDER BY effective_from`, [staffIds]);
+  // Overtime: workweeks start on the pay schedule's first weekday; hours from the start of the first week count toward its 40.
+  const commission = (await getSettings()).commission;
+  const rule: OvertimeRule = commission.overtime ?? 'california';
+  const weekStart = new Date(`${commission.paySchedule.anchorStart}T12:00:00Z`).getUTCDay();
+  const fromDow = new Date(`${from}T12:00:00Z`).getUTCDay();
+  const weekFrom = addDaysToDate(from, -((fromDow - weekStart + 7) % 7));
   const hours = await db().query<any>(
     `SELECT staff_id, to_char(work_date, 'YYYY-MM-DD') AS d, CASE WHEN note = 'Week total' AND source = 'manual' THEN 'week' WHEN note = 'Time clock' AND source = 'manual' THEN 'clock' ELSE source END AS source, sum(minutes)::int AS m FROM staff_hours
       WHERE staff_id = ANY($1::uuid[]) AND work_date BETWEEN $2::date AND $3::date GROUP BY staff_id, work_date, 3`,
-    [staffIds, from, to]);
+    [staffIds, weekFrom, to]);
   for (const s of staff) {
-    const { squareMinutes, manualMinutes, counted } = countedDays(hours.filter((h) => h.staff_id === s.id));
+    const all = countedDays(hours.filter((h) => h.staff_id === s.id));
+    const { squareMinutes, manualMinutes, counted } = countedDays(hours.filter((h) => h.staff_id === s.id && h.d >= from));
+    let regularMinutes = 0; let overtimeMinutes = 0; let doubleMinutes = 0;
     // Each wage covers its start date up to the day before the next one; only the part inside [from, to] counts.
     const own = rates.filter((r) => r.staff_id === s.id);
     let wagesCents = 0;
@@ -395,14 +438,25 @@ export async function paySummaries(staffIds: string[], from: string, to: string)
       if (r.pay_type === 'hourly' && r.hourly_rate_cents != null && s.hourly_mode === 'off') {
         parts.push('Hourly pay turned off (commission only)');
       } else if (r.pay_type === 'hourly' && r.hourly_rate_cents != null) {
-        const days = [...counted].filter(([d]) => d >= segFrom && d <= segTo);
         const appts = servicing.get(s.id);
-        // With clients: never more than the hours worked that day.
-        const withClients = appts ? days.reduce((a, [d, mins]) => a + Math.min(mins, appts.get(d) ?? 0), 0) : 0;
-        const m = days.reduce((a, [, mins]) => a + mins, 0) - withClients;
+        // Hourly minutes per day (time with clients taken off, never below 0), from the start of the first workweek.
+        const hourly: [string, number, number][] = [...all.counted].map(([d, mins]) => [d, Math.max(0, mins - Math.min(mins, appts?.get(d) ?? 0)), all.weekly.get(d) ?? 0]);
+        const split = overtimeSplit(hourly, weekStart, rule);
+        let reg = 0; let ot = 0; let dt = 0; let withClients = 0;
+        for (const [d, mins] of counted) {
+          if (d < segFrom || d > segTo) continue;
+          const x = split.get(d) ?? { regular: 0, overtime: 0, double: 0 };
+          reg += x.regular; ot += x.overtime; dt += x.double;
+          withClients += Math.min(mins, appts?.get(d) ?? 0);
+        }
         servicingMinutes += withClients;
-        wagesCents += Math.round((m / 60) * r.hourly_rate_cents);
-        parts.push(`${(m / 60).toFixed(2)} hours × ${money(r.hourly_rate_cents)}/hour${appts ? ` (${(withClients / 60).toFixed(2)} hours with clients paid as commission)` : ''}`);
+        regularMinutes += reg; overtimeMinutes += ot; doubleMinutes += dt;
+        const rate = r.hourly_rate_cents;
+        wagesCents += Math.round((reg / 60) * rate + (ot / 60) * rate * 1.5 + (dt / 60) * rate * 2);
+        const bits = [`${(reg / 60).toFixed(2)} regular hours × ${money(rate)}/hour`];
+        if (ot) bits.push(`${(ot / 60).toFixed(2)} overtime hours × ${money(Math.round(rate * 1.5))}/hour`);
+        if (dt) bits.push(`${(dt / 60).toFixed(2)} double-time hours × ${money(rate * 2)}/hour`);
+        parts.push(`${bits.join(' + ')}${appts ? ` (${(withClients / 60).toFixed(2)} hours with clients paid as commission)` : ''}`);
       } else if (r.pay_type === 'salary' && r.salary_cents != null) {
         const n = days(segFrom, segTo);
         wagesCents += Math.round(((r.salary_cents * PERIODS_PER_YEAR[r.salary_period as SalaryPeriod]) / 365) * n);
@@ -410,7 +464,7 @@ export async function paySummaries(staffIds: string[], from: string, to: string)
       }
     });
     if (!own.length) payType = s.pay_type;
-    out.set(s.id, { payType, minutes: squareMinutes + manualMinutes, squareMinutes, manualMinutes, wagesCents, servicingMinutes, basis: parts.length ? parts.join(' + ') : 'No wage set.' });
+    out.set(s.id, { payType, minutes: squareMinutes + manualMinutes, squareMinutes, manualMinutes, wagesCents, servicingMinutes, regularMinutes, overtimeMinutes, doubleMinutes, basis: parts.length ? parts.join(' + ') : 'No wage set.' });
   }
   return out;
 }

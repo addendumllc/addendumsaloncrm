@@ -28,3 +28,32 @@ describe('estimated net pay', () => {
     expect(e.netCents).toBeLessThan(280255);
   });
 });
+
+describe('overtime (California)', async () => {
+  const { overtimeSplit } = await import('../src/domain/wages.js');
+  const SAT = 6;
+  const h = (n: number) => Math.round(n * 60);
+  it('over 8 hours in a day is overtime, over 12 is double time', () => {
+    const s = overtimeSplit([['2026-10-10', h(9.5), 0], ['2026-10-11', h(13), 0]], SAT, 'california');
+    expect(s.get('2026-10-10')).toEqual({ regular: h(8), overtime: h(1.5), double: 0 });
+    expect(s.get('2026-10-11')).toEqual({ regular: h(8), overtime: h(4), double: h(1) });
+  });
+  it('regular hours over 40 in the workweek (Saturday–Friday) are overtime; a new week starts over', () => {
+    const week = ['2026-10-10', '2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15'].map((d) => [d, h(8), 0] as [string, number, number]);
+    const s = overtimeSplit([...week, ['2026-10-17', h(8), 0]], SAT, 'california');
+    expect(s.get('2026-10-15')).toEqual({ regular: 0, overtime: h(8), double: 0 }); // 6th day of 8: past 40
+    expect(s.get('2026-10-17')).toEqual({ regular: h(8), overtime: 0, double: 0 }); // next Saturday: new week
+  });
+  it('weekly-only and none', () => {
+    const days: [string, number, number][] = [['2026-10-10', h(10), 0], ['2026-10-11', h(10), 0]];
+    expect(overtimeSplit(days, SAT, 'weekly').get('2026-10-10')).toEqual({ regular: h(10), overtime: 0, double: 0 });
+    expect(overtimeSplit(days, SAT, 'none').get('2026-10-11')).toEqual({ regular: h(10), overtime: 0, double: 0 });
+  });
+  it('a weekly total typed in has no daily overtime, only the weekly 40', () => {
+    expect(overtimeSplit([['2026-10-16', h(45), h(45)]], SAT, 'california').get('2026-10-16')).toEqual({ regular: h(40), overtime: h(5), double: 0 });
+  });
+  it('pays like the paystub: 66.23 regular × $23 + 8.4 overtime × $34.50', () => {
+    const cents = Math.round((h(66.23) / 60) * 2300 + (h(8.4) / 60) * 2300 * 1.5);
+    expect(Math.abs(cents - (152329 + 28980))).toBeLessThanOrEqual(25); // $1,813.09 (minutes rounding)
+  });
+});
