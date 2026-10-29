@@ -1,7 +1,7 @@
 import { productName } from '@addendum/shared';
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ChevronDown, Download, FileText, Save } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Download, FileText, Save, SlidersHorizontal } from 'lucide-react';
 import { api } from '../../api/client';
 import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, cx, useToast } from '../ui';
 import { ProductSettingsButton } from './ProductSettings';
@@ -17,7 +17,10 @@ interface Row {
 interface ListResponse {
   plan: Plan; items: Row[]; groups: string[]; urgentKtips: string[];
   saved: { plan: Plan; lines: { key: string; include: boolean; qty: number }[]; savedBy: string | null; savedAt: string } | null;
+  amounts: Amounts;
 }
+/** Order amounts per section ("Tapes") or section and length ("Redefined Wefts 24\""): always this many, at least this many. */
+type Amounts = Record<string, { fixed: number | null; min: number | null }>;
 interface Review {
   problems: { key: string; label: string; message: string; suggest: number }[];
   suppliers: { supplier: string; units: number; estCents: number | null; estPartialCents: number; warnings: string[]; lines: { key: string; label: string; sku: string | null; qty: number; costCents: number | null; leadDays: number }[] }[];
@@ -61,9 +64,10 @@ export function ReorderList({ onOrders }: { onOrders: () => void }) {
     setLoadedSaved(true);
     setPlan(data.saved.plan);
     setInclude(Object.fromEntries(data.saved.lines.map((l) => [l.key, l.include])));
-    setQty(Object.fromEntries(data.saved.lines.map((l) => [l.key, l.qty])));
+    setQty(Object.fromEntries(data.saved.lines.filter((l) => l.qty > 0).map((l) => [l.key, l.qty]))); // 0s start at the amount shown
   }, [data?.saved, loadedSaved]);
   const [review, setReview] = useState<Review | null>(null);
+  const [editAmounts, setEditAmounts] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
   const items = data?.items ?? [];
@@ -106,12 +110,14 @@ export function ReorderList({ onOrders }: { onOrders: () => void }) {
         </Field>
         <span className="pb-2 text-[13px] text-stone"><b className="num font-medium text-ink">{all.length}</b> to order{estimate > 0 && <> · about <b className="num font-medium text-ink">{money(estimate)}</b></>}</span>
         <span className="ml-auto flex flex-wrap gap-2">
+          <Button icon={<SlidersHorizontal className="h-4 w-4" />} onClick={() => setEditAmounts(true)} disabled={!data}>Order amounts</Button>
           <Button icon={<Save className="h-4 w-4" />} onClick={save} disabled={!items.length}>Save List</Button>
           <Button icon={<Download className="h-4 w-4" />} onClick={exportCsv} disabled={!all.length}>Export</Button>
           <Button variant="primary" icon={<FileText className="h-4 w-4" />} loading={busy === 'all'} onClick={() => openReview(items, 'all')} disabled={!all.length}>Create order</Button>
         </span>
       </div>
 
+      {editAmounts && data && <AmountsModal amounts={data.amounts} items={items} onClose={() => setEditAmounts(false)} onSaved={() => { setEditAmounts(false); setQty({}); void qc.invalidateQueries({ queryKey: ['reorder-list'] }); }} />}
       {urgentK.length > 0 && (
         <p className="mb-4 flex items-start gap-2 rounded-xl2 border border-rose/30 bg-rose/5 px-4 py-3 text-[14px] text-ink">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose" />
@@ -235,6 +241,52 @@ function ReviewModal({ plan, review, onFix, onExclude, onClose, onDone }: {
         </div>
       ))}
       <p className="text-[12px] text-stone">Creates draft purchase orders (one per supplier). Nothing is sent to a supplier.</p>
+    </Modal>
+  );
+}
+
+/** Order amounts: for a section (all lengths) or one length of it — always order this many, or at least this many. */
+function AmountsModal({ amounts, items, onClose, onSaved }: { amounts: Amounts; items: Row[]; onClose: () => void; onSaved: () => void }) {
+  const toast = useToast();
+  const [draft, setDraft] = useState<Record<string, { fixed: string; min: string }>>(() =>
+    Object.fromEntries(Object.entries(amounts).map(([k, r]) => [k, { fixed: r.fixed ? String(r.fixed) : '', min: r.min ? String(r.min) : '' }])));
+  const [busy, setBusy] = useState(false);
+  // Each section on the list, then each of its lengths (plus any saved rule for one that isn't on the list today).
+  const sections = [...new Set(items.map((r) => r.group))];
+  const keys = sections.flatMap((g) => [g, ...[...new Set(items.filter((r) => r.group === g && r.length).map((r) => `${g} ${r.length!.replace(/[”″]/g, '"')}`))]
+    .sort((a, b) => Number.parseInt(a.slice(g.length), 10) - Number.parseInt(b.slice(g.length), 10))]);
+  for (const k of Object.keys(amounts)) if (!keys.includes(k)) keys.push(k);
+  const val = (k: string, f: 'fixed' | 'min') => draft[k]?.[f] ?? '';
+  const set = (k: string, f: 'fixed' | 'min', v: string) => setDraft((d) => ({ ...d, [k]: { ...(d[k] ?? { fixed: '', min: '' }), [f]: v.replace(/\D/g, '') } }));
+  const save = async () => {
+    setBusy(true);
+    try {
+      const rules = Object.fromEntries(Object.entries(draft).map(([k, r]) => [k, { fixed: Number(r.fixed) || null, min: Number(r.min) || null }]));
+      await api.put('/inventory-sync/reorder-list/amounts', { rules });
+      toast('Order amounts saved');
+      onSaved();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal open onClose={onClose} title="Order amounts" footer={<><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" loading={busy} onClick={save}>Save</Button></>}>
+      <p className="mb-3 text-[13px] text-stone"><b className="font-medium text-ink-soft">Always</b> orders exactly that many. <b className="font-medium text-ink-soft">At least</b> is the minimum order. A length’s amounts win over its section’s. Anything else rounds up to the next 5 (or full cases).</p>
+      <div className="divide-y divide-line rounded-xl2 border border-line">
+        <div className="flex items-center gap-2 bg-mist px-3 py-1.5 text-[11px] uppercase tracking-wide text-stone"><span className="flex-1">Section</span><span className="w-20 text-center">Always</span><span className="w-20 text-center">At least</span></div>
+        {keys.map((k) => {
+          const section = sections.find((g) => k === g);
+          return (
+            <div key={k} className="flex items-center gap-2 px-3 py-1.5">
+              <span className={cx('min-w-0 flex-1 text-[14px]', section ? 'font-medium text-ink' : 'pl-3 text-ink-soft')}>{section ? `${k} (all lengths)` : k}</span>
+              <input inputMode="numeric" className="field num h-9 w-20 text-center" placeholder="—" value={val(k, 'fixed')} onChange={(e) => set(k, 'fixed', e.target.value)} aria-label={`Always order for ${k}`} />
+              <input inputMode="numeric" className="field num h-9 w-20 text-center" placeholder="—" value={val(k, 'min')} onChange={(e) => set(k, 'min', e.target.value)} aria-label={`Minimum order for ${k}`} />
+            </div>
+          );
+        })}
+      </div>
     </Modal>
   );
 }

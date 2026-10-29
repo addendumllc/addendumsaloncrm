@@ -1,4 +1,4 @@
-import { createReorderPOs, PLANS, productPrefs, reorderList, reviewOrder, saveList, savePrefs, savedList } from '../domain/reorderList.js';
+import { amountRules, createReorderPOs, PLANS, saveAmountRules, productPrefs, reorderList, reviewOrder, saveList, savePrefs, savedList } from '../domain/reorderList.js';
 import { Router, type Request } from 'express';
 import { can } from '../auth/permissions.js';
 import { z } from 'zod';
@@ -477,7 +477,7 @@ const plan = z.enum(PLANS as [string, ...string[]]).catch('normal') as unknown a
 const reorderLines = z.array(z.object({ key: z.string().min(1).max(200), qty: z.number().int().min(0).max(1_000_000) })).max(1000);
 inventorySyncRouter.get('/reorder-list', ah(async (req, res) => {
   const q = req.query as Record<string, string | undefined>;
-  res.json({ ...(await reorderList(parse(plan, q.plan), { type: (['weft', 'ktip', 'tape', 'clipin'] as const).find((t) => t === q.type), group: q.group || undefined, collection: q.collection || undefined, supplier: q.supplier || undefined })), saved: await savedList() });
+  res.json({ ...(await reorderList(parse(plan, q.plan), { type: (['weft', 'ktip', 'tape', 'clipin'] as const).find((t) => t === q.type), group: q.group || undefined, collection: q.collection || undefined, supplier: q.supplier || undefined })), saved: await savedList(), amounts: await amountRules() });
 }));
 inventorySyncRouter.put('/reorder-list/saved', ah(async (req, res) => {
   const b = parse(z.object({ plan, lines: z.array(z.object({ key: z.string().min(1).max(200), include: z.boolean(), qty: z.number().int().min(0).max(1_000_000) })).max(2000) }), req.body);
@@ -491,6 +491,14 @@ inventorySyncRouter.put('/reorder-list/prefs', ah(async (req, res) => {
   await savePrefs(b.key, b, req.user!.id);
   await logAction(req, 'stock.reorder_prefs', 'stock', null, { product: b.key, typicalQty: b.typicalQty, preferredPlan: b.preferredPlan, safetyUnits: b.safetyUnits });
   res.json({ ok: true });
+}));
+// Order amounts: always this many and/or at least this many, per section or section and length.
+inventorySyncRouter.put('/reorder-list/amounts', ah(async (req, res) => {
+  const n = z.number().int().min(1).max(100_000).nullable();
+  const b = parse(z.object({ rules: z.record(z.string().trim().min(1).max(80), z.object({ fixed: n, min: n })) }), req.body);
+  const rules = await saveAmountRules(b.rules);
+  await logAction(req, 'stock.reorder_amounts', 'stock', null, { rules });
+  res.json({ rules });
 }));
 inventorySyncRouter.post('/reorder-list/review', ah(async (req, res) => {
   const b = parse(z.object({ plan, lines: reorderLines }), req.body);

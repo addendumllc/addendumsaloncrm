@@ -109,6 +109,25 @@ async function orderHistory(keys: string[]) {
   return m;
 }
 
+// ---------------- order amounts (Lisa's rules per section) ----------------
+/** Per section ("Tapes") or section and length ("Redefined Wefts 24\""): always this many, and/or at least this many. */
+export type AmountRules = Record<string, { fixed: number | null; min: number | null }>;
+export const DEFAULT_AMOUNTS: AmountRules = { Tapes: { fixed: 17, min: null }, 'K-Tips': { fixed: 40, min: null }, 'Redefined Wefts 24"': { fixed: null, min: 20 } };
+/** Amounts above the minimum round up to the next 5 (no odd amounts like 13 or 22), unless the product has a case size. */
+export const ROUND_TO = 5;
+const AMOUNTS_KEY = 'reorder.list.amounts';
+export const amountRules = async () => (await getKV<AmountRules>(AMOUNTS_KEY)) ?? DEFAULT_AMOUNTS;
+export async function saveAmountRules(rules: AmountRules) {
+  const clean = Object.fromEntries(Object.entries(rules).filter(([, r]) => r.fixed || r.min));
+  await setKV(AMOUNTS_KEY, clean);
+  return clean;
+}
+/** The rule for a product: its section and length's, over its section's. */
+const ruleOf = (rules: AmountRules, group: string, length: string | null) => {
+  const all = rules[group]; const one = length ? rules[`${group} ${length}`] : undefined;
+  return { fixed: one?.fixed ?? all?.fixed ?? null, min: one?.min ?? all?.min ?? null };
+};
+
 export async function reorderList(plan: Plan, opts: { type?: HairType; group?: string; collection?: string; supplier?: string } = {}) {
   const f = await stockForecast();
   const today = new Date().toISOString().slice(0, 10);
@@ -116,6 +135,7 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; group?: s
   // Addendum Hair = the online store (Shopify); wefts and K-tips only; not discontinued or skipped.
   const hair = f.items.filter((i) => i.stores.online && hairTypeOf(i) && i.status !== 'discontinued' && !i.skippedUntil);
   const prefs = await allPrefs();
+  const rules = await amountRules();
   const rows: ReorderRow[] = [];
   const needs = hair.filter((i) => {
     const owed = Math.max(0, i.preorders - i.incoming);
@@ -125,6 +145,13 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; group?: s
   const history = await orderHistory(needs.map((i) => i.key));
   for (const i of needs) {
     const type = hairTypeOf(i)!;
+    const group = groupOf(i.label, type);
+    const length = hairLengthOf(i.label, i.sku)?.replace(/[”″]/g, '"') ?? null;
+    const rule = ruleOf(rules, group, length);
+    // The section's minimum (or its fixed amount) over the product's own; rounding to 5 when there's no case size.
+    const moq = rule.fixed ?? rule.min ?? i.moq;
+    const step = i.caseSize && i.caseSize > 1 ? i.caseSize : ROUND_TO;
+    const round = (need: number) => (need > 0 ? applyRules(need, moq, step).qty : 0);
     const p = prefs.get(i.key) ?? { typicalQty: null, preferredPlan: null, safetyUnits: null, notes: null, updatedAt: null };
     const rate = i.ratePerDay;
     const committed = i.preorders;
@@ -134,7 +161,7 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; group?: s
     const flags: string[] = [];
     if (rate <= 0) flags.push('No sales in the last 90 days — the forecast is a guess');
     if (i.leadSource.kind === 'missing') flags.push(`No lead time recorded — using the ${lead}-day default`);
-    const moqMissing = i.moq == null;
+    const moqMissing = moq == null;
     if (moqMissing) flags.push('No minimum order recorded');
     const hist = history.get(i.key) ?? [];
 
@@ -162,7 +189,15 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; group?: s
     }
     // Normal orders are the usual amount; coverage plans subtract what's here and on order.
     const net = own === 'normal' && (p.typicalQty || hist.length) ? calculated : Math.max(0, calculated - (own === 'normal' ? 0 : i.stock + i.incoming));
-    const { qty, steps } = applyRules(net, i.moq, i.caseSize);
+    const ruled = applyRules(net, moq, step);
+    // No case size: "Case size 5" is the rounding to 5s.
+    const steps = ruled.steps.map((x) => (!(i.caseSize && i.caseSize > 1) && x === `Case size ${ROUND_TO}` ? `Rounded to ${ROUND_TO}s` : x));
+    const forecastNeed = Math.max(0, Math.ceil(rate * (lead + 30) + safety + owed - i.stock - i.incoming));
+    // A fixed amount is always that; otherwise the plan's amount, else the suggestion, else the minimum (never a blank 0).
+    const forecastQty = rule.fixed ?? round(forecastNeed);
+    const qty = rule.fixed ?? (ruled.qty || forecastQty || moq || ROUND_TO);
+    if (rule.fixed) steps.push(`Always ${rule.fixed} for ${group}${rules[`${group} ${length}`]?.fixed ? ` ${length}` : ''}`);
+    else if (!ruled.qty) steps.push(forecastQty ? 'The suggested amount' : moq ? `The minimum order (${moq})` : `At least ${ROUND_TO}`);
     const parts = [`Need ${calculated}`];
     if (own !== 'normal' && (i.stock > 0 || i.incoming > 0)) {
       if (i.stock > 0) parts.push(`Available ${i.stock}`);
@@ -170,9 +205,6 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; group?: s
       parts.push(`Net need ${net}`);
     }
     parts.push(...steps, `Order ${qty}`);
-
-    const forecastNeed = Math.max(0, Math.ceil(rate * (lead + 30) + safety + owed - i.stock - i.incoming));
-    const forecastQty = forecastNeed > 0 ? applyRules(forecastNeed, i.moq, i.caseSize).qty : 0;
 
     const stockoutOn = days == null ? null : addDays(today, Math.floor(days));
     const coveredDays = rate > 0 ? (i.stock + i.incoming) / rate : null;
@@ -191,11 +223,11 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; group?: s
     if (!out && !beforeArrival && i.incoming > 0 && qty === 0) why.push('Covered by what’s already on order.');
     if (own === 'normal' && i.incoming > 0 && qty > 0) why.push(`${i.incoming} already on order — lower the amount if that covers it.`);
     rows.push({
-      key: i.key, label: i.label, shade: shadeOf(i.label), group: groupOf(i.label, type), sku: i.sku, length: hairLengthOf(i.label, i.sku), type, supplier: i.supplier ?? fallback, collection: i.collection ?? i.collections[0] ?? null,
+      key: i.key, label: i.label, shade: shadeOf(i.label), group, sku: i.sku, length, type, supplier: i.supplier ?? fallback, collection: i.collection ?? i.collections[0] ?? null,
       available: i.stock, committed, incoming: i.incoming, ratePerDay: rate, units30: i.units30, noSales: rate <= 0,
       daysUntilStockout: days == null ? null : Math.round(days), stockoutOn, productionDays: i.productionDays, shippingDays: i.shippingDays, leadDays: lead, leadMissing: i.leadSource.kind === 'missing',
-      moq: i.moq, moqMissing, caseSize: i.caseSize, costCents: i.costCents,
-      plan: own, planNote, calculatedNeed: calculated, netNeed: net, suggestedQty: qty, forecastQty, minimumQty: i.moq, explain: parts.join(' · '), why,
+      moq, moqMissing, caseSize: rule.fixed ? null : i.caseSize, costCents: i.costCents,
+      plan: own, planNote, calculatedNeed: calculated, netNeed: net, suggestedQty: qty, forecastQty, minimumQty: moq, explain: parts.join(' · '), why,
       tier, urgent: tier <= 2, badges, warning, flags, prefs: p, history: hist,
     });
   }

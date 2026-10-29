@@ -9,7 +9,7 @@ vi.mock('../src/domain/stock.js', async (orig) => {
   const m: any = await orig();
   return { ...m, stockForecast: async () => (fake ? { items: fake, settings: {}, salesFrom: {} } : m.stockForecast()) };
 });
-const { applyRules, quantityProblem, reorderList } = await import('../src/domain/reorderList.js');
+const { applyRules, quantityProblem, reorderList, saveAmountRules, DEFAULT_AMOUNTS, ROUND_TO } = await import('../src/domain/reorderList.js');
 const { stockRows } = await import('../src/domain/stock.js');
 
 let api: Awaited<ReturnType<typeof setup>>['api'];
@@ -83,7 +83,33 @@ describe('Reorder List', () => {
     expect(r.items.find((i) => i.label.includes('Ash'))!.flags).toContain('No minimum order recorded');
   });
 
+  it('order amounts: tapes always 17, K-Tips always 40, 24" Redefined at least 20; others round to 5s; no blank 0s', async () => {
+    expect(DEFAULT_AMOUNTS).toMatchObject({ Tapes: { fixed: 17 }, 'K-Tips': { fixed: 40 }, 'Redefined Wefts 24"': { min: 20 } });
+    const saved = fake;
+    fake = [
+      item(K[0], { label: '22" Tape-Ins · Honey', stock: 0, ratePerDay: 2 }),
+      item(K[1], { label: 'K-Tip Extensions · 18" Black', stock: 1, ratePerDay: 0.1 }),
+      item(K[2], { label: '24" Redefined Weft · Aperol', stock: 1, ratePerDay: 0.05 }),
+      item(K[3], { label: '18" Redefined Weft · Honey', stock: 0, ratePerDay: 0.43 }),
+      item(K[4], { label: '18" Redefined Weft · Covered', stock: 2, incoming: 400, ratePerDay: 0.01, moq: 10 }),
+    ];
+    const r = await reorderList('normal');
+    const q = (label: string) => r.items.find((i) => i.label.includes(label))!;
+    expect([q('Tape-Ins').suggestedQty, q('Tape-Ins').forecastQty]).toEqual([17, 17]);
+    expect([q('K-Tip').suggestedQty, q('K-Tip').forecastQty]).toEqual([40, 40]);
+    expect(q('24"').suggestedQty).toBeGreaterThanOrEqual(20);
+    expect(q('24"').moq).toBe(20);
+    for (const i of r.items.filter((x) => !['tape', 'ktip'].includes(x.type))) {
+      expect(i.suggestedQty % ROUND_TO).toBe(0);
+      expect(i.forecastQty % ROUND_TO).toBe(0);
+      expect(i.suggestedQty).toBeGreaterThan(0); // never a blank 0 — at least the minimum
+    }
+    expect(q('Covered').suggestedQty).toBe(10); // covered by what's on order → the minimum
+    fake = saved;
+  });
+
   it('each plan recalculates: coverage subtracts stock and incoming, then MOQ and cases', async () => {
+    await saveAmountRules({});
     const at = async (plan: any, label: string) => (await reorderList(plan)).items.find((i) => i.label.includes(label))!;
     // 30 days × 0.5 = 15 → MOQ 12 doesn't change it.
     expect((await at('30', 'Aperol')).suggestedQty).toBe(15);
@@ -93,11 +119,12 @@ describe('Reorder List', () => {
     const b30 = await at('30', 'Black');
     expect([b30.suggestedQty, b30.explain]).toEqual([10, 'Need 6 · Case size 10 · Order 10']);
     expect((await at('90', 'Black')).suggestedQty).toBe(20);
-    // Honey: 30 days = 30, minus 8 available = 22.
-    expect((await at('30', 'Honey')).explain).toBe('Need 30 · Available 8 · Net need 22 · Order 22');
-    // Covered by incoming: 15 − 2 − 40 → 0, flagged as incoming.
+    // Honey: 30 days = 30, minus 8 available = 22 → rounded up to 25 (no odd amounts).
+    expect((await at('30', 'Honey')).explain).toBe('Need 30 · Available 8 · Net need 22 · Rounded to 5s · Order 25');
+    // Covered by incoming: 15 − 2 − 40 → 0, flagged as incoming; the box still starts at the smallest order (no blank 0).
     const cov = await at('30', 'Covered');
-    expect(cov.suggestedQty).toBe(0);
+    expect(cov.netNeed).toBe(0);
+    expect(cov.suggestedQty).toBe(5);
     expect(cov.badges).toContain('INCOMING STOCK');
     // Pre-orders owed are added on top.
     expect((await at('30', 'Pre-ordered')).calculatedNeed).toBe(9 + 3);
@@ -118,7 +145,7 @@ describe('Reorder List', () => {
     expect((await reorderList('normal')).items.find((i) => i.label.includes('Honey'))!.suggestedQty).toBe(25);
     await api.put('/api/inventory-sync/reorder-list/prefs', { key: K[0], typicalQty: null, preferredPlan: '60', safetyUnits: 2, notes: null });
     const ap = (await reorderList('normal')).items.find((i) => i.label.includes('Aperol'))!;
-    expect([ap.plan, ap.suggestedQty]).toEqual(['60', 32]); // 30 + 2 safety
+    expect([ap.plan, ap.suggestedQty]).toEqual(['60', 35]); // 30 + 2 safety = 32 → 35
   });
 
   it('reviews before ordering, then creates one draft purchase order per supplier (only valid lines; nothing sent)', async () => {
@@ -145,6 +172,15 @@ describe('Reorder List', () => {
     const fixed = await api.post('/api/inventory-sync/reorder-list/purchase-orders', { plan: '30', lines: [{ key: K[0], qty: 12 }, { key: K[5], qty: 20 }] });
     expect(fixed.body.orders.map((o: any) => o.supplier).sort()).toEqual(['Hair Co', 'Tip Co']);
     expect(fixed.body.orders.every((o: any) => o.status === 'draft')).toBe(true);
+  });
+
+  it('order amounts can be changed (and are kept), and the list uses them', async () => {
+    const res = await api.put('/api/inventory-sync/reorder-list/amounts', { rules: { 'K-Tips': { fixed: 30, min: null }, 'Redefined Wefts 18"': { fixed: null, min: null } } });
+    expect(res.status).toBe(200);
+    expect(res.body.rules).toEqual({ 'K-Tips': { fixed: 30, min: null } }); // empty ones dropped
+    expect((await api.get('/api/inventory-sync/reorder-list?plan=normal')).body.amounts).toEqual({ 'K-Tips': { fixed: 30, min: null } });
+    expect((await reorderList('normal')).items.filter((i) => i.type === 'ktip').every((i) => i.suggestedQty === 30)).toBe(true);
+    await saveAmountRules({});
   });
 
   it('saves the list to come back to', async () => {
