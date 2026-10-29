@@ -30,7 +30,7 @@ export const SUB_NAV: Record<string, SubNav> = {
       // Count low stock: everything at 10 or less, to check the numbers (where the "please count" alert opens).
       { to: '/inventory-sync?view=count', label: 'Stock count' },
       { to: '/inventory-sync?view=reorder', label: 'To order', also: ['/inventory-sync?view=toorder', '/inventory-sync?view=preorders'] },
-      { to: '/inventory-sync?view=reorder-list', label: 'Reorder List' },
+      { to: '/inventory-sync?view=reorder-list', label: 'Easy Reorder List' },
       { to: '/inventory-sync?view=orders', label: 'Purchase orders' },
       { to: '/inventory-sync?view=products', label: 'Products', also: ['/inventory-sync?view=items'] },
       { to: '/inventory-sync?view=pricing', label: 'Pricing' },

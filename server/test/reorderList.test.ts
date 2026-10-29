@@ -171,7 +171,7 @@ describe('Reorder List', () => {
     const made = await api.post('/api/inventory-sync/reorder-list/purchase-orders', { plan: '30', lines });
     expect(made.status).toBe(201);
     expect(made.body.orders).toHaveLength(1);
-    expect(made.body.orders[0]).toMatchObject({ supplier: 'Hair Co', status: 'draft', store: 'shopify', name: 'Reorder List · 30-day coverage' });
+    expect(made.body.orders[0]).toMatchObject({ supplier: 'Hair Co', status: 'draft', store: 'shopify', name: 'Easy Reorder List · 30-day coverage' });
     expect(made.body.orders[0].lines.map((l: any) => [l.productKey, l.quantity])).toEqual([[K[2], 22]]);
     expect(made.body.skipped).toHaveLength(2);
     // Fixed quantities: both suppliers get their own draft.

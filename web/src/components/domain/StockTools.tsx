@@ -2112,7 +2112,7 @@ function SupplierModal({ supplier, onClose, onSaved }: { supplier: SupplierDTO |
         <Field label="Usual lead time (days)" hint={untracked ? 'Not tracked for this supplier.' : 'Given to its products that don’t have their own.'}><input className="field num" inputMode="numeric" disabled={untracked} {...f('lead')} /></Field>
         <Field label="Shipping (days)" hint={untracked ? 'Not tracked for this supplier.' : 'Days in transit, added to the lead time.'}><input className="field num" inputMode="numeric" disabled={untracked} {...f('shipping')} /></Field>
         <Field label="Default MOQ" hint="Minimum order for its products that don’t have their own."><input className="field num" inputMode="numeric" {...f('moq')} /></Field>
-        <Field label="Minimum units per order" hint="The whole purchase order (Reorder List checks it). Blank = none."><input className="field num" inputMode="numeric" {...f('minUnits')} /></Field>
+        <Field label="Minimum units per order" hint="The whole purchase order (Easy Reorder List checks it). Blank = none."><input className="field num" inputMode="numeric" {...f('minUnits')} /></Field>
         <Field label="Minimum order value ($)" hint="The whole purchase order. Blank = none."><input className="field num" inputMode="decimal" {...f('minValue')} /></Field>
         <div className="sm:col-span-2"><Toggle checked={untracked} onChange={setUntracked} label="Lead time not tracked"
           description="For suppliers you buy from as needed: To order times reorders on safety stock alone (no lead time), and its orders get no expected date." /></div>

@@ -85,7 +85,7 @@ function Form({ p, prefs, onClose }: { p: StockProductDTO; prefs: PrefsResponse;
         <p className={g}>Usual order</p>
         <p className="mb-2 text-[13px] text-stone">{prefs.history.length ? <>Past orders: {prefs.history.map((h) => `${h.quantity} (#${h.number}, ${h.orderedOn})`).join(', ')}.</> : 'No past orders of this product yet.'}</p>
         <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Order each time" hint={usual ? `Blank = ${usual} from past orders` : 'Reorder List: the amount every time'}><input className="field num" inputMode="numeric" placeholder={str(usual)} {...f('typical')} /></Field>
+          <Field label="Order each time" hint={usual ? `Blank = ${usual} from past orders` : 'Easy Reorder List: the amount every time'}><input className="field num" inputMode="numeric" placeholder={str(usual)} {...f('typical')} /></Field>
           <Field label="Preferred plan" hint="Used under Normal Order">
             <select className="field" value={d.plan} onChange={(e) => setD({ ...d, plan: e.target.value })}><option value="">Typical quantity</option><option value="30">30-day coverage</option><option value="60">60-day coverage</option><option value="90">90-day coverage</option></select>
           </Field>

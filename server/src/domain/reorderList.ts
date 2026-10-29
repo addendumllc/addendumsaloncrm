@@ -296,7 +296,7 @@ export async function reviewOrder(plan: Plan, lines: ReviewLine[]) {
   const groups = new Map<string, { supplier: string; lines: { key: string; label: string; sku: string | null; qty: number; costCents: number | null; leadDays: number }[] }>();
   for (const l of lines.filter((x) => x.qty > 0)) {
     const i = byKey.get(l.key);
-    if (!i) { problems.push({ key: l.key, label: l.key, message: 'No longer on the Reorder List (refresh)', suggest: 0 }); continue; }
+    if (!i) { problems.push({ key: l.key, label: l.key, message: 'No longer on the Easy Reorder List (refresh)', suggest: 0 }); continue; }
     const p = quantityProblem(l.qty, i.moq, i.caseSize);
     if (p) problems.push({ key: i.key, label: i.label, ...p });
     const s = i.supplier ?? 'Supplier needed';
@@ -327,6 +327,6 @@ export async function createReorderPOs(plan: Plan, lines: ReviewLine[], staffId:
   const label = plan === 'normal' ? 'Normal order' : `${plan}-day coverage`;
   // One draft per supplier, as reviewed (Addendum Hair's store); ordering it is a separate, confirmed step.
   const orders = [];
-  for (const g of groups) orders.push(...await createPurchaseOrders(g.lines.map((l) => ({ productKey: l.key, quantity: l.qty })), staffId, g.supplier, 'shopify', undefined, `Reorder List · ${label}`));
+  for (const g of groups) orders.push(...await createPurchaseOrders(g.lines.map((l) => ({ productKey: l.key, quantity: l.qty })), staffId, g.supplier, 'shopify', undefined, `Easy Reorder List · ${label}`));
   return { orders, skipped: r.problems };
 }
