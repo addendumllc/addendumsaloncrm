@@ -33,7 +33,7 @@ export function PayrollTimesheet() {
     queryKey: ['timesheet', week],
     queryFn: () => api.get<{ rows: TimesheetRowDTO[] }>(`/commission/timesheet?from=${week}&to=${to}`).then((r) => r.rows),
   });
-  const [onlyHourly, setOnlyHourly] = useState(true);
+  const [onlyHourly, setOnlyHourly] = useState(false); // everyone, so commission-only hours show too
   // Person tabs: work through one person at a time (null = everyone).
   const [person, setPerson] = useState<string | null>(null);
   // Editing a day by its times (clock in/out, lunch): that day's shift, or a new one. Owners/Admins; saved to Square.

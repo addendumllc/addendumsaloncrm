@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { CommissionSettings, PayRateDTO, PaySummaryDTO, SalaryPeriod, StaffHoursDTO, StaffPayDTO, StaffTaxDTO } from '@addendum/shared';
+import type { CommissionSettings, HourlyMode, PayRateDTO, PaySummaryDTO, SalaryPeriod, StaffHoursDTO, StaffPayDTO, StaffTaxDTO } from '@addendum/shared';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { api } from '../../api/client';
 import { useCanDo } from '../../api/hooks';
@@ -146,9 +146,11 @@ export function WagesSection({ staffId, staffName, part }: { staffId: string; st
         description={d.tipEligible ? `Tips on ${first}’s work go to ${first}.` : `Tips on ${first}’s work go to Needs review on Team Payroll, to be credited by hand.`} />
       {/* Saved right away (not with Save pay). */}
       {(d.payType === 'hourly' || saved.rates.some((r) => r.payType === 'hourly')) && (
-        <Toggle checked={!saved.hourlyOff} disabled={!editable} label="Include hourly pay"
-          onChange={async (v) => { try { await api.put(`/commission/pay/${staffId}/hourly`, { include: v }); toast(v ? `${first}’s hourly pay is back in` : `${first}’s hourly pay is taken out`); reload(); } catch (e) { toast((e as Error).message, 'error'); } }}
-          description={saved.hourlyOff ? `Taken out — ${first}’s wage and hours stay saved; turn it on to add the hourly pay back.` : `${first}’s hours × their hourly rate count in pay and estimates. Turn off to take it out (e.g. commission only).`} />
+        <Field label="Hourly pay" hint={HOURLY_HINT[saved.hourlyMode ?? 'all'](first)}>
+          {editable ? <Segmented value={saved.hourlyMode ?? 'all'} options={[{ value: 'all', label: 'All hours' }, { value: 'not_servicing', label: 'Not with a client' }, { value: 'off', label: 'Off' }]}
+            onChange={async (mode) => { try { await api.put(`/commission/pay/${staffId}/hourly`, { mode }); toast(`${first}: ${HOURLY_TOAST[mode]}`); reload(); } catch (e) { toast((e as Error).message, 'error'); } }} />
+            : <p className="text-[14px] text-ink">{HOURLY_TOAST[saved.hourlyMode ?? 'all']}</p>}
+        </Field>
       )}
       <Toggle checked={saved.suggestForCommission !== false} disabled={!editable} label="Suggest for commission"
         onChange={async (v) => { try { await api.put(`/commission/pay/${staffId}/suggest`, { suggest: v }); toast(v ? `${first} can be suggested again` : `${first} won’t be suggested for commission`); reload(); } catch (e) { toast((e as Error).message, 'error'); } }}
@@ -277,6 +279,14 @@ function TaxFields({ t, editable, location, onChange }: { t: TaxDraft; editable:
     </div>
   );
 }
+
+/** Hourly pay choices: all hours worked, only hours not with a client (appointments are commission), or none. */
+const HOURLY_HINT: Record<HourlyMode, (first: string) => string> = {
+  all: (f) => `Every hour ${f} works is paid at the hourly rate.`,
+  not_servicing: (f) => `Hourly only for time ${f} isn’t with a client — their booked appointments (from the schedule) are paid as commission instead. Hours worked still show in full.`,
+  off: (f) => `Commission only — ${f}’s hours still show, and the wage stays saved for when it’s turned back on.`,
+};
+const HOURLY_TOAST: Record<HourlyMode, string> = { all: 'hourly for all hours', not_servicing: 'hourly only when not with a client', off: 'hourly pay off (commission only)' };
 
 /**
  * Match a paystub: the gross pay and the federal and state income tax from a real paycheck set this person's withholding

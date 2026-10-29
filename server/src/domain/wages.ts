@@ -46,7 +46,7 @@ async function listRates(staffId: string): Promise<PayRateDTO[]> {
 }
 
 const payDTO = async (r: any): Promise<StaffPayDTO> => ({
-  staffId: r.id, payType: r.pay_type, hourlyRateCents: r.hourly_rate_cents, salaryCents: r.salary_cents, salaryPeriod: r.salary_period, tipEligible: r.tip_eligible, suggestForCommission: r.commission_suggest !== false, hourlyOff: r.hourly_off === true,
+  staffId: r.id, payType: r.pay_type, hourlyRateCents: r.hourly_rate_cents, salaryCents: r.salary_cents, salaryPeriod: r.salary_period, tipEligible: r.tip_eligible, suggestForCommission: r.commission_suggest !== false, hourlyMode: r.hourly_mode ?? 'all',
   taxes: taxDTO(r), rates: await listRates(r.id),
 });
 
@@ -341,11 +341,36 @@ export async function taxDetails(staffIds: string[]): Promise<Map<string, StaffT
   return new Map(rows.map((r) => [r.id as string, taxDTO(r)]));
 }
 
+/** Minutes each person spent with clients per salon day: their kept appointments (not cancelled or no-shows), overlaps merged. */
+async function appointmentMinutesByDay(staffIds: string[], from: string, to: string) {
+  const tz = (await getSettings()).business.timezone;
+  const rows = await db().query<{ staff_id: string; start_at: Date; end_at: Date }>(
+    `SELECT staff_id, start_at, end_at FROM appointments WHERE staff_id = ANY($1::uuid[]) AND square_status = 'ACCEPTED'
+      AND start_at < $3::date + 2 AND end_at > $2::date - 1 AND start_at < now() ORDER BY staff_id, start_at`, [staffIds, from, to]);
+  const out = new Map<string, Map<string, number>>();
+  // Rows are by person, then start: each one only counts the part after the person's previous appointment ended.
+  const endOf = new Map<string, number>();
+  for (const r of rows) {
+    const start = Math.max(new Date(r.start_at).getTime(), endOf.get(r.staff_id) ?? 0);
+    const end = Math.min(new Date(r.end_at).getTime(), Date.now());
+    endOf.set(r.staff_id, Math.max(end, endOf.get(r.staff_id) ?? 0));
+    if (end <= start) continue;
+    const day = localDate(new Date(start), tz);
+    if (day < from || day > to) continue;
+    const m = out.get(r.staff_id) ?? new Map<string, number>();
+    m.set(day, (m.get(day) ?? 0) + Math.round((end - start) / 60000));
+    out.set(r.staff_id, m);
+  }
+  return out;
+}
+
 /** Hours and wages for each of these people in [from, to]. */
 export async function paySummaries(staffIds: string[], from: string, to: string): Promise<Map<string, PaySummaryDTO>> {
   const out = new Map<string, PaySummaryDTO>();
   if (!staffIds.length) return out;
-  const staff = await db().query<any>('SELECT id, pay_type, hourly_off FROM staff WHERE id = ANY($1::uuid[])', [staffIds]);
+  const staff = await db().query<any>('SELECT id, pay_type, hourly_mode FROM staff WHERE id = ANY($1::uuid[])', [staffIds]);
+  // "Only when not with a client": each day's appointment time (overlaps counted once) comes off the hours paid hourly.
+  const servicing = staff.some((s) => s.hourly_mode === 'not_servicing') ? await appointmentMinutesByDay(staff.filter((s) => s.hourly_mode === 'not_servicing').map((s) => s.id), from, to) : new Map<string, Map<string, number>>();
   const rates = await db().query<any>(
     `SELECT staff_id, to_char(effective_from, 'YYYY-MM-DD') AS f, pay_type, hourly_rate_cents, salary_cents, salary_period FROM staff_pay_rates
       WHERE staff_id = ANY($1::uuid[]) ORDER BY effective_from`, [staffIds]);
@@ -358,6 +383,7 @@ export async function paySummaries(staffIds: string[], from: string, to: string)
     // Each wage covers its start date up to the day before the next one; only the part inside [from, to] counts.
     const own = rates.filter((r) => r.staff_id === s.id);
     let wagesCents = 0;
+    let servicingMinutes = 0;
     const parts: string[] = [];
     let payType: PayType = 'none';
     own.forEach((r, i) => {
@@ -366,12 +392,17 @@ export async function paySummaries(staffIds: string[], from: string, to: string)
       const segTo = end < to ? end : to;
       if (segFrom > segTo) return;
       payType = r.pay_type;
-      if (r.pay_type === 'hourly' && r.hourly_rate_cents != null && s.hourly_off) {
-        parts.push('Hourly pay turned off');
+      if (r.pay_type === 'hourly' && r.hourly_rate_cents != null && s.hourly_mode === 'off') {
+        parts.push('Hourly pay turned off (commission only)');
       } else if (r.pay_type === 'hourly' && r.hourly_rate_cents != null) {
-        const m = [...counted].filter(([d]) => d >= segFrom && d <= segTo).reduce((a, [, mins]) => a + mins, 0);
+        const days = [...counted].filter(([d]) => d >= segFrom && d <= segTo);
+        const appts = servicing.get(s.id);
+        // With clients: never more than the hours worked that day.
+        const withClients = appts ? days.reduce((a, [d, mins]) => a + Math.min(mins, appts.get(d) ?? 0), 0) : 0;
+        const m = days.reduce((a, [, mins]) => a + mins, 0) - withClients;
+        servicingMinutes += withClients;
         wagesCents += Math.round((m / 60) * r.hourly_rate_cents);
-        parts.push(`${(m / 60).toFixed(2)} hours × ${money(r.hourly_rate_cents)}/hour`);
+        parts.push(`${(m / 60).toFixed(2)} hours × ${money(r.hourly_rate_cents)}/hour${appts ? ` (${(withClients / 60).toFixed(2)} hours with clients paid as commission)` : ''}`);
       } else if (r.pay_type === 'salary' && r.salary_cents != null) {
         const n = days(segFrom, segTo);
         wagesCents += Math.round(((r.salary_cents * PERIODS_PER_YEAR[r.salary_period as SalaryPeriod]) / 365) * n);
@@ -379,7 +410,7 @@ export async function paySummaries(staffIds: string[], from: string, to: string)
       }
     });
     if (!own.length) payType = s.pay_type;
-    out.set(s.id, { payType, minutes: squareMinutes + manualMinutes, squareMinutes, manualMinutes, wagesCents, basis: parts.length ? parts.join(' + ') : 'No wage set.' });
+    out.set(s.id, { payType, minutes: squareMinutes + manualMinutes, squareMinutes, manualMinutes, wagesCents, servicingMinutes, basis: parts.length ? parts.join(' + ') : 'No wage set.' });
   }
   return out;
 }

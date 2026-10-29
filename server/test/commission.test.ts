@@ -499,13 +499,21 @@ describe('Wages, hours and tips', () => {
     expect(s.manualMinutes).toBe(150);
     expect(s.minutes).toBe(s.squareMinutes + 150);
     expect(s.wagesCents).toBe(Math.round((s.minutes / 60) * 2000));
-    // Hourly pay taken out (hours and wage stay saved), then added back.
-    const off = await admin.put(`/api/commission/pay/${jenId}/hourly`, { include: false });
+    // Hourly pay off (hours and wage stay saved), only when not with a client, then back to all hours.
+    const off = await admin.put(`/api/commission/pay/${jenId}/hourly`, { mode: 'off' });
     expect(off.status).toBe(200);
-    expect(off.body.pay).toMatchObject({ hourlyOff: true, payType: 'hourly', hourlyRateCents: 2000 });
+    expect(off.body.pay).toMatchObject({ hourlyMode: 'off', payType: 'hourly', hourlyRateCents: 2000 });
     const without = (await admin.get(`/api/commission/pay/${jenId}?${range}`)).body;
-    expect([without.summary.wagesCents, without.summary.minutes, without.summary.basis]).toEqual([0, s.minutes, 'Hourly pay turned off']);
-    expect((await admin.put(`/api/commission/pay/${jenId}/hourly`, { include: true })).body.pay.hourlyOff).toBe(false);
+    expect([without.summary.wagesCents, without.summary.minutes]).toEqual([0, s.minutes]); // hours still show
+    expect(without.summary.basis).toMatch(/turned off/);
+    // A 1-hour appointment that day is paid as commission, so it comes off the hourly pay (hours worked unchanged).
+    await db().query(`INSERT INTO appointments(square_booking_id, staff_id, start_at, end_at, square_status) VALUES ('hourly-test', $1, $2::date + time '19:00', $2::date + time '20:00', 'ACCEPTED')`, [jenId, daysAgo(10)]);
+    await admin.put(`/api/commission/pay/${jenId}/hourly`, { mode: 'not_servicing' });
+    const ns = (await admin.get(`/api/commission/pay/${jenId}?${range}`)).body.summary;
+    expect([ns.minutes, ns.servicingMinutes, ns.wagesCents]).toEqual([s.minutes, 60, s.wagesCents - 2000]);
+    expect(ns.basis).toMatch(/1\.00 hours with clients paid as commission/);
+    await db().query("DELETE FROM appointments WHERE square_booking_id = 'hourly-test'");
+    expect((await admin.put(`/api/commission/pay/${jenId}/hourly`, { mode: 'all' })).body.pay.hourlyMode).toBe('all');
     expect((await admin.get(`/api/commission/pay/${jenId}?${range}`)).body.summary.wagesCents).toBe(s.wagesCents);
 
     // Square timecards can't be deleted here; hand-entered hours can.

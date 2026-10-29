@@ -259,12 +259,12 @@ commissionRouter.put('/pay/:staffId', requirePermission('commission:manage'), ah
   res.json({ pay: await getPay(req.params.staffId) });
 }));
 
-/** Hourly pay left out for someone, or added back (their wage and hours stay saved). */
+/** Hourly pay: all hours, only hours not with a client (appointments paid as commission), or off. Wage and hours stay saved. */
 commissionRouter.put('/pay/:staffId/hourly', requirePermission('commission:manage'), ah(async (req, res) => {
-  const b = parse(z.object({ include: z.boolean() }), req.body);
-  const r = await db().query('UPDATE staff SET hourly_off = $2, updated_at = now() WHERE id = $1 RETURNING id', [req.params.staffId, !b.include]);
+  const b = parse(z.object({ mode: z.enum(['all', 'not_servicing', 'off']) }), req.body);
+  const r = await db().query('UPDATE staff SET hourly_mode = $2, updated_at = now() WHERE id = $1 RETURNING id', [req.params.staffId, b.mode]);
   if (!r.length) throw notFound('That team member');
-  await logAction(req, 'commission.hourly_update', 'staff', req.params.staffId, { include: b.include });
+  await logAction(req, 'commission.hourly_update', 'staff', req.params.staffId, { mode: b.mode });
   res.json({ pay: await getPay(req.params.staffId) });
 }));
 

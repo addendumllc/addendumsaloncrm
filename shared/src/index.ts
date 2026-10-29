@@ -960,12 +960,16 @@ export interface CommissionSummaryDTO {
 /** How someone is paid besides commission (Users & Permissions → Wages & tips). */
 export type PayType = 'none' | 'hourly' | 'salary';
 export type SalaryPeriod = 'week' | 'biweekly' | 'semimonthly' | 'month' | 'year';
+export type HourlyMode = 'all' | 'not_servicing' | 'off';
 export interface StaffPayDTO {
   staffId: string;
   /** False: never picked or suggested for commission when Square didn't record who checked out (credit them by choosing). */
   suggestForCommission?: boolean;
-  /** Hourly pay left out of their pay and estimates (the wage and hours stay saved). */
-  hourlyOff?: boolean;
+  /**
+   * Hourly pay: for all hours worked, only for hours not with a client (their appointments are paid as commission), or
+   * off (commission only). The wage and hours stay saved either way.
+   */
+  hourlyMode?: HourlyMode;
   payType: PayType;
   hourlyRateCents: number | null;
   /** Salary per salaryPeriod. */
@@ -1136,6 +1140,8 @@ export interface PaySummaryDTO {
   squareMinutes: number;
   manualMinutes: number;
   wagesCents: number;
+  /** Hours with clients (their appointments) left out of hourly pay ("Only when not with a client"). */
+  servicingMinutes?: number;
   /** How wagesCents was worked out, in plain words. */
   basis: string;
 }
