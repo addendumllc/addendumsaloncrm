@@ -259,6 +259,15 @@ commissionRouter.put('/pay/:staffId', requirePermission('commission:manage'), ah
   res.json({ pay: await getPay(req.params.staffId) });
 }));
 
+/** Hourly pay left out for someone, or added back (their wage and hours stay saved). */
+commissionRouter.put('/pay/:staffId/hourly', requirePermission('commission:manage'), ah(async (req, res) => {
+  const b = parse(z.object({ include: z.boolean() }), req.body);
+  const r = await db().query('UPDATE staff SET hourly_off = $2, updated_at = now() WHERE id = $1 RETURNING id', [req.params.staffId, !b.include]);
+  if (!r.length) throw notFound('That team member');
+  await logAction(req, 'commission.hourly_update', 'staff', req.params.staffId, { include: b.include });
+  res.json({ pay: await getPay(req.params.staffId) });
+}));
+
 /** Whether someone can be picked or suggested for commission when Square didn't record who checked out. */
 commissionRouter.put('/pay/:staffId/suggest', requirePermission('commission:manage'), ah(async (req, res) => {
   const b = parse(z.object({ suggest: z.boolean() }), req.body);

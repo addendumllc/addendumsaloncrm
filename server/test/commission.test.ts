@@ -499,6 +499,14 @@ describe('Wages, hours and tips', () => {
     expect(s.manualMinutes).toBe(150);
     expect(s.minutes).toBe(s.squareMinutes + 150);
     expect(s.wagesCents).toBe(Math.round((s.minutes / 60) * 2000));
+    // Hourly pay taken out (hours and wage stay saved), then added back.
+    const off = await admin.put(`/api/commission/pay/${jenId}/hourly`, { include: false });
+    expect(off.status).toBe(200);
+    expect(off.body.pay).toMatchObject({ hourlyOff: true, payType: 'hourly', hourlyRateCents: 2000 });
+    const without = (await admin.get(`/api/commission/pay/${jenId}?${range}`)).body;
+    expect([without.summary.wagesCents, without.summary.minutes, without.summary.basis]).toEqual([0, s.minutes, 'Hourly pay turned off']);
+    expect((await admin.put(`/api/commission/pay/${jenId}/hourly`, { include: true })).body.pay.hourlyOff).toBe(false);
+    expect((await admin.get(`/api/commission/pay/${jenId}?${range}`)).body.summary.wagesCents).toBe(s.wagesCents);
 
     // Square timecards can't be deleted here; hand-entered hours can.
     expect((await admin.del(`/api/commission/hours/${square.hours[0].id}`)).status).toBe(400);

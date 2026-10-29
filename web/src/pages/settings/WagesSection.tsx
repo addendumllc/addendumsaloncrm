@@ -145,6 +145,11 @@ export function WagesSection({ staffId, staffName, part }: { staffId: string; st
       <Toggle checked={d.tipEligible} disabled={!editable} onChange={(v) => setD({ ...d, tipEligible: v })} label="Tip eligible"
         description={d.tipEligible ? `Tips on ${first}’s work go to ${first}.` : `Tips on ${first}’s work go to Needs review on Team Payroll, to be credited by hand.`} />
       {/* Saved right away (not with Save pay). */}
+      {(d.payType === 'hourly' || saved.rates.some((r) => r.payType === 'hourly')) && (
+        <Toggle checked={!saved.hourlyOff} disabled={!editable} label="Include hourly pay"
+          onChange={async (v) => { try { await api.put(`/commission/pay/${staffId}/hourly`, { include: v }); toast(v ? `${first}’s hourly pay is back in` : `${first}’s hourly pay is taken out`); reload(); } catch (e) { toast((e as Error).message, 'error'); } }}
+          description={saved.hourlyOff ? `Taken out — ${first}’s wage and hours stay saved; turn it on to add the hourly pay back.` : `${first}’s hours × their hourly rate count in pay and estimates. Turn off to take it out (e.g. commission only).`} />
+      )}
       <Toggle checked={saved.suggestForCommission !== false} disabled={!editable} label="Suggest for commission"
         onChange={async (v) => { try { await api.put(`/commission/pay/${staffId}/suggest`, { suggest: v }); toast(v ? `${first} can be suggested again` : `${first} won’t be suggested for commission`); reload(); } catch (e) { toast((e as Error).message, 'error'); } }}
         description={saved.suggestForCommission !== false ? `When Square didn’t record who checked out, ${first} can be picked or suggested.` : `Never picked or suggested (e.g. not at the salon) — credit ${first} only by choosing them.`} />

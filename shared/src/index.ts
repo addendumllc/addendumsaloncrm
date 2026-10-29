@@ -964,6 +964,8 @@ export interface StaffPayDTO {
   staffId: string;
   /** False: never picked or suggested for commission when Square didn't record who checked out (credit them by choosing). */
   suggestForCommission?: boolean;
+  /** Hourly pay left out of their pay and estimates (the wage and hours stay saved). */
+  hourlyOff?: boolean;
   payType: PayType;
   hourlyRateCents: number | null;
   /** Salary per salaryPeriod. */

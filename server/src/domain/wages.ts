@@ -46,7 +46,7 @@ async function listRates(staffId: string): Promise<PayRateDTO[]> {
 }
 
 const payDTO = async (r: any): Promise<StaffPayDTO> => ({
-  staffId: r.id, payType: r.pay_type, hourlyRateCents: r.hourly_rate_cents, salaryCents: r.salary_cents, salaryPeriod: r.salary_period, tipEligible: r.tip_eligible, suggestForCommission: r.commission_suggest !== false,
+  staffId: r.id, payType: r.pay_type, hourlyRateCents: r.hourly_rate_cents, salaryCents: r.salary_cents, salaryPeriod: r.salary_period, tipEligible: r.tip_eligible, suggestForCommission: r.commission_suggest !== false, hourlyOff: r.hourly_off === true,
   taxes: taxDTO(r), rates: await listRates(r.id),
 });
 
@@ -345,7 +345,7 @@ export async function taxDetails(staffIds: string[]): Promise<Map<string, StaffT
 export async function paySummaries(staffIds: string[], from: string, to: string): Promise<Map<string, PaySummaryDTO>> {
   const out = new Map<string, PaySummaryDTO>();
   if (!staffIds.length) return out;
-  const staff = await db().query<any>('SELECT id, pay_type FROM staff WHERE id = ANY($1::uuid[])', [staffIds]);
+  const staff = await db().query<any>('SELECT id, pay_type, hourly_off FROM staff WHERE id = ANY($1::uuid[])', [staffIds]);
   const rates = await db().query<any>(
     `SELECT staff_id, to_char(effective_from, 'YYYY-MM-DD') AS f, pay_type, hourly_rate_cents, salary_cents, salary_period FROM staff_pay_rates
       WHERE staff_id = ANY($1::uuid[]) ORDER BY effective_from`, [staffIds]);
@@ -366,7 +366,9 @@ export async function paySummaries(staffIds: string[], from: string, to: string)
       const segTo = end < to ? end : to;
       if (segFrom > segTo) return;
       payType = r.pay_type;
-      if (r.pay_type === 'hourly' && r.hourly_rate_cents != null) {
+      if (r.pay_type === 'hourly' && r.hourly_rate_cents != null && s.hourly_off) {
+        parts.push('Hourly pay turned off');
+      } else if (r.pay_type === 'hourly' && r.hourly_rate_cents != null) {
         const m = [...counted].filter(([d]) => d >= segFrom && d <= segTo).reduce((a, [, mins]) => a + mins, 0);
         wagesCents += Math.round((m / 60) * r.hourly_rate_cents);
         parts.push(`${(m / 60).toFixed(2)} hours × ${money(r.hourly_rate_cents)}/hour`);
