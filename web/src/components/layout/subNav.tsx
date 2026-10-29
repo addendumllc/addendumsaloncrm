@@ -27,6 +27,8 @@ export const SUB_NAV: Record<string, SubNav> = {
     items: [
       // Inventory and stock counts in one: every product's stock, searchable, counted in place (and its Activity).
       { to: '/inventory-sync', label: 'Inventory', also: ['/inventory-sync?view=stock', '/inventory-sync?view=activity', '/inventory-sync?view=overview'] },
+      // Count low stock: everything at 10 or less, to check the numbers (where the "please count" alert opens).
+      { to: '/inventory-sync?view=count', label: 'Stock count' },
       { to: '/inventory-sync?view=reorder', label: 'To order', also: ['/inventory-sync?view=toorder', '/inventory-sync?view=preorders'] },
       { to: '/inventory-sync?view=reorder-list', label: 'Reorder List' },
       { to: '/inventory-sync?view=orders', label: 'Purchase orders' },

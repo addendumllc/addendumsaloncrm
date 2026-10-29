@@ -35,6 +35,7 @@ const ABOUT: Record<string, string> = {
   overview: 'Stock in the salon (Square) and online (Shopify), kept separate. Open a product for its details.',
   items: 'Each store’s products. All stores: pair products, set SKUs and types, and add products.',
   stock: 'Every product’s stock — search by product, SKU or collection, then count or adjust it. Every change is logged under Activity.',
+  count: 'Everything at 10 or less: count each one to make sure the number is right, or press Right if it already is.',
   pricing: 'Unit cost and each store’s price.',
   reorder: 'What needs ordering, from sales, lead times and what’s on order.',
   'reorder-list': 'Addendum Hair wefts and K-Tips that need ordering — wefts first, K-Tips second — with an amount for the plan you pick.',
@@ -65,8 +66,9 @@ export function InventorySyncPage() {
   const raw = params.get('view') ?? '';
   // Older links still land in the right place (?view=square / shopify / all / inventory = a store's products, etc.).
   const view = raw === 'stock' && params.get('part') === 'reorder' ? 'reorder'
+    : raw === 'stock' && params.get('low') === '1' ? 'count'
     : ({ all: 'items', square: 'items', shopify: 'items', inventory: 'items', 'orders-online': 'orders', preorders: 'reorder', toorder: 'reorder' } as Record<string, string>)[raw]
-    ?? (['overview', 'items', 'pricing', 'orders', 'stock', 'reorder', 'reorder-list', 'products', 'suppliers', 'activity', 'sync'].includes(raw) ? raw : 'stock');
+    ?? (['overview', 'items', 'pricing', 'orders', 'stock', 'count', 'reorder', 'reorder-list', 'products', 'suppliers', 'activity', 'sync'].includes(raw) ? raw : 'stock');
   // The page's own choice (?for=), else the business workspace they're in.
   const ws = useWorkspace();
   const forHair = raw === 'shopify' || raw === 'orders-online' || raw === 'preorders' || pageBusiness(params, 'for', ws.current?.id ?? 'salon') === 'hair';
@@ -114,7 +116,7 @@ export function InventorySyncPage() {
         actions={<>
           {view === 'items' || view === 'products'
             ? <Segmented size="sm" value={productsStore} onChange={setProductsStore} options={STORES} />
-            : ['overview', 'reorder', 'stock', 'pricing'].includes(view)
+            : ['overview', 'reorder', 'stock', 'count', 'pricing'].includes(view)
               ? <Segmented size="sm" value={storePick} onChange={pickStore} options={STORES} />
               : view === 'orders' && <Segmented size="sm" value={forHair ? 'hair' : 'salon'} onChange={(v) => setStore(v === 'hair')} options={STORES.slice(1)} />}
           <Menu align="right" trigger={(open) => <Button icon={<RefreshCw className={cx('h-4 w-4', data.running && 'animate-spin')} />} onClick={open}>More</Button>}
@@ -134,7 +136,8 @@ export function InventorySyncPage() {
       {view === 'pricing' && <PricingView store={storePick} />}
       {view === 'products' && <div className="mb-3 flex flex-wrap justify-end gap-2"><CollectionsButton products={productList?.products ?? []} /><AddLengthButton /><AddToSquareButton /></div>}
       {view === 'products' && <ProductsView setup />}
-      {view === 'stock' && <StockView key={`${params.get('q') ?? ''}-${params.get('low') ?? ''}`} store={storePick} initialQuery={params.get('q') ?? ''} initialLow={params.get('low') === '1'} />}
+      {view === 'stock' && <StockView key={params.get('q') ?? ''} store={storePick} initialQuery={params.get('q') ?? ''} />}
+      {view === 'count' && <StockView key="count" store={storePick} initialLow />}
       {view === 'reorder-list' && <ReorderList onOrders={() => setView('orders', { for: 'hair' })} />}
       {view === 'reorder' && <WaitingForStock store={storePick} />}
       {view === 'reorder' && <ReorderView key={storePick} store={storePick} initialFilter={params.get('show') === 'alerts' ? 'alerts' : params.get('show') === 'recount' ? 'recount' : 'reorder'} onOrders={() => setView('orders')} />}
