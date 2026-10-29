@@ -19,6 +19,8 @@ export function HoursWagesCard({ pay, taxes }: { pay: PaySummaryDTO; taxes?: Tax
         <p className="text-[12px] font-medium uppercase tracking-wide text-stone">Hours worked</p>
         <p className="num mt-1 font-display text-[28px] leading-none text-ink">{hrs(pay.minutes)}</p>
         <p className="mt-1 text-[12px] text-stone">{pay.minutes ? `${hrs(pay.squareMinutes)} from Square timecards${pay.manualMinutes ? ` · ${hrs(pay.manualMinutes)} added by payroll` : ''}` : 'No hours recorded for these dates yet.'}</p>
+        {/* Admins only (the server leaves it out for everyone else): time with clients, paid as commission. */}
+        {(pay.servicingMinutes ?? 0) > 0 && <p className="text-[12px] text-stone">{hrs(pay.servicingMinutes!)} with clients (commission) · {hrs(pay.minutes - pay.servicingMinutes!)} hourly</p>}
       </div>
       <div className="rounded-xl2 border border-line bg-white px-4 py-3">
         <p className="text-[12px] font-medium uppercase tracking-wide text-stone">Estimated wages</p>

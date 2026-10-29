@@ -112,7 +112,10 @@ commissionRouter.get('/me', requirePermission('commission:own'), requirePayUnloc
   const entries = await listEntries({ staffId: req.user!.id, ...r });
   // Their own hours, estimated wages and estimated taxes.
   const summary = summarize(entries, r.from, r.to, req.user!.id);
-  res.json({ summary, entries, squareLinked: !!me?.square_team_member_id, ...(await payAndTaxes(req.user!.id, r.from, r.to, summary)) });
+  const pt = await payAndTaxes(req.user!.id, r.from, r.to, summary);
+  // Hours with and without clients are for admins: people see their hours worked, not the split.
+  if (pt.pay && !can(req.user, 'commission:manage')) pt.pay = { ...pt.pay, servicingMinutes: undefined, basis: pt.pay.basis.replace(/ \([\d.]+ hours with clients paid as commission\)/g, '') };
+  res.json({ summary, entries, squareLinked: !!me?.square_team_member_id, ...pt });
 }));
 
 // New clients for My Commission: two counts, always for the signed-in person (no client names or details).

@@ -3,7 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, RefreshCw, CalendarDays } from 'lucide-react';
 import type { AppointmentDTO, AppointmentDisplayStatus } from '@addendum/shared';
 import { api } from '../api/client';
-import { useAppointments, useIntegrations, useMe, useRefreshAll, useStaff } from '../api/hooks';
+import { useAppointments, useCanDo, useIntegrations, useMe, useRefreshAll, useStaff } from '../api/hooks';
+import { ScheduleChanges } from '../components/domain/ScheduleChanges';
 import {
   addDaysKey, dateShort, dayKey, hourOfDay, labelOfKey, relative, startOfDayKey, time, weekdayOfKey,
 } from '../lib/format';
@@ -11,7 +12,7 @@ import { Button, EmptyState, ErrorNote, PageHeader, PageLoading, Segmented, cx, 
 import { APPT_STYLE } from '../components/domain/appointmentStyles';
 import { Tc } from '../lib/titleCase';
 
-type View = 'day' | 'week' | 'month' | 'list';
+type View = 'day' | 'week' | 'month' | 'list' | 'changes';
 const START_HOUR = 8;
 const END_HOUR = 20;
 const HOUR_PX = 64;
@@ -30,6 +31,7 @@ export function AppointmentsPage() {
   const refresh = useRefreshAll();
   const toast = useToast();
   const nav = useNavigate();
+  const canDo = useCanDo();
 
   const set = (patch: Record<string, string>) => {
     const p = new URLSearchParams(params);
@@ -88,8 +90,9 @@ export function AppointmentsPage() {
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <Segmented value={view} onChange={(v) => set({ view: v })} options={[{ value: 'day', label: 'Day' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'list', label: 'List' }]} />
-        {view !== 'list' ? (
+        <Segmented value={view} onChange={(v) => set({ view: v })} options={[{ value: 'day', label: 'Day' }, { value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'list', label: 'List' },
+          ...(canDo('appointments:changes') ? [{ value: 'changes' as const, label: 'Changes' }] : [])]} />
+        {view === 'changes' ? null : view !== 'list' ? (
           <div className="flex items-center gap-1">
             <Button size="sm" variant="ghost" onClick={() => step(-1)} aria-label="Previous" icon={<ChevronLeft className="h-4 w-4" />} />
             <Button size="sm" variant="secondary" onClick={() => set({ date: '' })}>Today</Button>
@@ -101,19 +104,20 @@ export function AppointmentsPage() {
             <option value="today">Today</option><option value="tomorrow">Tomorrow</option><option value="upcoming">Upcoming (90 days)</option><option value="past">Past (90 days)</option>
           </select>
         )}
-        <div className="ml-auto flex flex-wrap gap-2">
+        {view !== 'changes' && <div className="ml-auto flex flex-wrap gap-2">
           <select className="field h-10 w-auto py-1 text-sm" value={staffId} onChange={(e) => set({ staff: e.target.value })} aria-label="Stylist">
             <option value="">{me?.calendarStaffIds ? 'Everyone I can see' : 'All stylists'}</option>{staff?.filter((s) => s.squareTeamMemberId && (s.stylist || s.id === staffId) && (!me?.calendarStaffIds || s.id === me.id || me.calendarStaffIds.includes(s.id))).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
           <select className="field h-10 w-auto py-1 text-sm" value={status} onChange={(e) => set({ status: e.target.value })} aria-label="Status">
             <option value="">All statuses</option>{Object.entries(APPT_STYLE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
           </select>
-        </div>
+        </div>}
       </div>
 
-      <Legend />
-      {isLoading && <PageLoading />}
-      {error && <ErrorNote error={new Error('Unable to load appointments.')} onRetry={refetch} />}
+      {view === 'changes' && <ScheduleChanges />}
+      {view !== 'changes' && <Legend />}
+      {view !== 'changes' && isLoading && <PageLoading />}
+      {view !== 'changes' && error && <ErrorNote error={new Error('Unable to load appointments.')} onRetry={refetch} />}
       {appts && view === 'day' && <DayView appts={appts} dayKeyStr={anchor} staff={staff ?? []} onOpen={open} />}
       {appts && view === 'week' && range && <WeekView appts={appts} from={range.from} onOpen={open} onDay={(d) => set({ view: 'day', date: d })} />}
       {appts && view === 'month' && range && <MonthView appts={appts} from={range.from} month={anchor.slice(0, 7)} onDay={(d) => set({ view: 'day', date: d })} />}

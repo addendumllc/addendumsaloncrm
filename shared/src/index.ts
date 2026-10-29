@@ -111,6 +111,7 @@ export const PERMISSIONS_CATALOG: PermissionDef[] = [
 
   { key: 'appointments:read', category: 'Appointments and calendar', action: 'view', label: 'Can view team calendars', description: 'Other team members’ appointments: everyone’s, or only the people chosen on their account. Viewing never allows changes.' },
   { key: 'appointments:read_own', category: 'Appointments and calendar', action: 'view', label: 'View their own calendar', description: 'Only appointments where they are the provider.' },
+  { key: 'appointments:changes', category: 'Appointments and calendar', action: 'view', label: 'See schedule changes', description: 'The history of appointment changes from Square: cancellations (by the salon or the client), reschedules, stylist changes, new bookings and no-shows — last-minute ones flagged.' },
   { key: 'square:sync', category: 'Appointments and calendar', action: 'edit', label: 'Refresh from Square', description: 'Pull the latest bookings from Square now.' },
 
   { key: 'services:read', category: 'Services and pricing', action: 'view', label: 'View services and prices', description: 'The service menu with durations and prices.' },

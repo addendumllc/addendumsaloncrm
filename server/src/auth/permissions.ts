@@ -117,6 +117,7 @@ export const API_RULES: { method: string; path: RegExp; anyOf: string[] }[] = [
   { method: '*', path: /^\/clients(\/.*)?$/, anyOf: ['clients:read', 'clients:read_assigned'] },
   { method: '*', path: /^\/notes\/[^/]+$/, anyOf: ['clients:notes', 'clients:write'] },
   { method: '*', path: /^\/leads(\/.*)?$/, anyOf: ['leads:read'] },
+  { method: 'GET', path: /^\/appointments\/changes$/, anyOf: ['appointments:changes'] },
   { method: '*', path: /^\/appointments(\/[^/]+)?$/, anyOf: ['appointments:read', 'appointments:read_own'] },
   { method: '*', path: /^\/messages(\/.*)?$/, anyOf: ['messages:read', 'messages:send'] },
   { method: '*', path: /^\/tasks(\/.*)?$/, anyOf: ['tasks:read_all', 'tasks:read_own'] },

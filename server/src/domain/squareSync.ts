@@ -237,6 +237,7 @@ export async function upsertBooking(b: SquareBooking, opts: { notify: boolean })
     const [existing] = await q.query<any>('SELECT * FROM appointments WHERE square_booking_id = $1', [b.id]);
     const events: string[] = [];
     let id: string;
+    let before: { startAt: string; staffId: string | null; status: string } | null = null;
     if (!existing) {
       const ins = await q.query<{ id: string }>(
         `INSERT INTO appointments(square_booking_id, square_version, source, square_customer_id, client_id, staff_id, location_id,
@@ -263,6 +264,9 @@ export async function upsertBooking(b: SquareBooking, opts: { notify: boolean })
       }
       const moved = new Date(existing.start_at).getTime() !== start.getTime();
       if (moved) events.push('rescheduled');
+      // Given to another stylist (the schedule-change history shows who it moved from).
+      if (existing.staff_id && staff?.id && existing.staff_id !== staff.id) events.push('staff_changed');
+      before = { startAt: new Date(existing.start_at).toISOString(), staffId: existing.staff_id ?? null, status: existing.square_status };
       const changed = events.length > 0 || existing.square_version !== (b.version ?? null) || existing.staff_id !== (staff?.id ?? null);
       if (changed) {
         await q.query(
@@ -288,8 +292,9 @@ export async function upsertBooking(b: SquareBooking, opts: { notify: boolean })
       );
     }
     for (const ev of events) {
+      // What it is now, and what it was before (start, stylist, status) — the schedule-change history reads these.
       await q.query('INSERT INTO appointment_events(appointment_id, event, detail) VALUES ($1,$2,$3::jsonb)', [
-        id, ev, JSON.stringify({ status: b.status, startAt: b.start_at }),
+        id, ev, JSON.stringify({ status: b.status, startAt: b.start_at, staffId: staff?.id ?? null, ...(before ? { fromStartAt: before.startAt, fromStaffId: before.staffId, fromStatus: before.status } : {}) }),
       ]);
     }
     let note: { title: string; link: string } | null = null;
