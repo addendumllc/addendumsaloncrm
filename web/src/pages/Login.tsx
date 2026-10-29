@@ -14,10 +14,11 @@ const SHOW_CODE_SIGN_IN = false;
 /** How the sign-in sits over the photo on phones (Settings → Businesses → Sign-in page → Card on phones). */
 const CARD: Record<'solid' | 'frosted' | 'clear' | 'none', { outer: string; form: string }> = {
   solid: { outer: 'rounded-2xl bg-paper px-5 py-7 shadow-pop', form: 'border-line bg-white' },
-  frosted: { outer: 'rounded-2xl border border-white/50 bg-white/60 px-5 py-7 shadow-pop backdrop-blur-md', form: 'border-white/60 bg-white/85' },
-  clear: { outer: 'rounded-2xl border border-white/40 bg-white/25 px-5 py-7 shadow-pop backdrop-blur-[3px]', form: 'border-white/50 bg-white/75' },
+  frosted: { outer: 'rounded-2xl border border-white/50 bg-white/70 px-5 py-7 shadow-pop backdrop-blur-md', form: 'border-white/60 bg-white' },
+  // See-through: the text on it is white (with a shadow) so it reads over the photo; the form stays solid to type in.
+  clear: { outer: 'rounded-2xl border border-white/40 bg-black/25 px-5 py-7 shadow-pop backdrop-blur-[3px] [&>*:not(form):not(.panel)]:!text-white [&>*:not(form):not(.panel)_*]:!text-white', form: 'border-white bg-white' },
   // No card: the name and links sit on the photo (light, with a soft shadow); the form keeps a light box to type in.
-  none: { outer: 'px-1 py-2 text-white [&>*:not(form)]:[filter:drop-shadow(0_1px_6px_rgba(0,0,0,0.65))] [&_.text-stone]:text-white/90 [&>*:first-child_*]:!text-white', form: 'border-white/60 bg-white/90 text-ink shadow-pop' },
+  none: { outer: 'px-1 py-2 [&>*:not(form):not(.panel)]:!text-white [&>*:not(form):not(.panel)_*]:!text-white [&>*:not(form):not(.panel)]:[filter:drop-shadow(0_1px_6px_rgba(0,0,0,0.7))]', form: 'border-white bg-white text-ink shadow-pop' },
 };
 
 export function LoginPage() {

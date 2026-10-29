@@ -143,8 +143,9 @@ function LoginCard({ editable }: { editable: boolean }) {
           {!d.imageVersion && <ImageIcon className="mb-auto h-5 w-5 opacity-40" />}
           {/* On a phone: the card as chosen over the photo. */}
           <span className={cx('mx-auto mb-auto mt-auto flex w-[78%] flex-col items-center gap-1.5 p-3', PREVIEW[d.cardStyle ?? 'solid'])}>
-            <span className={cx('font-display text-[15px] uppercase tracking-[0.06em]', (d.cardStyle ?? 'solid') === 'none' ? 'text-white drop-shadow' : 'text-ink')}>Addendum</span>
-            <span className="h-3 w-full rounded-sm bg-white/90" /><span className="h-3 w-full rounded-sm bg-white/90" /><span className="h-3 w-full rounded-sm bg-[#6b5242]" />
+            <span className={cx('font-display text-[15px] uppercase tracking-[0.06em]', (d.cardStyle ?? 'solid') === 'none' || d.cardStyle === 'clear' ? 'text-white drop-shadow' : 'text-ink')}>Addendum</span>
+            <span className="flex w-full flex-col gap-1 rounded-sm bg-white p-1.5"><span className="h-2 w-full rounded-sm border border-black/15" /><span className="h-2 w-full rounded-sm border border-black/15" /><span className="h-2 w-full rounded-sm bg-[#6b5242]" /><span className="mx-auto h-1 w-1/2 rounded-sm bg-black/25" /></span>
+            <span className={cx('text-[8px]', (d.cardStyle ?? 'solid') === 'none' || d.cardStyle === 'clear' ? 'text-white drop-shadow' : 'text-ink-soft')}>New here? Request access</span>
           </span>
         </div>
       </div>
@@ -179,7 +180,7 @@ const CARD_STYLES: { value: 'solid' | 'frosted' | 'clear' | 'none'; label: strin
 ];
 const PREVIEW: Record<'solid' | 'frosted' | 'clear' | 'none', string> = {
   solid: 'rounded-lg bg-[#faf8f5] shadow-lg',
-  frosted: 'rounded-lg border border-white/50 bg-white/60 shadow-lg backdrop-blur-md',
-  clear: 'rounded-lg border border-white/40 bg-white/25 shadow-lg backdrop-blur-[2px]',
+  frosted: 'rounded-lg border border-white/50 bg-white/70 shadow-lg backdrop-blur-md',
+  clear: 'rounded-lg border border-white/40 bg-black/25 shadow-lg backdrop-blur-[2px]',
   none: '',
 };
