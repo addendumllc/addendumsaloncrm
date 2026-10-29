@@ -183,6 +183,18 @@ describe('Reorder List', () => {
     await saveAmountRules({});
   });
 
+  it('a product’s own amount (Suggested each time) is used exactly, over the section’s amounts', async () => {
+    await saveAmountRules({ 'Redefined Wefts': { fixed: null, min: 10 } });
+    await api.put('/api/inventory-sync/reorder-list/prefs', { key: K[2], typicalQty: 20, preferredPlan: null, safetyUnits: null, notes: null });
+    const honey = (await reorderList('normal')).items.find((i) => i.label.includes('Honey'))!;
+    expect([honey.typicalQty, honey.forecastQty, honey.suggestedQty]).toEqual([20, 20, 20]);
+    expect(honey.explain).toMatch(/Set to 20 each time/);
+    // Suggested is never 0 — covered by what's on order still shows the smallest order.
+    expect((await reorderList('normal')).items.every((i) => i.forecastQty > 0)).toBe(true);
+    await api.put('/api/inventory-sync/reorder-list/prefs', { key: K[2], typicalQty: null, preferredPlan: null, safetyUnits: null, notes: null });
+    await saveAmountRules({});
+  });
+
   it('saves the list to come back to', async () => {
     await api.put('/api/inventory-sync/reorder-list/saved', { plan: '60', lines: [{ key: K[0], include: true, qty: 30 }] });
     const r = (await api.get('/api/inventory-sync/reorder-list?plan=60')).body;

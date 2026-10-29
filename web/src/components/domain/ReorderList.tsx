@@ -11,7 +11,7 @@ interface Row {
   key: string; label: string; shade: string; group: string; sku: string | null; length: string | null; type: 'weft' | 'ktip' | 'tape' | 'clipin'; supplier: string | null;
   available: number; committed: number; incoming: number; ratePerDay: number; units30: number; noSales: boolean; daysUntilStockout: number | null;
   productionDays: number; shippingDays: number; leadDays: number; moq: number | null; caseSize: number | null; costCents: number | null;
-  planNote: string; suggestedQty: number; forecastQty: number; minimumQty: number | null; explain: string; why: string[];
+  planNote: string; typicalQty: number | null; suggestedQty: number; forecastQty: number; minimumQty: number | null; explain: string; why: string[];
   tier: 1 | 2 | 3; urgent: boolean; badges: string[]; warning: string | null; flags: string[];
 }
 interface ListResponse {
@@ -166,6 +166,7 @@ export function ReorderList({ onOrders }: { onOrders: () => void }) {
                             <p className="text-ink-soft"><span className="text-stone">{r.planNote}:</span> {r.explain}</p>
                             <p className="text-stone">Sells {r.noSales ? 'nothing lately' : `${r.ratePerDay.toFixed(2)} a day (${r.units30} in 30 days)`} · lead time {r.leadDays} days · MOQ {r.moq ?? '—'}{r.caseSize ? ` · cases of ${r.caseSize}` : ''}</p>
                             {r.flags.length > 0 && <p className="text-amber">{r.flags.join(' · ')}</p>}
+                            <SuggestEach row={r} onSaved={() => { setQty(({ [r.key]: _, ...rest }) => rest); void qc.invalidateQueries({ queryKey: ['reorder-list'] }); }} />
                           </div>
                         )}
                       </div>
@@ -233,6 +234,36 @@ function ReviewModal({ plan, review, onFix, onExclude, onClose, onDone }: {
       ))}
       <p className="text-[12px] text-stone">Creates draft purchase orders (one per supplier). Nothing is sent to a supplier.</p>
     </Modal>
+  );
+}
+
+/** This product's own amount, used for Suggested and the order every time (blank = worked out from sales). */
+function SuggestEach({ row, onSaved }: { row: Row; onSaved: () => void }) {
+  const toast = useToast();
+  const [v, setV] = useState(row.typicalQty ? String(row.typicalQty) : '');
+  const [busy, setBusy] = useState(false);
+  const changed = (Number(v) || null) !== row.typicalQty;
+  const save = async () => {
+    setBusy(true);
+    try {
+      // Keeps the product's other ordering preferences as they are.
+      const cur = await api.get<{ prefs: { preferredPlan: Plan | null; safetyUnits: number | null; notes: string | null } }>(`/inventory-sync/reorder-list/prefs?key=${encodeURIComponent(row.key)}`);
+      await api.put('/inventory-sync/reorder-list/prefs', { key: row.key, typicalQty: Number(v) || null, preferredPlan: cur.prefs.preferredPlan, safetyUnits: cur.prefs.safetyUnits, notes: cur.prefs.notes });
+      toast(Number(v) ? `${nameOf(row)}: ${Number(v)} each time` : `${nameOf(row)}: worked out from sales`);
+      onSaved();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-2 pt-1">
+      <label className="text-ink-soft" htmlFor={`each-${row.key}`}>Suggested each time</label>
+      <input id={`each-${row.key}`} inputMode="numeric" className="field num h-9 w-20 text-center" placeholder={String(row.forecastQty)} value={v} onChange={(e) => setV(e.target.value.replace(/\D/g, ''))} />
+      <Button size="sm" loading={busy} disabled={!changed} onClick={save}>Save</Button>
+      <span className="text-[12px] text-stone">{row.typicalQty ? 'Clear it to work it out from sales.' : 'Blank = worked out from sales.'}</span>
+    </div>
   );
 }
 

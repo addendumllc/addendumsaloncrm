@@ -65,7 +65,9 @@ export interface ReorderRow {
   available: number; committed: number; incoming: number; ratePerDay: number; units30: number; noSales: boolean;
   daysUntilStockout: number | null; stockoutOn: string | null; productionDays: number; shippingDays: number; leadDays: number; leadMissing: boolean;
   moq: number | null; moqMissing: boolean; caseSize: number | null; costCents: number | null;
-  plan: Plan; planNote: string; calculatedNeed: number; netNeed: number; suggestedQty: number;
+  plan: Plan; planNote: string; calculatedNeed: number;
+  /** The product's own amount (Suggested each time), when set. */
+  typicalQty: number | null; netNeed: number; suggestedQty: number;
   /** From sales, whatever the plan: through the lead time plus 30 days, with safety stock and pre-orders, less stock and what's on order (min order and cases applied). */
   forecastQty: number; minimumQty: number | null; explain: string; why: string[];
   /** 1 out of stock · 2 runs out before an order placed now could arrive · 3 other attention. */
@@ -194,9 +196,11 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; group?: s
     const steps = ruled.steps.map((x) => (!(i.caseSize && i.caseSize > 1) && x === `Case size ${ROUND_TO}` ? `Rounded to ${ROUND_TO}s` : x));
     const forecastNeed = Math.max(0, Math.ceil(rate * (lead + 30) + safety + owed - i.stock - i.incoming));
     // A fixed amount is always that; otherwise the plan's amount, else the suggestion, else the minimum (never a blank 0).
-    const forecastQty = rule.fixed ?? round(forecastNeed);
-    const qty = rule.fixed ?? (ruled.qty || forecastQty || moq || ROUND_TO);
-    if (rule.fixed) steps.push(`Always ${rule.fixed} for ${group}${rules[`${group} ${length}`]?.fixed ? ` ${length}` : ''}`);
+    // The product's own amount ("Suggested each time" / typical order) wins, exactly as set; then the section's fixed amount.
+    const forecastQty = p.typicalQty ?? rule.fixed ?? (round(forecastNeed) || moq || ROUND_TO); // never 0: at least the minimum
+    const qty = own === 'normal' && p.typicalQty ? p.typicalQty : rule.fixed ?? (ruled.qty || forecastQty || moq || ROUND_TO);
+    if (own === 'normal' && p.typicalQty) steps.splice(0, steps.length, `Set to ${p.typicalQty} each time`);
+    else if (rule.fixed) steps.push(`Always ${rule.fixed} for ${group}${rules[`${group} ${length}`]?.fixed ? ` ${length}` : ''}`);
     else if (!ruled.qty) steps.push(forecastQty ? 'The suggested amount' : moq ? `The minimum order (${moq})` : `At least ${ROUND_TO}`);
     const parts = [`Need ${calculated}`];
     if (own !== 'normal' && (i.stock > 0 || i.incoming > 0)) {
@@ -226,8 +230,8 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; group?: s
       key: i.key, label: i.label, shade: shadeOf(i.label), group, sku: i.sku, length, type, supplier: i.supplier ?? fallback, collection: i.collection ?? i.collections[0] ?? null,
       available: i.stock, committed, incoming: i.incoming, ratePerDay: rate, units30: i.units30, noSales: rate <= 0,
       daysUntilStockout: days == null ? null : Math.round(days), stockoutOn, productionDays: i.productionDays, shippingDays: i.shippingDays, leadDays: lead, leadMissing: i.leadSource.kind === 'missing',
-      moq, moqMissing, caseSize: rule.fixed ? null : i.caseSize, costCents: i.costCents,
-      plan: own, planNote, calculatedNeed: calculated, netNeed: net, suggestedQty: qty, forecastQty, minimumQty: moq, explain: parts.join(' · '), why,
+      moq, moqMissing, caseSize: rule.fixed || p.typicalQty ? null : i.caseSize, costCents: i.costCents,
+      plan: own, planNote, typicalQty: p.typicalQty, calculatedNeed: calculated, netNeed: net, suggestedQty: qty, forecastQty, minimumQty: moq, explain: parts.join(' · '), why,
       tier, urgent: tier <= 2, badges, warning, flags, prefs: p, history: hist,
     });
   }
