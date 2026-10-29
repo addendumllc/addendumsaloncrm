@@ -67,7 +67,7 @@ describe('Reorder List', () => {
     // Out of stock first in each section.
     expect(r.items[0].badges).toContain('OUT OF STOCK');
     const kt = r.items.filter((i) => i.type === 'ktip');
-    expect(kt[0].label).toContain('Black');
+    expect(kt.map((i) => i.label.match(/(\d+)"/)?.[1])).toEqual(['20', '22']); // by length
     // Long-lead K-tips are urgent even at the end of the list.
     const plat = kt.find((i) => i.label.includes('Platinum'))!;
     expect(plat.badges).toEqual(expect.arrayContaining(['ORDER NOW', 'LONG PRODUCTION LEAD']));
