@@ -61,10 +61,10 @@ export function LoginPage() {
         {login.message && <p className="relative hidden max-w-md text-[15px] text-[#F3EEE7]/85 lg:block">{login.message}</p>}
       </aside>
       <div className="relative z-10 flex items-center justify-center px-4 py-10 lg:px-5">
-      <div className="w-full max-w-[400px] rounded-2xl bg-paper/95 px-5 py-7 shadow-pop backdrop-blur-sm lg:max-w-[380px] lg:rounded-none lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none">
+      <div className="w-full max-w-[400px] rounded-2xl border border-white/40 bg-white/25 px-5 py-7 shadow-pop backdrop-blur-[3px] lg:max-w-[380px] lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none">
         <BrandMark a={{ ...DEFAULT_APPEARANCE, ...(cfg?.appearance ?? {}) }} size="login" />
         <p className="mt-2 text-center text-[15px] text-stone">Sign in to your workspace</p>
-        <form onSubmit={submit} className="mt-8 space-y-4 border border-line bg-white p-6">
+        <form onSubmit={submit} className="mt-8 space-y-4 border border-white/50 bg-white/75 p-6 lg:border-line lg:bg-white">
           {/* Sign-in codes are hidden for now (password only); turn this back on to offer them again. */}
           {SHOW_CODE_SIGN_IN && <Segmented className="w-full" value={mode} onChange={(v) => { setMode(v); setError(null); }} options={[{ value: 'password', label: 'Password' }, { value: 'code', label: 'Sign-in code' }]} />}
           <Field label="Email"><input className="field" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></Field>
