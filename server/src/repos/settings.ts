@@ -53,7 +53,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     unrecordedCheckout: { clientStylist: true, onTheClock: true, fallbackStaffId: null, hold: true },
     defaultServiceBps: 4000, defaultRetailBps: 1000, tips: 'separate', tipAttribution: 'service_share',
     disclaimer: 'Commission shown here is an estimate based on Square sales. Your final pay is confirmed with payroll and may differ.',
-    payrollTaxes: { socialSecurityBps: 620, medicareBps: 145, futaBps: 60, sutaBps: 0, sdiBps: 130, stateIncomeBps: 400, workAddress: '12853 El Camino Real Ste 104, San Diego, CA 92130' },
+    payrollTaxes: { socialSecurityBps: 620, medicareBps: 145, futaBps: 60, sutaBps: 0, sdiBps: 130, stateIncomeBps: 400, federalIncomeBps: 1000, netCushionBps: 200, workAddress: '12853 El Camino Real Ste 104, San Diego, CA 92130' },
     // Every 2 weeks, Saturday–Friday (e.g. Sep 26 – Oct 9, 2026), paid the following Friday (Oct 16).
     paySchedule: { frequency: 'biweekly', anchorStart: '2026-09-26', payDayOffsetDays: 7 },
   },

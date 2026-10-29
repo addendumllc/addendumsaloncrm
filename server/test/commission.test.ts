@@ -454,7 +454,7 @@ describe('Privacy', () => {
     expect(m.estimatedCents + m.finalizedCents).toBe(m.totalCommissionCents);
     // Gross pay and estimated taxes side by side for payroll.
     expect(m.taxes.grossCents).toBe(m.totalCommissionCents + m.tipsCents + m.pay.wagesCents);
-    expect(m.taxes.netCents).toBe(m.taxes.grossCents - m.taxes.withheldCents);
+    expect(m.taxes.netCents).toBe(m.taxes.grossCents - m.taxes.withheldCents - (m.taxes.cushionCents ?? 0));
   });
 });
 
@@ -600,7 +600,7 @@ describe('Wages, hours and tips', () => {
     expect(d.taxes.grossCents).toBe(gross);
     expect(d.taxes.federalCents).toBe(Math.round(gross * 0.10));
     expect(d.taxes.ficaCents).toBe(Math.round(gross * 0.062) + Math.round(gross * 0.0145));
-    expect(d.taxes.netCents).toBe(gross - d.taxes.withheldCents);
+    expect(d.taxes.netCents).toBe(gross - d.taxes.withheldCents - (d.taxes.cushionCents ?? 0));
     expect(d.taxes.employerCents).toBe(Math.round(gross * 0.062) + Math.round(gross * 0.0145) + Math.round(gross * 0.006));
     const csv = (await admin.get(`/api/commission/export/summary?${RANGE()}`)).text;
     expect(csv.split('\n')[0]).toContain('"Est. net pay"');

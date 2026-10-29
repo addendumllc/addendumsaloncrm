@@ -56,6 +56,7 @@ export function TaxesPanel({ taxes }: { taxes: TaxEstimateDTO | null }) {
             {row('CA state income tax', -taxes.stateCents)}
             {taxes.sdiCents > 0 && row('CA disability insurance (SDI)', -taxes.sdiCents)}
             {taxes.localCents > 0 && row('Local tax', -taxes.localCents)}
+            {(taxes.cushionCents ?? 0) > 0 && row('Cushion (keeps the estimate under your real pay)', -(taxes.cushionCents ?? 0))}
             {row('Estimated net pay', taxes.netCents, true)}
           </>
         )}

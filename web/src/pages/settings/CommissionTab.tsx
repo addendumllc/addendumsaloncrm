@@ -125,17 +125,17 @@ function SettingsCard({ settings, editable }: { settings: CommissionSettings; ed
           </Field>
           <div className="h-3" />
           <div className="grid gap-3 sm:grid-cols-4">
-            {([['stateIncomeBps', 'CA state income tax (default)'], ['socialSecurityBps', 'Social Security'], ['medicareBps', 'Medicare'], ['sdiBps', 'CA disability insurance (SDI)'], ['futaBps', 'Federal unemployment (FUTA)'], ['sutaBps', 'State unemployment (SUTA)']] as const).map(([k, label]) => (
+            {([['federalIncomeBps', 'Federal income tax (default)'], ['stateIncomeBps', 'CA state income tax (default)'], ['socialSecurityBps', 'Social Security'], ['medicareBps', 'Medicare'], ['sdiBps', 'CA disability insurance (SDI)'], ['futaBps', 'Federal unemployment (FUTA)'], ['sutaBps', 'State unemployment (SUTA)'], ['netCushionBps', 'Cushion off estimated net']] as const).map(([k, label]) => (
               <Field key={k} label={label}>
                 <div className="flex items-center gap-1.5">
-                  <input type="number" min={0} max={100} step="0.01" className="field num w-24" disabled={!editable} value={((d.payrollTaxes[k] ?? 0) / 100).toString()}
+                  <input type="number" min={0} max={100} step="0.01" className="field num w-24" disabled={!editable} value={((d.payrollTaxes[k] ?? (k === 'federalIncomeBps' ? 1000 : k === 'netCushionBps' ? 200 : 0)) / 100).toString()}
                     onChange={(e) => set('payrollTaxes', { ...d.payrollTaxes, [k]: Math.max(0, Math.min(10000, Math.round(Number(e.target.value || 0) * 100))) })} />
                   <span className="text-stone">%</span>
                 </div>
               </Field>
             ))}
           </div>
-          <p className="mt-1 text-[12px] text-stone">CA state income tax is used for anyone without their own state rate (Users &amp; Permissions → Pay → Taxes). Social Security and Medicare are withheld from the employee and also paid by the salon; CA SDI is withheld from employees working in California; FUTA and SUTA are paid by the salon only.</p>
+          <p className="mt-1 text-[12px] text-stone">The federal and CA defaults are used for anyone without their own rates — for exact estimates use Match a paystub on each person’s Taxes. The cushion comes off estimated net pay so it stays a little under the real paycheck. CA state income tax is used for anyone without their own state rate (Users &amp; Permissions → Pay → Taxes). Social Security and Medicare are withheld from the employee and also paid by the salon; CA SDI is withheld from employees working in California; FUTA and SUTA are paid by the salon only.</p>
         </div>
         <Field label="Note shown on Earnings & Goals" hint="Everyone sees this at the top of their commission page. Leave it empty to hide it.">
           <textarea className="field min-h-[72px]" maxLength={1000} disabled={!editable} value={d.disclaimer} onChange={(e) => set('disclaimer', e.target.value)} />

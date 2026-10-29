@@ -479,7 +479,7 @@ const settingsInput = z.object({
   tips: z.enum(['separate', 'exclude']),
   tipAttribution: z.enum(['service_share', 'payment_team_member']),
   disclaimer: z.string().trim().max(1000),
-  payrollTaxes: z.object({ socialSecurityBps: bps, medicareBps: bps, futaBps: bps, sutaBps: bps, sdiBps: bps.default(130), stateIncomeBps: bps.default(400), workAddress: z.string().trim().max(300) }),
+  payrollTaxes: z.object({ socialSecurityBps: bps, medicareBps: bps, futaBps: bps, sutaBps: bps, sdiBps: bps.default(130), stateIncomeBps: bps.default(400), federalIncomeBps: bps.default(1000), netCushionBps: bps.default(200), workAddress: z.string().trim().max(300) }),
   paySchedule: z.object({ frequency: z.enum(['weekly', 'biweekly', 'semimonthly', 'monthly']), anchorStart: ymd, payDayOffsetDays: z.number().int().min(0).max(31) }),
 }).partial();
 

@@ -316,7 +316,8 @@ export function estimateTaxes(grossCents: number, t: StaffTaxDTO, rates: Commiss
   if (t.workerType === '1099') {
     return { workerType: '1099', grossCents, federalCents: 0, stateCents: 0, localCents: 0, ficaCents: 0, socialSecurityCents: 0, medicareCents: 0, sdiCents: 0, withheldCents: 0, netCents: grossCents, employerCents: 0 };
   }
-  const federalCents = of(t.federalBps);
+  // Without their own federal rate, the salon's default (so it isn't $0.00).
+  const federalCents = of(t.federalBps ?? rates.federalIncomeBps ?? 1000);
   // DE 4 "exempt from withholding": nothing withheld for California. Without their own state rate, the salon's default
   // CA state income tax rate is used (so it isn't $0.00).
   const stateCents = t.de4.exempt ? 0 : of(t.stateBps ?? rates.stateIncomeBps ?? 400);
@@ -328,7 +329,9 @@ export function estimateTaxes(grossCents: number, t: StaffTaxDTO, rates: Commiss
   const sdiCents = /,\s*CA\b|California/i.test(rates.workAddress ?? '') ? of(rates.sdiBps ?? 0) : 0;
   const withheldCents = federalCents + stateCents + localCents + ficaCents + sdiCents;
   const employerCents = of(rates.socialSecurityBps) + of(rates.medicareBps) + of(rates.futaBps) + of(rates.sutaBps);
-  return { workerType: 'w2', grossCents, federalCents, stateCents, localCents, ficaCents, socialSecurityCents, medicareCents, sdiCents, withheldCents, netCents: grossCents - withheldCents, employerCents };
+  // Estimates lean low: a small cushion comes off net pay so the real paycheck isn't less than shown.
+  const cushionCents = of(rates.netCushionBps ?? 200);
+  return { workerType: 'w2', grossCents, federalCents, stateCents, localCents, ficaCents, socialSecurityCents, medicareCents, sdiCents, withheldCents, cushionCents, netCents: grossCents - withheldCents - cushionCents, employerCents };
 }
 
 /** Tax details for these people (for estimates). */

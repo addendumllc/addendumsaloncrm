@@ -215,6 +215,7 @@ function TaxFields({ t, editable, location, onChange }: { t: TaxDraft; editable:
             { value: 'federal', label: 'Federal (W-4)' }, { value: 'state', label: location.state === 'CA' ? 'California (DE 4)' : location.state ? `State (${location.state})` : 'State' }, { value: 'local', label: 'Local' },
           ]} />
           {view === 'federal' && <>
+          {editable && <MatchPaystub onMatch={(federal, state) => onChange({ ...t, federal, state })} />}
           <div className="mt-3 grid gap-3 sm:grid-cols-2">{pct('federal', 'Federal withholding')}</div>
           <p className="mt-3 text-[13px] font-medium text-ink">W-4</p>
           <div className="mt-1 grid gap-3 sm:grid-cols-2">
@@ -257,7 +258,7 @@ function TaxFields({ t, editable, location, onChange }: { t: TaxDraft; editable:
                 <Field label="Additional withholding" hint="Per paycheck"><div className="flex items-center gap-1.5"><span className="text-stone">$</span><input type="number" min={0} step="0.01" className="field num w-28" disabled={!editable} value={t.de4Extra} onChange={(e) => set('de4Extra', e.target.value)} /></div></Field>
               </div>
             )}
-            <p className="mt-2 text-[12px] text-stone">California also takes State Disability Insurance (SDI) from employees — include it in the withholding % above.</p>
+            <p className="mt-2 text-[12px] text-stone">California SDI is added automatically at the salon rate — don’t include it in the withholding % above.</p>
           </div>
           ) : <p className="mt-3 text-[13px] text-stone">{location.state ? `Enter ${location.stateName}’s withholding % above; the state form details are kept with your payroll provider.` : 'Add the salon’s work address (Settings → Commission → Payroll tax rates) to show the right state form.'}</p>}
           </>}
@@ -268,6 +269,32 @@ function TaxFields({ t, editable, location, onChange }: { t: TaxDraft; editable:
           </>}
         </>
       ) : <p className="mt-2 text-[13px] text-stone">Nothing is withheld for contractors; they handle their own taxes.</p>}
+    </div>
+  );
+}
+
+/**
+ * Match a paystub: the gross pay and the federal and state income tax from a real paycheck set this person's withholding
+ * %, so estimates match their actual pay (Social Security, Medicare and SDI are the same for everyone).
+ */
+function MatchPaystub({ onMatch }: { onMatch: (federal: string, state: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [v, setV] = useState({ gross: '', federal: '', state: '' });
+  const n = (x: string) => Number(x.replace(/[$,\s]/g, ''));
+  const ok = n(v.gross) > 0 && n(v.federal) >= 0 && n(v.state) >= 0 && v.federal.trim() !== '' && v.state.trim() !== '';
+  const pctOf = (x: string) => ((n(x) / n(v.gross)) * 100).toFixed(2);
+  if (!open) return <Button size="sm" className="mt-3" onClick={() => setOpen(true)}>Match a paystub</Button>;
+  return (
+    <div className="mt-3 rounded-xl border border-line bg-mist/40 p-3">
+      <p className="text-[13px] font-medium text-ink">Match a paystub</p>
+      <p className="mb-2 text-[12px] text-stone">From a recent paycheck: Gross Pay, Federal Income Tax and State Income Tax. Sets their federal and state % so estimates match — then Save tax information.</p>
+      <div className="flex flex-wrap items-end gap-2">
+        {([['gross', 'Gross pay'], ['federal', 'Federal income tax'], ['state', 'State income tax']] as const).map(([k, label]) => (
+          <Field key={k} label={label}><div className="flex items-center gap-1.5"><span className="text-stone">$</span><input inputMode="decimal" className="field num h-9 w-28" value={v[k]} onChange={(e) => setV({ ...v, [k]: e.target.value })} /></div></Field>
+        ))}
+        <Button size="sm" variant="primary" disabled={!ok} onClick={() => { onMatch(pctOf(v.federal), pctOf(v.state)); setOpen(false); }}>{ok ? `Use ${pctOf(v.federal)}% federal · ${pctOf(v.state)}% state` : 'Use these'}</Button>
+        <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+      </div>
     </div>
   );
 }

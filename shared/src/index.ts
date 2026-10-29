@@ -805,6 +805,10 @@ export interface CommissionSettings {
     sdiBps: number;
     /** CA state income tax for people without their own state rate (an estimate; theirs wins when set). */
     stateIncomeBps: number;
+    /** Federal income tax for people without their own federal rate (so it's never $0). */
+    federalIncomeBps?: number;
+    /** Taken off estimated net pay so the estimate stays a little under the real paycheck. */
+    netCushionBps?: number;
     /** Where the work is done (decides state/local taxes). */ workAddress: string;
   };
   /** When pay periods run and when they're paid (My Commission and Team Commission default to the current one). */
@@ -1086,6 +1090,8 @@ export interface TaxEstimateDTO {
   /** California SDI (disability insurance). */
   sdiCents: number;
   withheldCents: number;
+  /** A little kept back so the estimate stays under the real paycheck (Settings → Commission → Payroll tax rates). */
+  cushionCents?: number;
   netCents: number;
   /** Employer Social Security, Medicare, FUTA and state unemployment. */
   employerCents: number;
