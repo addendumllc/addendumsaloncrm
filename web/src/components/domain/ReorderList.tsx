@@ -1,7 +1,7 @@
 import { productName } from '@addendum/shared';
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ChevronDown, Download, FileText, Save, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ClipboardList, FileText, Save, SlidersHorizontal } from 'lucide-react';
 import { api } from '../../api/client';
 import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, cx, useToast } from '../ui';
 import { ProductSettingsButton } from './ProductSettings';
@@ -90,17 +90,7 @@ export function ReorderList({ onOrders }: { onOrders: () => void }) {
     setBusy(label);
     try { setReview(await api.post<Review>('/inventory-sync/reorder-list/review', { plan, lines: chosen(rows).map((r) => ({ key: r.key, qty: qOf(r) })) })); } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(null); }
   };
-  const exportCsv = () => {
-    const esc = (v: unknown) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    const head = ['Section', 'Product', 'SKU', 'Supplier', 'Available', 'Incoming', 'Order qty', 'Unit cost', 'Line cost'];
-    const body = all.map((r) => [r.group, r.label, r.sku, r.supplier, r.available, r.incoming, qOf(r), r.costCents != null ? (r.costCents / 100).toFixed(2) : '', r.costCents != null ? ((r.costCents * qOf(r)) / 100).toFixed(2) : '']);
-    const blob = new Blob([[head, ...body].map((x) => x.map(esc).join(',')).join('\r\n')], { type: 'text/csv' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `Reorder_List_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
+  const [listText, setListText] = useState<string | null>(null);
 
   return (
     <div>
@@ -112,11 +102,12 @@ export function ReorderList({ onOrders }: { onOrders: () => void }) {
         <span className="ml-auto flex flex-wrap gap-2">
           <Button icon={<SlidersHorizontal className="h-4 w-4" />} onClick={() => setEditAmounts(true)} disabled={!data}>Order amounts</Button>
           <Button icon={<Save className="h-4 w-4" />} onClick={save} disabled={!items.length}>Save List</Button>
-          <Button icon={<Download className="h-4 w-4" />} onClick={exportCsv} disabled={!all.length}>Export</Button>
+          <Button icon={<ClipboardList className="h-4 w-4" />} onClick={() => setListText(noteText(groups.map((g) => ({ name: g.name, rows: chosen(g.rows).map((r) => ({ r, qty: qOf(r) })) }))))} disabled={!all.length}>Copy list</Button>
           <Button variant="primary" icon={<FileText className="h-4 w-4" />} loading={busy === 'all'} onClick={() => openReview(items, 'all')} disabled={!all.length}>Create order</Button>
         </span>
       </div>
 
+      {listText != null && <CopyListModal text={listText} onClose={() => setListText(null)} />}
       {editAmounts && data && <AmountsModal amounts={data.amounts} items={items} onClose={() => setEditAmounts(false)} onSaved={() => { setEditAmounts(false); setQty({}); void qc.invalidateQueries({ queryKey: ['reorder-list'] }); }} />}
       {urgentK.length > 0 && (
         <p className="mb-4 flex items-start gap-2 rounded-xl2 border border-rose/30 bg-rose/5 px-4 py-3 text-[14px] text-ink">
@@ -241,6 +232,42 @@ function ReviewModal({ plan, review, onFix, onExclude, onClose, onDone }: {
         </div>
       ))}
       <p className="text-[12px] text-stone">Creates draft purchase orders (one per supplier). Nothing is sent to a supplier.</p>
+    </Modal>
+  );
+}
+
+/** What each section's products are called in the list ("18\" Aperol Spritz Redefined - 10"). */
+const NOTE_SUFFIX: Record<string, string> = { 'Redefined Wefts': 'Redefined', Wefts: 'Wefts', 'K-Tips': 'K-Tips', Tapes: 'Tapes', 'Clip-Ins': 'Clip-Ins' };
+/**
+ * The order as plain text for a note: each section in capitals, a blank line between lengths.
+ *   REDEFINED WEFTS
+ *   18" Aperol Spritz Redefined - 10
+ *
+ *   22" Margarita Redefined - 20
+ */
+function noteText(groups: { name: string; rows: { r: Row; qty: number }[] }[]) {
+  return groups.filter((g) => g.rows.length).map((g) => {
+    const lines: string[] = [g.name.toUpperCase()];
+    let len: string | null | undefined;
+    for (const { r, qty } of g.rows) {
+      if (len !== undefined && r.length !== len) lines.push('');
+      len = r.length;
+      lines.push(`${[nameOf(r), NOTE_SUFFIX[g.name] ?? ''].filter(Boolean).join(' ')} - ${qty}`);
+    }
+    return lines.join('\n');
+  }).join('\n\n');
+}
+
+/** The list to copy into a note; it can also be selected by hand (phones that block copying). */
+function CopyListModal({ text, onClose }: { text: string; onClose: () => void }) {
+  const toast = useToast();
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(text); toast('Copied — paste it into your note'); onClose(); } catch { toast('Couldn’t copy — select the text and copy it', 'error'); }
+  };
+  return (
+    <Modal open onClose={onClose} title="Order list" footer={<><Button variant="ghost" onClick={onClose}>Close</Button><Button variant="primary" icon={<ClipboardList className="h-4 w-4" />} onClick={copy}>Copy</Button></>}>
+      <p className="mb-2 text-[13px] text-stone">The ticked products and amounts, ready to paste into a note.</p>
+      <textarea readOnly className="field h-80 w-full font-mono text-[14px] leading-relaxed" value={text} onFocus={(e) => e.currentTarget.select()} aria-label="Order list" />
     </Modal>
   );
 }
