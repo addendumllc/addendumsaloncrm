@@ -69,7 +69,8 @@ export interface ReorderRow {
   /** The product's own amount (Suggested each time), when set. */
   typicalQty: number | null; netNeed: number; suggestedQty: number;
   /** From sales, whatever the plan: through the lead time plus 30 days, with safety stock and pre-orders, less stock and what's on order (min order and cases applied). */
-  forecastQty: number; minimumQty: number | null; explain: string; why: string[];
+  forecastQty: number;
+  forecastKind: 'set' | 'minimum' | 'suggested'; minimumQty: number | null; explain: string; why: string[];
   /** 1 out of stock · 2 runs out before an order placed now could arrive · 3 other attention. */
   tier: 1 | 2 | 3; urgent: boolean; badges: string[]; warning: string | null; flags: string[];
   prefs: Prefs; history: { quantity: number; orderedOn: string; number: number }[];
@@ -198,6 +199,8 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; group?: s
     // A fixed amount is always that; otherwise the plan's amount, else the suggestion, else the minimum (never a blank 0).
     // The product's own amount ("Suggested each time" / typical order) wins, exactly as set; then the section's fixed amount.
     const forecastQty = p.typicalQty ?? rule.fixed ?? (round(forecastNeed) || moq || ROUND_TO); // never 0: at least the minimum
+    // What that number is: set for the product or section, the minimum order, or more than the minimum because of sales.
+    const forecastKind: ReorderRow['forecastKind'] = p.typicalQty || rule.fixed ? 'set' : moq && forecastQty <= moq ? 'minimum' : 'suggested';
     const qty = own === 'normal' && p.typicalQty ? p.typicalQty : rule.fixed ?? (ruled.qty || forecastQty || moq || ROUND_TO);
     if (own === 'normal' && p.typicalQty) steps.splice(0, steps.length, `Set to ${p.typicalQty} each time`);
     else if (rule.fixed) steps.push(`Always ${rule.fixed} for ${group}${rules[`${group} ${length}`]?.fixed ? ` ${length}` : ''}`);
@@ -231,7 +234,7 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; group?: s
       available: i.stock, committed, incoming: i.incoming, ratePerDay: rate, units30: i.units30, noSales: rate <= 0,
       daysUntilStockout: days == null ? null : Math.round(days), stockoutOn, productionDays: i.productionDays, shippingDays: i.shippingDays, leadDays: lead, leadMissing: i.leadSource.kind === 'missing',
       moq, moqMissing, caseSize: rule.fixed || p.typicalQty ? null : i.caseSize, costCents: i.costCents,
-      plan: own, planNote, typicalQty: p.typicalQty, calculatedNeed: calculated, netNeed: net, suggestedQty: qty, forecastQty, minimumQty: moq, explain: parts.join(' · '), why,
+      plan: own, planNote, typicalQty: p.typicalQty, calculatedNeed: calculated, netNeed: net, suggestedQty: qty, forecastQty, forecastKind, minimumQty: moq, explain: parts.join(' · '), why,
       tier, urgent: tier <= 2, badges, warning, flags, prefs: p, history: hist,
     });
   }

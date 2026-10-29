@@ -11,7 +11,7 @@ interface Row {
   key: string; label: string; shade: string; group: string; sku: string | null; length: string | null; type: 'weft' | 'ktip' | 'tape' | 'clipin'; supplier: string | null;
   available: number; committed: number; incoming: number; ratePerDay: number; units30: number; noSales: boolean; daysUntilStockout: number | null;
   productionDays: number; shippingDays: number; leadDays: number; moq: number | null; caseSize: number | null; costCents: number | null;
-  planNote: string; typicalQty: number | null; suggestedQty: number; forecastQty: number; minimumQty: number | null; explain: string; why: string[];
+  planNote: string; typicalQty: number | null; suggestedQty: number; forecastQty: number; forecastKind: 'set' | 'minimum' | 'suggested'; minimumQty: number | null; explain: string; why: string[];
   tier: 1 | 2 | 3; urgent: boolean; badges: string[]; warning: string | null; flags: string[];
 }
 interface ListResponse {
@@ -144,11 +144,11 @@ export function ReorderList({ onOrders }: { onOrders: () => void }) {
                           </button>
                           <ChevronDown className={cx('h-4 w-4 shrink-0 text-stone transition-transform', expanded && 'rotate-180')} aria-hidden />
                           <ProductSettingsButton productKey={r.key} />
-                          {/* Suggested from sales, beside the usual amount; tap to use it. */}
+                          {/* Beside the amount: the minimum order, more than that because of sales (Suggested), or the amount set each time; tap to use it. */}
                           <button type="button" className="shrink-0 text-center leading-tight disabled:opacity-60" disabled={q === r.forecastQty}
                             onClick={() => { setQty({ ...qty, [r.key]: r.forecastQty }); if (r.forecastQty > 0 && !isIn(r)) setInclude({ ...include, [r.key]: true }); }}
-                            title="Suggested from sales: lead time + 30 days, safety stock and pre-orders, less stock and what’s on order. Tap to use it." aria-label={`Use the suggested ${r.forecastQty} for ${r.label}`}>
-                            <span className="block text-[10px] uppercase tracking-wide text-stone">Suggested</span>
+                            title={KIND[r.forecastKind].hint} aria-label={`Use ${KIND[r.forecastKind].label.toLowerCase()} ${r.forecastQty} for ${r.label}`}>
+                            <span className="block text-[10px] uppercase tracking-wide text-stone">{KIND[r.forecastKind].label}</span>
                             <span className={cx('block num text-[16px]', q === r.forecastQty ? 'text-stone' : 'text-plum underline decoration-dotted underline-offset-2')}>{r.forecastQty}</span>
                           </button>
                           <label className="shrink-0 text-right">
@@ -237,6 +237,12 @@ function ReviewModal({ plan, review, onFix, onExclude, onClose, onDone }: {
   );
 }
 
+const KIND: Record<Row['forecastKind'], { label: string; hint: string }> = {
+  minimum: { label: 'Minimum', hint: 'The minimum order — sales don’t need more. Tap to use it.' },
+  suggested: { label: 'Suggested', hint: 'More than the minimum because of sales: lead time + 30 days, safety stock and pre-orders, less stock and what’s on order. Tap to use it.' },
+  set: { label: 'Each time', hint: 'The amount set to order each time. Tap to use it.' },
+};
+
 /** This product's own amount, used for Suggested and the order every time (blank = worked out from sales). */
 function SuggestEach({ row, onSaved }: { row: Row; onSaved: () => void }) {
   const toast = useToast();
@@ -249,7 +255,7 @@ function SuggestEach({ row, onSaved }: { row: Row; onSaved: () => void }) {
       // Keeps the product's other ordering preferences as they are.
       const cur = await api.get<{ prefs: { preferredPlan: Plan | null; safetyUnits: number | null; notes: string | null } }>(`/inventory-sync/reorder-list/prefs?key=${encodeURIComponent(row.key)}`);
       await api.put('/inventory-sync/reorder-list/prefs', { key: row.key, typicalQty: Number(v) || null, preferredPlan: cur.prefs.preferredPlan, safetyUnits: cur.prefs.safetyUnits, notes: cur.prefs.notes });
-      toast(Number(v) ? `${nameOf(row)}: ${Number(v)} each time` : `${nameOf(row)}: worked out from sales`);
+      toast(Number(v) ? `${nameOf(row)}: ${Number(v)} each time` : `${nameOf(row)}: minimum, or more if sales need it`);
       onSaved();
     } catch (e) {
       toast((e as Error).message, 'error');
@@ -259,10 +265,10 @@ function SuggestEach({ row, onSaved }: { row: Row; onSaved: () => void }) {
   };
   return (
     <div className="flex flex-wrap items-center gap-2 pt-1">
-      <label className="text-ink-soft" htmlFor={`each-${row.key}`}>Suggested each time</label>
+      <label className="text-ink-soft" htmlFor={`each-${row.key}`}>Order each time</label>
       <input id={`each-${row.key}`} inputMode="numeric" className="field num h-9 w-20 text-center" placeholder={String(row.forecastQty)} value={v} onChange={(e) => setV(e.target.value.replace(/\D/g, ''))} />
       <Button size="sm" loading={busy} disabled={!changed} onClick={save}>Save</Button>
-      <span className="text-[12px] text-stone">{row.typicalQty ? 'Clear it to work it out from sales.' : 'Blank = worked out from sales.'}</span>
+      <span className="text-[12px] text-stone">{row.typicalQty ? 'Clear it to use the minimum (or more if sales need it).' : 'Blank = the minimum, or more if sales need it.'}</span>
     </div>
   );
 }

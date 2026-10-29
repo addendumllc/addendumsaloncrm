@@ -105,6 +105,12 @@ describe('Reorder List', () => {
       expect(i.suggestedQty).toBeGreaterThan(0); // never a blank 0 — at least the minimum
     }
     expect(q('Covered').suggestedQty).toBe(10); // covered by what's on order → the minimum
+    // Labelled: set amounts, the minimum, or Suggested when sales need more than the minimum.
+    expect([q('Tape-Ins').forecastKind, q('K-Tip').forecastKind]).toEqual(['set', 'set']);
+    expect(q('Covered').forecastKind).toBe('minimum');
+    const aperol = q('24"');
+    expect(aperol.forecastKind).toBe(aperol.forecastQty > 20 ? 'suggested' : 'minimum');
+    expect(q('18" Redefined Weft · Honey').forecastKind).toBe('suggested'); // no minimum, sales need it
     fake = saved;
   });
 
