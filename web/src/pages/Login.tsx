@@ -6,10 +6,19 @@ import { api } from '../api/client';
 import { applyAppearance } from '../lib/theme';
 import { BrandMark } from '../components/layout/Brand';
 import { DEFAULT_APPEARANCE, DEFAULT_LOGIN, DEFAULT_WORKSPACES, type Appearance, type LoginSettings, type WorkspaceSettings } from '@addendum/shared';
-import { Button, Field, Segmented } from '../components/ui';
+import { Button, Field, Segmented, cx } from '../components/ui';
 
 /** The Sign-in code tab on the sign-in screen (off for now). */
 const SHOW_CODE_SIGN_IN = false;
+
+/** How the sign-in sits over the photo on phones (Settings → Businesses → Sign-in page → Card on phones). */
+const CARD: Record<'solid' | 'frosted' | 'clear' | 'none', { outer: string; form: string }> = {
+  solid: { outer: 'rounded-2xl bg-paper px-5 py-7 shadow-pop', form: 'border-line bg-white' },
+  frosted: { outer: 'rounded-2xl border border-white/50 bg-white/60 px-5 py-7 shadow-pop backdrop-blur-md', form: 'border-white/60 bg-white/85' },
+  clear: { outer: 'rounded-2xl border border-white/40 bg-white/25 px-5 py-7 shadow-pop backdrop-blur-[3px]', form: 'border-white/50 bg-white/75' },
+  // No card: the name and links sit on the photo (light, with a soft shadow); the form keeps a light box to type in.
+  none: { outer: 'px-1 py-2 text-white [&>*:not(form)]:[filter:drop-shadow(0_1px_6px_rgba(0,0,0,0.65))] [&_.text-stone]:text-white/90 [&>*:first-child_*]:!text-white', form: 'border-white/60 bg-white/90 text-ink shadow-pop' },
+};
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
@@ -61,10 +70,10 @@ export function LoginPage() {
         {login.message && <p className="relative hidden max-w-md text-[15px] text-[#F3EEE7]/85 lg:block">{login.message}</p>}
       </aside>
       <div className="relative z-10 flex items-center justify-center px-4 py-10 lg:px-5">
-      <div className="w-full max-w-[400px] rounded-2xl border border-white/40 bg-white/25 px-5 py-7 shadow-pop backdrop-blur-[3px] lg:max-w-[380px] lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none">
+      <div className={cx('w-full max-w-[400px] lg:max-w-[380px] lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none', CARD[login.cardStyle ?? 'solid'].outer)}>
         <BrandMark a={{ ...DEFAULT_APPEARANCE, ...(cfg?.appearance ?? {}) }} size="login" />
         <p className="mt-2 text-center text-[15px] text-stone">Sign in to your workspace</p>
-        <form onSubmit={submit} className="mt-8 space-y-4 border border-white/50 bg-white/75 p-6 lg:border-line lg:bg-white">
+        <form onSubmit={submit} className={cx('mt-8 space-y-4 border p-6 lg:border-line lg:bg-white', CARD[login.cardStyle ?? 'solid'].form)}>
           {/* Sign-in codes are hidden for now (password only); turn this back on to offer them again. */}
           {SHOW_CODE_SIGN_IN && <Segmented className="w-full" value={mode} onChange={(v) => { setMode(v); setError(null); }} options={[{ value: 'password', label: 'Password' }, { value: 'code', label: 'Sign-in code' }]} />}
           <Field label="Email"><input className="field" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required /></Field>

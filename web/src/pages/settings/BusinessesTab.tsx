@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ImageIcon, Trash2, Upload } from 'lucide-react';
 import { BUSINESSES, DEFAULT_LOGIN, DEFAULT_MENU_GROUPS, DEFAULT_MENU_ORDER, DEFAULT_MENU_SECTIONS, DEFAULT_WORKSPACES, LOGIN_IMAGE_MAX_BYTES, ROLES, type AppSettings, type BuiltinRole, type BusinessId, type LoginSettings, type SidebarDefaults, type WorkspaceSettings } from '@addendum/shared';
 import { api } from '../../api/client';
-import { Button, Field, Segmented, useToast } from '../../components/ui';
+import { Button, Field, Segmented, cx, useToast } from '../../components/ui';
 import { NAV } from '../../components/layout/AppShell';
 import { MenuEditor } from '../../components/layout/sidebarLayout';
 import { Card, SaveBar, useCan, useSection } from './shared';
@@ -129,11 +129,23 @@ function LoginCard({ editable }: { editable: boolean }) {
             <Button size="sm" icon={<Upload className="h-4 w-4" />} loading={busy} disabled={!editable} onClick={() => file.current?.click()}>{d.imageVersion ? 'Replace photo' : 'Upload photo'}</Button>
             {d.imageVersion && <Button size="sm" variant="ghost" icon={<Trash2 className="h-4 w-4" />} disabled={!editable || busy} onClick={remove}>Remove photo</Button>}
           </div>
+          <Field label="Card on phones" hint="How the sign-in sits over the photo on a phone (computers show the photo beside the form).">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{CARD_STYLES.map((c) => (
+              <button key={c.value} type="button" disabled={!editable} aria-pressed={(d.cardStyle ?? 'solid') === c.value} onClick={() => sec.setDraft({ ...d, cardStyle: c.value })}
+                className={cx('rounded-lg border p-2 text-left text-[12px] transition-colors', (d.cardStyle ?? 'solid') === c.value ? 'border-plum bg-plum-tint text-ink' : 'border-line bg-white text-ink-soft hover:border-plum/40')}>
+                <span className="block font-medium text-ink">{c.label}</span>{c.hint}
+              </button>
+            ))}</div>
+          </Field>
           <p className="text-[12px] text-stone">An editorial photo beside the form — behind it on phones (any size; large photos are resized for you). Without one, a quiet dark panel is shown.</p>
         </div>
         <div className="flex aspect-[4/5] items-end overflow-hidden border border-line bg-[#14110E] p-4 text-[#F3EEE7]" style={d.imageVersion ? { backgroundImage: `url(/brand/login-image?v=${d.imageVersion})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}>
           {!d.imageVersion && <ImageIcon className="mb-auto h-5 w-5 opacity-40" />}
-          {d.message && <span className="text-[12px] drop-shadow">{d.message}</span>}
+          {/* On a phone: the card as chosen over the photo. */}
+          <span className={cx('mx-auto mb-auto mt-auto flex w-[78%] flex-col items-center gap-1.5 p-3', PREVIEW[d.cardStyle ?? 'solid'])}>
+            <span className={cx('font-display text-[15px] uppercase tracking-[0.06em]', (d.cardStyle ?? 'solid') === 'none' ? 'text-white drop-shadow' : 'text-ink')}>Addendum</span>
+            <span className="h-3 w-full rounded-sm bg-white/90" /><span className="h-3 w-full rounded-sm bg-white/90" /><span className="h-3 w-full rounded-sm bg-[#6b5242]" />
+          </span>
         </div>
       </div>
     </Card>
@@ -158,3 +170,16 @@ async function shrinkPhoto(f: File, maxBytes: number): Promise<string> {
   } finally { bmp.close(); }
   throw new Error('That photo is too large even after resizing — try a smaller one.');
 }
+
+const CARD_STYLES: { value: 'solid' | 'frosted' | 'clear' | 'none'; label: string; hint: string }[] = [
+  { value: 'solid', label: 'Solid', hint: 'A clean light card' },
+  { value: 'frosted', label: 'Frosted', hint: 'Soft glass, photo blurred behind' },
+  { value: 'clear', label: 'See-through', hint: 'The photo shows through' },
+  { value: 'none', label: 'No card', hint: 'The form on the photo' },
+];
+const PREVIEW: Record<'solid' | 'frosted' | 'clear' | 'none', string> = {
+  solid: 'rounded-lg bg-[#faf8f5] shadow-lg',
+  frosted: 'rounded-lg border border-white/50 bg-white/60 shadow-lg backdrop-blur-md',
+  clear: 'rounded-lg border border-white/40 bg-white/25 shadow-lg backdrop-blur-[2px]',
+  none: '',
+};

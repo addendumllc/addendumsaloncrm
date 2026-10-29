@@ -152,7 +152,7 @@ const settingsPatch = z.object({
     sections: z.record(navPath, menuSection),
     menuDefaults: z.object({ admin: sidebarDefaults, receptionist: sidebarDefaults, stylist: sidebarDefaults, assistant: sidebarDefaults }).partial(),
   }).partial().optional(),
-  login: z.object({ headline: z.string().trim().max(40), message: z.string().trim().max(160) }).partial().optional(),
+  login: z.object({ headline: z.string().trim().max(40), message: z.string().trim().max(160), cardStyle: z.enum(['solid', 'frosted', 'clear', 'none']) }).partial().optional(),
   sharedSettings: z.object({ rules: z.boolean(), rebooking: z.boolean(), reminders: z.boolean(), replies: z.boolean() }).partial().optional(),
   onboardingComplete: z.boolean().optional(),
 });

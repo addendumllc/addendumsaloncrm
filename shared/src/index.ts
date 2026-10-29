@@ -1707,8 +1707,10 @@ export const DEFAULT_WORKSPACES: WorkspaceSettings = {
   },
 };
 /** The sign-in screen (Settings → Businesses): umbrella-branded, with an optional editorial photo. */
-export interface LoginSettings { headline: string; message: string; imageVersion: string | null }
-export const DEFAULT_LOGIN: LoginSettings = { headline: 'Addendum', message: 'Salon & Hair — sign in to your workspace.', imageVersion: null };
+/** cardStyle: how the sign-in form sits over the photo on phones — solid card, frosted glass, see-through, or no card. */
+export type LoginCardStyle = 'solid' | 'frosted' | 'clear' | 'none';
+export interface LoginSettings { headline: string; message: string; imageVersion: string | null; cardStyle?: LoginCardStyle }
+export const DEFAULT_LOGIN: LoginSettings = { headline: 'Addendum', message: 'Salon & Hair — sign in to your workspace.', imageVersion: null, cardStyle: 'solid' };
 /** The 16:10-ish photo beside the sign-in form: JPEG, PNG or WebP up to this size. */
 export const LOGIN_IMAGE_MAX_BYTES = 1536 * 1024;
 
