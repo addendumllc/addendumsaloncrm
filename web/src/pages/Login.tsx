@@ -51,20 +51,17 @@ export function LoginPage() {
   const biz = { ...DEFAULT_WORKSPACES.businesses, ...(cfg?.businesses ?? {}) };
   const photo = login.imageVersion ? `/brand/login-image?v=${encodeURIComponent(login.imageVersion)}` : null;
   return (
-    <div className="grid min-h-[100dvh] bg-paper lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
-      {/* Umbrella brand panel: an editorial photo (Settings → Businesses) or a quiet typographic panel. Decorative only. */}
-      <aside className="relative flex min-h-[200px] flex-col justify-between overflow-hidden bg-[#14110E] px-6 py-6 text-[#F3EEE7] sm:px-10 lg:min-h-0 lg:py-10" aria-hidden>
+    <div className="relative grid min-h-[100dvh] bg-paper lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+      {/* The editorial photo (Settings → Businesses): beside the form on large screens, behind it on phones. Decorative. */}
+      <aside className="absolute inset-0 flex flex-col justify-between overflow-hidden bg-[#14110E] px-6 py-6 text-[#F3EEE7] sm:px-10 lg:relative lg:inset-auto lg:py-10" aria-hidden>
         {photo && <img src={photo} alt="" className="absolute inset-0 h-full w-full object-cover" />}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-black/30" />
-        <p className="relative text-[11px] font-medium uppercase tracking-[0.32em] text-[#F3EEE7]/80">{biz.salon.name} · {biz.hair.name}</p>
-        <div className="relative">
-          {/* One line, sized to the panel (it's about half the screen on large screens), never cut off. */}
-          <p className="font-display whitespace-nowrap uppercase leading-[0.95] tracking-[0.02em] text-[clamp(36px,11vw,64px)] lg:text-[clamp(44px,6vw,88px)]" style={{ fontWeight: 300, zoom: 1 }}>{login.headline || 'Addendum'}</p>
-          {login.message && <p className="mt-3 max-w-md text-[14px] text-[#F3EEE7]/80 sm:text-[15px]">{login.message}</p>}
-        </div>
+        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/15 to-black/30" />
+        <p className="relative hidden text-[11px] font-medium uppercase tracking-[0.32em] text-[#F3EEE7]/80 lg:block">{biz.salon.name} · {biz.hair.name}</p>
+        {/* The name shows once — above the form; the panel carries only an optional message. */}
+        {login.message && <p className="relative hidden max-w-md text-[15px] text-[#F3EEE7]/85 lg:block">{login.message}</p>}
       </aside>
-      <div className="flex items-center justify-center px-5 py-10">
-      <div className="w-full max-w-[380px]">
+      <div className="relative z-10 flex items-center justify-center px-4 py-10 lg:px-5">
+      <div className="w-full max-w-[400px] rounded-2xl bg-paper/95 px-5 py-7 shadow-pop backdrop-blur-sm lg:max-w-[380px] lg:rounded-none lg:bg-transparent lg:p-0 lg:shadow-none lg:backdrop-blur-none">
         <BrandMark a={{ ...DEFAULT_APPEARANCE, ...(cfg?.appearance ?? {}) }} size="login" />
         <p className="mt-2 text-center text-[15px] text-stone">Sign in to your workspace</p>
         <form onSubmit={submit} className="mt-8 space-y-4 border border-line bg-white p-6">

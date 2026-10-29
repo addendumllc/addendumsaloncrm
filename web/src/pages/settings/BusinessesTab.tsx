@@ -123,18 +123,17 @@ function LoginCard({ editable }: { editable: boolean }) {
       footer={<SaveBar dirty={sec.dirty} saving={sec.saving} onSave={save} onReset={sec.reset} disabled={!editable} />}>
       <div className="grid gap-5 sm:grid-cols-[1fr_240px]">
         <div className="space-y-3">
-          <Field label="Headline"><input className="field" disabled={!editable} maxLength={40} value={d.headline} onChange={(e) => sec.setDraft({ ...d, headline: e.target.value })} /></Field>
-          <Field label="Message"><input className="field" disabled={!editable} maxLength={160} value={d.message} onChange={(e) => sec.setDraft({ ...d, message: e.target.value })} /></Field>
+          <Field label="Message" hint="Optional — shown on the photo on large screens. The name shows once, above the form (your logo)."><input className="field" disabled={!editable} maxLength={160} value={d.message} onChange={(e) => sec.setDraft({ ...d, message: e.target.value })} /></Field>
           <div className="flex flex-wrap gap-2">
             <input ref={file} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => upload(e.target.files?.[0])} />
             <Button size="sm" icon={<Upload className="h-4 w-4" />} loading={busy} disabled={!editable} onClick={() => file.current?.click()}>{d.imageVersion ? 'Replace photo' : 'Upload photo'}</Button>
             {d.imageVersion && <Button size="sm" variant="ghost" icon={<Trash2 className="h-4 w-4" />} disabled={!editable || busy} onClick={remove}>Remove photo</Button>}
           </div>
-          <p className="text-[12px] text-stone">An editorial photo beside the form (any size — large photos are resized for you). Without one, a quiet typographic panel is shown.</p>
+          <p className="text-[12px] text-stone">An editorial photo beside the form — behind it on phones (any size; large photos are resized for you). Without one, a quiet dark panel is shown.</p>
         </div>
         <div className="flex aspect-[4/5] items-end overflow-hidden border border-line bg-[#14110E] p-4 text-[#F3EEE7]" style={d.imageVersion ? { backgroundImage: `url(/brand/login-image?v=${d.imageVersion})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}>
           {!d.imageVersion && <ImageIcon className="mb-auto h-5 w-5 opacity-40" />}
-          <span className="font-display text-[22px] uppercase tracking-[0.04em] drop-shadow">{d.headline || 'Addendum'}</span>
+          {d.message && <span className="text-[12px] drop-shadow">{d.message}</span>}
         </div>
       </div>
     </Card>
