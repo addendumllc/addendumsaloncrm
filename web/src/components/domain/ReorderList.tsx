@@ -11,7 +11,7 @@ interface Row {
   key: string; label: string; shade: string; group: string; sku: string | null; length: string | null; type: 'weft' | 'ktip' | 'tape' | 'clipin'; supplier: string | null;
   available: number; committed: number; incoming: number; ratePerDay: number; units30: number; noSales: boolean; daysUntilStockout: number | null;
   productionDays: number; shippingDays: number; leadDays: number; moq: number | null; caseSize: number | null; costCents: number | null;
-  planNote: string; suggestedQty: number; minimumQty: number | null; explain: string; why: string[];
+  planNote: string; suggestedQty: number; forecastQty: number; minimumQty: number | null; explain: string; why: string[];
   tier: 1 | 2 | 3; urgent: boolean; badges: string[]; warning: string | null; flags: string[];
 }
 interface ListResponse {
@@ -147,6 +147,13 @@ export function ReorderList({ onOrders }: { onOrders: () => void }) {
                           </button>
                           <ChevronDown className={cx('h-4 w-4 shrink-0 text-stone transition-transform', expanded && 'rotate-180')} aria-hidden />
                           <ProductSettingsButton productKey={r.key} />
+                          {/* Suggested from sales, beside the usual amount; tap to use it. */}
+                          <button type="button" className="shrink-0 text-center leading-tight disabled:opacity-60" disabled={q === r.forecastQty}
+                            onClick={() => { setQty({ ...qty, [r.key]: r.forecastQty }); if (r.forecastQty > 0 && !isIn(r)) setInclude({ ...include, [r.key]: true }); }}
+                            title="Suggested from sales: lead time + 30 days, safety stock and pre-orders, less stock and what’s on order. Tap to use it." aria-label={`Use the suggested ${r.forecastQty} for ${r.label}`}>
+                            <span className="block text-[10px] uppercase tracking-wide text-stone">Suggested</span>
+                            <span className={cx('block num text-[16px]', q === r.forecastQty ? 'text-stone' : 'text-plum underline decoration-dotted underline-offset-2')}>{r.forecastQty}</span>
+                          </button>
                           <label className="shrink-0 text-right">
                             <input type="number" min={0} inputMode="numeric" className={cx('field num h-10 w-20 text-right text-[16px]', bad && 'border-rose')} value={q} disabled={!isIn(r)}
                               onChange={(e) => { const v = Math.max(0, Math.round(Number(e.target.value) || 0)); setQty({ ...qty, [r.key]: v }); if (v > 0 && !isIn(r)) setInclude({ ...include, [r.key]: true }); }}

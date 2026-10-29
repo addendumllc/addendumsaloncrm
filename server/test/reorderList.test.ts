@@ -64,6 +64,10 @@ describe('Reorder List', () => {
     expect(rw).toEqual([...rw].sort((a, b) => a - b));
     expect(r.items.find((i) => i.label.includes('Aperol'))!.shade).toBe('Aperol');
     expect(r.items.find((i) => i.label.includes('Platinum'))!.group).toBe('K-Tips');
+    // Suggested from sales beside the usual amount: covers the lead time + 30 days, in full cases.
+    const black = r.items.find((i) => i.label.includes('22" Black'))!;
+    expect(black.forecastQty).toBeGreaterThanOrEqual(Math.ceil(0.2 * (black.leadDays + 30)));
+    expect(black.forecastQty % 10).toBe(0);
     // Out of stock first in each section.
     expect(r.items[0].badges).toContain('OUT OF STOCK');
     const kt = r.items.filter((i) => i.type === 'ktip');

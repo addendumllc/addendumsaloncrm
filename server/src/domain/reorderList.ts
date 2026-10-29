@@ -65,7 +65,9 @@ export interface ReorderRow {
   available: number; committed: number; incoming: number; ratePerDay: number; units30: number; noSales: boolean;
   daysUntilStockout: number | null; stockoutOn: string | null; productionDays: number; shippingDays: number; leadDays: number; leadMissing: boolean;
   moq: number | null; moqMissing: boolean; caseSize: number | null; costCents: number | null;
-  plan: Plan; planNote: string; calculatedNeed: number; netNeed: number; suggestedQty: number; minimumQty: number | null; explain: string; why: string[];
+  plan: Plan; planNote: string; calculatedNeed: number; netNeed: number; suggestedQty: number;
+  /** From sales, whatever the plan: through the lead time plus 30 days, with safety stock and pre-orders, less stock and what's on order (min order and cases applied). */
+  forecastQty: number; minimumQty: number | null; explain: string; why: string[];
   /** 1 out of stock · 2 runs out before an order placed now could arrive · 3 other attention. */
   tier: 1 | 2 | 3; urgent: boolean; badges: string[]; warning: string | null; flags: string[];
   prefs: Prefs; history: { quantity: number; orderedOn: string; number: number }[];
@@ -169,6 +171,9 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; group?: s
     }
     parts.push(...steps, `Order ${qty}`);
 
+    const forecastNeed = Math.max(0, Math.ceil(rate * (lead + 30) + safety + owed - i.stock - i.incoming));
+    const forecastQty = forecastNeed > 0 ? applyRules(forecastNeed, i.moq, i.caseSize).qty : 0;
+
     const stockoutOn = days == null ? null : addDays(today, Math.floor(days));
     const coveredDays = rate > 0 ? (i.stock + i.incoming) / rate : null;
     const out = i.stock <= 0 || owed > 0;
@@ -190,7 +195,7 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; group?: s
       available: i.stock, committed, incoming: i.incoming, ratePerDay: rate, units30: i.units30, noSales: rate <= 0,
       daysUntilStockout: days == null ? null : Math.round(days), stockoutOn, productionDays: i.productionDays, shippingDays: i.shippingDays, leadDays: lead, leadMissing: i.leadSource.kind === 'missing',
       moq: i.moq, moqMissing, caseSize: i.caseSize, costCents: i.costCents,
-      plan: own, planNote, calculatedNeed: calculated, netNeed: net, suggestedQty: qty, minimumQty: i.moq, explain: parts.join(' · '), why,
+      plan: own, planNote, calculatedNeed: calculated, netNeed: net, suggestedQty: qty, forecastQty, minimumQty: i.moq, explain: parts.join(' · '), why,
       tier, urgent: tier <= 2, badges, warning, flags, prefs: p, history: hist,
     });
   }
