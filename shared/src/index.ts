@@ -1337,6 +1337,12 @@ export function hairCompareByMethod(a: { label: string; sku?: string | null }, b
   return cmp(x.method ?? '~', y.method ?? '~') || lenNum(x.length) - lenNum(y.length) || cmp(x.color, y.color) || cmp(x.weight ?? '', y.weight ?? '') || cmp(a.label, b.label);
 }
 
+/** For counting stock: collection (its purchasing collection, else the method), then colour, then length — 18", 22", 24" of a colour together. */
+export function hairCompareByColor(a: { label: string; sku?: string | null; collection?: string | null }, b: { label: string; sku?: string | null; collection?: string | null }) {
+  const x = hairName(a.label, a.sku), y = hairName(b.label, b.sku);
+  return cmp(a.collection || x.method || '~', b.collection || y.method || '~') || cmp(x.color, y.color) || lenNum(x.length) - lenNum(y.length) || cmp(x.method ?? '', y.method ?? '') || cmp(x.weight ?? '', y.weight ?? '') || cmp(a.label, b.label);
+}
+
 /** Order Hair's list after the admin's choices: only listed (if set), listed ones in their order, the rest by name. */
 export function arrangeOrderHair<T extends { sku: string; label: string }>(items: T[], layout: Partial<OrderHairLayout> | undefined): T[] {
   const l = { ...DEFAULT_ORDER_HAIR, ...(layout ?? {}) };

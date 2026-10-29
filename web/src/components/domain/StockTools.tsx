@@ -3,7 +3,7 @@ import { Fragment, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   STOCK_REASONS, hairLengthOf, productSearchText, productSearchWords, type PurchaseOrderDTO, type StockApplyResultDTO, type SupplierDTO, type StockChangeInput, type StockForecastDTO, type StockForecastResponse,
-  type StockProductDTO, type StockProductStatus, type StockTxnDTO, productName, hairCompareByMethod } from '@addendum/shared';
+  type StockProductDTO, type StockProductStatus, type StockTxnDTO, productName, hairCompareByMethod, hairCompareByColor } from '@addendum/shared';
 import { AlertTriangle, ArrowLeftRight, Settings2, ChevronDown, ChevronRight, Download, FileUp, ListPlus, PackageCheck, Plus, Replace, Search, Trash2, Pencil, X } from 'lucide-react';
 import { api } from '../../api/client';
 import { useCanDo } from '../../api/hooks';
@@ -119,7 +119,7 @@ function filterProducts(list: StockProductDTO[], q: string, status: string) {
   return list.filter((p) => (status === 'all' || p.status === status) && (!words.length || (() => {
     const text = productSearchText(p.label, p.sku, p.squareSku, p.shopifySku, p.supplier, ...p.collections, ...p.store2.map((e) => e.label));
     return words.every((w) => text.includes(w));
-  })()));
+  })())).sort(hairCompareByColor); // collection, colour, then length
 }
 const SEARCH_HINT = 'Search name, colour, collection or SKU (e.g. aperol 18")';
 
