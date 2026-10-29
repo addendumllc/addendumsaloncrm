@@ -98,7 +98,12 @@ export async function inactiveProducts(): Promise<Set<string>> {
   const rows = await db().query<{ product_key: string }>("SELECT product_key FROM stock_products WHERE status <> 'active'");
   return new Set(rows.map((r) => r.product_key));
 }
-const ACTIVE_LINK = `NOT EXISTS (SELECT 1 FROM stock_products sp WHERE sp.product_key = l.square_variation_id AND sp.status <> 'active')`;
+/** Products marked Not tracked (the stock sync leaves them alone). Discontinued ones still sync while their last stock sells. */
+async function untrackedProducts(): Promise<Set<string>> {
+  const rows = await db().query<{ product_key: string }>("SELECT product_key FROM stock_products WHERE status = 'not_tracked'");
+  return new Set(rows.map((r) => r.product_key));
+}
+const ACTIVE_LINK = `NOT EXISTS (SELECT 1 FROM stock_products sp WHERE sp.product_key = l.square_variation_id AND sp.status = 'not_tracked')`;
 
 // ---------------- Products kept in one store only ----------------
 
@@ -440,7 +445,7 @@ async function execute(runId: string, onlyFailed: boolean): Promise<InventorySyn
 
   const off = await shopifySyncOff();
   const allLinks = await db().query<any>(`SELECT * FROM inventory_sync_links ${onlyFailed ? "WHERE status IN ('error','pending')" : ''} ORDER BY lower(label)`);
-  const gone = await inactiveProducts();
+  const gone = await untrackedProducts();
   const isGone = (l: any) => gone.has(l.square_variation_id) || gone.has(`shopify:${l.shopify_inventory_item_id}`);
   const links = allLinks.filter((l) => !off.has(l.square_variation_id) && !isGone(l));
   const skippedGone = allLinks.filter(isGone).length;
@@ -773,7 +778,7 @@ async function execute(runId: string, onlyFailed: boolean): Promise<InventorySyn
     tally.failed && `${tally.failed} failed`,
     shopifyStale.size && `${shopifyStale.size} will retry`,
     skippedOff && `${skippedOff} skipped (separate stock — not synced)`,
-    skippedGone && `${skippedGone} discontinued (not tracked)`,
+    skippedGone && `${skippedGone} not tracked`,
   ].filter(Boolean);
   await db().query(
     `UPDATE inventory_sync_runs SET status = $2, finished_at = now(), stage = NULL, processed = total, updated_square = $3, updated_shopify = $4,

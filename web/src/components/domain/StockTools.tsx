@@ -780,7 +780,9 @@ export function StockView({ store = 'all', initialQuery = '', initialLow = false
   const [coll, setColl] = useState('');
   const { data: internal } = useInternalCollections();
   const collFilter = useMemo(() => collectionFilter(internal, [...new Set((data?.products ?? []).flatMap((p) => p.collections))].sort((a, b) => a.localeCompare(b))), [internal, data]);
-  const shown = useMemo(() => filterProducts(data?.products ?? [], q, 'active').filter((p) => (p.squareQty != null || p.shopifyQty != null)
+  // Discontinued products stay on the count while they still have stock (they just aren't reordered).
+  const shown = useMemo(() => filterProducts(data?.products ?? [], q, 'all').filter((p) => (p.squareQty != null || p.shopifyQty != null)
+    && (p.status === 'active' || (p.status === 'discontinued' && lowestStock(p) > 0))
     && (!coll || collFilter.matches(p, coll))
     && (store === 'all' || (store === 'salon' ? !!p.squareVariationId : !!p.shopifyInventoryItemId || p.store2.length > 0))
     && (!low || (lowestStock(p) <= (Number(lowAt) || 0) && (!hideCounted || !countedRecently(p.key))))), [data, q, store, coll, collFilter, low, lowAt, hideCounted, lastCounts]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -853,7 +855,7 @@ export function StockView({ store = 'all', initialQuery = '', initialLow = false
             <li key={p.key} className={cx('flex items-center gap-3 rounded-xl2 border bg-white p-3', vals[p.key]?.trim() ? 'border-amber/50' : 'border-line')}>
               <ProductThumb src={p.imageUrl} alt={p.label} />
               <div className="min-w-0 flex-1">
-                <p className="text-[15px] font-medium leading-snug text-ink">{productName(p.label, p.sku)}<ProductSettingsButton productKey={p.key} className="ml-1 align-middle" /></p>
+                <p className="text-[15px] font-medium leading-snug text-ink">{productName(p.label, p.sku)}<ProductSettingsButton productKey={p.key} className="ml-1 align-middle" />{p.status === 'discontinued' && <Badge tone="neutral" className="ml-1 align-middle">Discontinued</Badge>}</p>
                 <p className="truncate font-mono text-[12px] text-stone">{p.sku ?? 'No SKU'}{p.collections.length ? <span className="font-sans"> · {p.collections.slice(0, 2).join(' · ')}</span> : null}</p>
                 <div className="mt-1"><StockCell p={p} store2={data.store2} /></div>
                 {countedNote(p.key)}
@@ -871,7 +873,7 @@ export function StockView({ store = 'all', initialQuery = '', initialLow = false
             <tbody className="divide-y divide-line">
               {shown.slice(0, 400).map((p) => (
                 <tr key={p.key}>
-                  <td className="px-3 py-1.5 text-ink"><span className="flex items-center gap-2.5"><ProductThumb src={p.imageUrl} alt={p.label} size="sm" /><span>{productName(p.label, p.sku)}<ProductSettingsButton productKey={p.key} className="ml-1 align-middle" /><Collections p={p} /></span></span></td>
+                  <td className="px-3 py-1.5 text-ink"><span className="flex items-center gap-2.5"><ProductThumb src={p.imageUrl} alt={p.label} size="sm" /><span>{productName(p.label, p.sku)}<ProductSettingsButton productKey={p.key} className="ml-1 align-middle" />{p.status === 'discontinued' && <Badge tone="neutral" className="ml-1 align-middle">Discontinued</Badge>}<Collections p={p} /></span></span></td>
                   <td className="px-2 py-1.5 font-mono text-ink-soft">{p.sku}</td>
                   <td className="px-2 py-1.5"><StockCell p={p} store2={data.store2} />{low && <span className="block">{countedNote(p.key)}</span>}</td>
                   <td className="px-2 py-1.5"><input inputMode="numeric" className={cx('w-full rounded-md border border-line bg-white px-2 py-1 num', vals[p.key]?.trim() && 'border-amber bg-amber-tint')} value={vals[p.key] ?? ''} onChange={(e) => setVals((v) => ({ ...v, [p.key]: e.target.value }))} /></td>

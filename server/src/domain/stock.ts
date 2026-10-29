@@ -1708,8 +1708,8 @@ const NOT_HAIR_WORDS = /\b(care|kits?|remover|brush(es)?|shampoo|conditioner|too
 const isExtension = (i: StockForecastDTO, s: StockForecastSettings) => (s.recountCollections?.length
   ? s.recountCollections.some((c) => i.collection === c || !!i.collection?.startsWith(`${c} / `) || i.collections.includes(c))
   : EXTENSION_WORDS.test(i.label) && !NOT_HAIR_WORDS.test(i.label));
-/** Low enough to recount: an extension still sold, at or below the recount level. */
-const lowForRecount = (i: StockForecastDTO, s: StockForecastSettings) => i.status !== 'discontinued' && isExtension(i, s) && i.stock <= (s.recountAt ?? 10);
+/** Low enough to recount: an extension at or below the recount level (a discontinued one too while it still has stock). */
+const lowForRecount = (i: StockForecastDTO, s: StockForecastSettings) => (i.status !== 'discontinued' || i.stock > 0) && isExtension(i, s) && i.stock <= (s.recountAt ?? 10);
 
 /** When each product was last counted (a stock count), by product and by SKU (a SKU's other listings count too). */
 async function lastCounts() {

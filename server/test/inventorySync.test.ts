@@ -79,6 +79,18 @@ describe('Square ↔ Shopify inventory sync', () => {
     expect(MockShopifyService.stock.get(SH.tape)).toBe(15);
   });
 
+  it('discontinued products keep syncing while their last stock sells; Not tracked ones are left alone', async () => {
+    await sync();
+    await db().query(`INSERT INTO stock_products(product_key, status) VALUES ($1, 'discontinued'), ($2, 'not_tracked')
+      ON CONFLICT (product_key) DO UPDATE SET status = EXCLUDED.status`, [SQ.weft60, SQ.tape]);
+    MockShopifyService.stock.set(SH.weft60, 3);
+    demoSquareStock.set(SQ.tape, 15);
+    await sync();
+    expect(demoSquareStock.get(SQ.weft60)).toBe(3);
+    expect(MockShopifyService.stock.get(SH.tape)).not.toBe(15);
+    await db().query('DELETE FROM stock_products WHERE product_key = ANY($1)', [[SQ.weft60, SQ.tape]]);
+  });
+
   it('relinks by SKU when the Square product was deleted and re-created', async () => {
     await sync();
     const before = await link(SQ.weft60);
