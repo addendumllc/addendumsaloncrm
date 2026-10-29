@@ -1,4 +1,4 @@
-import { hairLengthOf, type StockForecastDTO, hairCompareByMethod } from '@addendum/shared';
+import { hairLengthOf, type StockForecastDTO, hairCompareByColor } from '@addendum/shared';
 import { db } from '../db/index.js';
 import { badRequest } from '../lib/errors.js';
 import { getKV, setKV } from '../repos/settings.js';
@@ -34,13 +34,11 @@ export const hairTypeOf = (i: Pick<StockForecastDTO, 'label' | 'collections'> & 
   }
   return null;
 };
-/** Lisa's sections, in the order she orders them; anything else follows by type. */
-export const GROUP_ORDER = ['18" Redefined Wefts', '22" Redefined Wefts', '24" Redefined Wefts', '18" K-Tips', '22" K-Tips', '22" Tapes', '18" Tapes', 'Clip-Ins'];
+/** Lisa's sections (by collection — the length shows by each name), in the order she orders them; anything else follows by type. */
+export const GROUP_ORDER = ['Redefined Wefts', 'Wefts', 'K-Tips', 'Tapes', 'Clip-Ins'];
 const LINE: Record<HairType, string> = { weft: 'Wefts', ktip: 'K-Tips', tape: 'Tapes', clipin: 'Clip-Ins' };
-export function groupOf(label: string, type: HairType, length: string | null) {
-  if (type === 'clipin') return 'Clip-Ins';
-  const line = type === 'weft' && /redefined/i.test(label) ? 'Redefined Wefts' : LINE[type];
-  return length ? `${length.replace(/[”″]/g, '"')} ${line}` : line;
+export function groupOf(label: string, type: HairType) {
+  return type === 'weft' && /redefined/i.test(label) ? 'Redefined Wefts' : LINE[type];
 }
 const groupRank = (g: string, type: HairType) => {
   const i = GROUP_ORDER.indexOf(g);
@@ -58,7 +56,7 @@ function clean(first: string) {
   return first.replace(/\b\d+(\.\d+)?\s*("|”|″|inch(es)?|in)(?=\s|$)/gi, '')
     .replace(/\b(redefined|signature|hand[\s-]?tied|addendum)\b/gi, '')
     .replace(/\b(wefts?|[ik][\s-]?tips?|tape[\s-]?ins?|tapes?|clip[\s-]?ins?|extensions?)\b/gi, '')
-    .replace(/\s{2,}/g, ' ').replace(/^[\s\-–·]+|[\s\-–·]+$/g, '').trim();
+    .replace(/(\s+[-–])+\s+/g, ' · ').replace(/\s{2,}/g, ' ').replace(/^[\s\-–·]+|[\s\-–·]+$/g, '').trim();
 }
 
 export interface Prefs { typicalQty: number | null; preferredPlan: Plan | null; safetyUnits: number | null; notes: string | null; updatedAt: string | null }
@@ -188,7 +186,7 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; group?: s
     if (!out && !beforeArrival && i.incoming > 0 && qty === 0) why.push('Covered by what’s already on order.');
     if (own === 'normal' && i.incoming > 0 && qty > 0) why.push(`${i.incoming} already on order — lower the amount if that covers it.`);
     rows.push({
-      key: i.key, label: i.label, shade: shadeOf(i.label), group: groupOf(i.label, type, hairLengthOf(i.label, i.sku)), sku: i.sku, length: hairLengthOf(i.label, i.sku), type, supplier: i.supplier ?? fallback, collection: i.collection ?? i.collections[0] ?? null,
+      key: i.key, label: i.label, shade: shadeOf(i.label), group: groupOf(i.label, type), sku: i.sku, length: hairLengthOf(i.label, i.sku), type, supplier: i.supplier ?? fallback, collection: i.collection ?? i.collections[0] ?? null,
       available: i.stock, committed, incoming: i.incoming, ratePerDay: rate, units30: i.units30, noSales: rate <= 0,
       daysUntilStockout: days == null ? null : Math.round(days), stockoutOn, productionDays: i.productionDays, shippingDays: i.shippingDays, leadDays: lead, leadMissing: i.leadSource.kind === 'missing',
       moq: i.moq, moqMissing, caseSize: i.caseSize, costCents: i.costCents,
@@ -198,9 +196,9 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; group?: s
   }
   // Wefts first, then K-tips; in each: out of stock, then runs out before an order could arrive, then the rest —
   // soonest stock-out first, longer lead first.
-  // Lisa's sections in her order (18" / 22" / 24" Redefined Wefts, K-Tips, Tapes, Clip-Ins) — method, then length; in each,
-  // by colour (urgent ones are marked, not moved).
-  rows.sort((a, b) => groupRank(a.group, a.type) - groupRank(b.group, b.type) || a.group.localeCompare(b.group) || hairCompareByMethod(a, b));
+  // Lisa's sections in her order (Redefined Wefts, K-Tips, Tapes, Clip-Ins); in each, by colour then length — 18", 22", 24"
+  // of a colour together (urgent ones are marked, not moved).
+  rows.sort((a, b) => groupRank(a.group, a.type) - groupRank(b.group, b.type) || a.group.localeCompare(b.group) || hairCompareByColor({ label: a.label, sku: a.sku }, { label: b.label, sku: b.sku }));
   const filtered = rows.filter((r) => (!opts.type || r.type === opts.type) && (!opts.group || r.group === opts.group) && (!opts.collection || r.collection === opts.collection) && (!opts.supplier || r.supplier === opts.supplier));
   const suppliers = await supplierRules();
   return {

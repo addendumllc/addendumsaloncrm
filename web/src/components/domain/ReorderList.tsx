@@ -34,7 +34,8 @@ const problemOf = (qty: number, r: Row) => {
   if (r.caseSize && r.caseSize > 1 && qty % r.caseSize) return `Cases of ${r.caseSize}`;
   return null;
 };
-const nameOf = (r: Row) => (r.type === 'clipin' && r.length ? `${r.shade} · ${r.length}` : r.shade);
+/** Length by the colour ("18\" Aperol Spritz"); the section is the collection. */
+const nameOf = (r: Row) => (r.length ? `${r.length.replace(/[”″]/g, '"')} ${r.shade}` : r.shade);
 /** One short status: what's left and the most important flag. */
 const statusOf = (r: Row) => (r.available <= 0 ? 'Out of stock' : `${r.available} left`) + (r.incoming ? ` · ${r.incoming} coming` : '')
   + (r.available > 0 && r.daysUntilStockout != null && r.daysUntilStockout <= 14 ? ` · runs out in ~${r.daysUntilStockout}d` : '');

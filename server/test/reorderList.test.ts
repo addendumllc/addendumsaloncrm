@@ -55,12 +55,15 @@ describe('Reorder List', () => {
     expect(labels).not.toContain('22" Weft · Salon only');
     expect(labels).toContain('18" Redefined Weft · Honey'); // 8 days of stock with 8 units
     expect(labels).toContain('22" Signature Weft · Ash');
-    // Lisa's sections in her order: 18" / 22" Redefined Wefts, other wefts, K-Tips, then Clip-Ins.
+    // Lisa's sections in her order: Redefined Wefts, other wefts, K-Tips, then Clip-Ins (the length is by each name).
     const order = r.items.map((i) => i.group);
-    expect(order.indexOf('18" Redefined Wefts')).toBe(0);
-    expect(order.lastIndexOf('22" K-Tips')).toBeLessThan(order.indexOf('Clip-Ins'));
+    expect(order.indexOf('Redefined Wefts')).toBe(0);
+    expect(order.lastIndexOf('K-Tips')).toBeLessThan(order.indexOf('Clip-Ins'));
+    // In a section: by colour, then length.
+    const rw = r.items.filter((i) => i.group === 'Redefined Wefts').map((i) => i.shade);
+    expect(rw).toEqual([...rw].sort((a, b) => a.localeCompare(b)));
     expect(r.items.find((i) => i.label.includes('Aperol'))!.shade).toBe('Aperol');
-    expect(r.items.find((i) => i.label.includes('Platinum'))!.group).toBe('20" K-Tips');
+    expect(r.items.find((i) => i.label.includes('Platinum'))!.group).toBe('K-Tips');
     // Out of stock first in each section.
     expect(r.items[0].badges).toContain('OUT OF STOCK');
     const kt = r.items.filter((i) => i.type === 'ktip');
