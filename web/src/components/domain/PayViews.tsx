@@ -122,7 +122,7 @@ export function YearTable({ url, showPaid = true, staffId }: { url: string; show
   // Columns chosen in the dropdown (remembered on this device). Until someone chooses, columns that are zero all year are hidden.
   const [chosen, setChosen] = useState<Optional[] | null>(() => { try { const v = localStorage.getItem(COLS_KEY); return v ? JSON.parse(v) : null; } catch { return null; } });
   const choose = (v: Optional[] | null) => { setChosen(v); try { if (v) localStorage.setItem(COLS_KEY, JSON.stringify(v)); else localStorage.removeItem(COLS_KEY); } catch { /* private window */ } };
-  const { data, isLoading } = useQuery({ queryKey: ['pay-year', url, year], queryFn: () => api.get<{ rows: PayPeriodRowDTO[]; showTaxBreakdown?: boolean; commissionOnly?: boolean }>(`${url}?year=${year}`) });
+  const { data, isLoading } = useQuery({ queryKey: ['pay-year', url, year], queryFn: () => api.get<{ rows: PayPeriodRowDTO[]; showTaxBreakdown?: boolean; commissionOnly?: boolean }>(`${url}${url.includes('?') ? '&' : '?'}year=${year}`) });
   const today = dayKey(new Date());
   const rows = data?.rows ?? [];
   const sum = (k: keyof PayPeriodRowDTO) => rows.reduce((a, r) => a + ((r[k] as number) ?? 0), 0);

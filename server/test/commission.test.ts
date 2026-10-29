@@ -569,6 +569,17 @@ describe('Wages, hours and tips', () => {
     expect(adminView.summary).toHaveProperty('minutes');
     // A stylist can't change it.
     expect((await jen.put(`/api/commission/pay/${jenId}/commission-only`, { on: false })).status).toBe(403);
+    // Admins can switch to "What Jennifer sees": the same as her own page.
+    const asThem = (await admin.get(`/api/commission/staff/${jenId}?${range}&as=them`)).body;
+    expect([asThem.commissionOnly, asThem.pay, asThem.taxes]).toEqual([true, null, null]);
+    const yearThem = (await admin.get(`/api/commission/staff/${jenId}/year?as=them&year=${today().slice(0, 4)}`)).body;
+    expect(yearThem).toEqual(year);
+    // Turned off: what she sees has her hours but not the with-client split; the admin view keeps everything.
+    await admin.put(`/api/commission/pay/${jenId}/commission-only`, { on: false });
+    const full = (await admin.get(`/api/commission/staff/${jenId}?${range}&as=them`)).body;
+    const own = (await jen.get(`/api/commission/me?${range}`)).body;
+    expect(full.pay).toEqual(own.pay);
+    expect(full.taxes).toEqual(own.taxes);
     await admin.put(`/api/commission/pay/${jenId}/commission-only`, { on: false });
   });
 

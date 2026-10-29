@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { CommissionEntryDTO, CommissionPeriodDTO, CommissionStatusDTO, CommissionSummaryDTO, CommissionTeamRowDTO, PaySummaryDTO, TaxEstimateDTO } from '@addendum/shared';
-import { AlertTriangle, ArrowLeft, Download, Info, Lock, RefreshCw, UserCheck } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Download, Eye, Info, Lock, RefreshCw, UserCheck } from 'lucide-react';
 import { api, ApiError } from '../api/client';
 import { useCanDo, useMe } from '../api/hooks';
 import { addDaysKey, dayKey, labelOfKey, relative } from '../lib/format';
@@ -281,10 +281,14 @@ function StaffDetail({ id, dr, onBack }: { id: string; dr: ReturnType<typeof use
   const adminPay = me?.role === 'admin' && canDo('commission:manage');
   const [adjust, setAdjust] = useState(false);
   const [view, setView] = useState<PayView>('commission');
+  // "What they see": the page exactly as this person sees it on their own Earnings page.
+  const [asThem, setAsThem] = useState(false);
+  const them = asThem && id !== me?.id;
   const { data, isLoading } = useQuery({
-    queryKey: ['commission-staff', id, dr.range],
-    queryFn: () => api.get<{ staff: { id: string; name: string; squareLinked: boolean }; summary: CommissionSummaryDTO; entries: CommissionEntryDTO[]; pay: PaySummaryDTO | null; taxes: TaxEstimateDTO | null }>(`/commission/staff/${id}?from=${dr.range.from}&to=${dr.range.to}`),
+    queryKey: ['commission-staff', id, dr.range, them],
+    queryFn: () => api.get<{ staff: { id: string; name: string; squareLinked: boolean }; summary: CommissionSummaryDTO; entries: CommissionEntryDTO[]; pay: PaySummaryDTO | null; taxes: TaxEstimateDTO | null; commissionOnly?: boolean }>(`/commission/staff/${id}?from=${dr.range.from}&to=${dr.range.to}${them ? '&as=them' : ''}`),
   });
+  const first = (data?.staff.name ?? '').split(' ')[0] || 'They';
   return (
     <div>
       <button onClick={onBack} className="mb-3 inline-flex items-center gap-1 text-sm text-stone hover:text-ink"><ArrowLeft className="h-4 w-4" />Team</button>
@@ -293,13 +297,17 @@ function StaffDetail({ id, dr, onBack }: { id: string; dr: ReturnType<typeof use
         {canDo('commission:approve') && <Button onClick={() => setAdjust(true)}>Add adjustment</Button>}
         {canDo('commission:export') && <a className={buttonClass('secondary', 'md')} href={`/api/commission/export?from=${dr.range.from}&to=${dr.range.to}&staffId=${id}`}><Download className="h-4 w-4" />CSV</a>}
       </div>
-      <Segmented className="mb-4" value={view} onChange={setView} options={PAY_VIEWS} />
-      {view === 'year' ? <YearTable url={`/commission/staff/${id}/year`} staffId={adminPay ? id : undefined} /> : <DateRangeBar {...dr} />}
-      {view === 'taxes' && data && <TaxesPanel taxes={data.taxes} />}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <Segmented value={view} onChange={setView} options={PAY_VIEWS} />
+        {id !== me?.id && <Segmented size="sm" className="ml-auto" value={asThem ? 'them' : 'admin'} onChange={(v) => setAsThem(v === 'them')} options={[{ value: 'admin', label: 'Admin view' }, { value: 'them', label: `What ${first} sees` }]} />}
+      </div>
+      {them && <p className="mb-3 flex items-start gap-2 rounded-xl2 border border-plum/30 bg-plum-tint/40 px-4 py-2 text-[13px] text-ink"><Eye className="mt-0.5 h-4 w-4 shrink-0 text-plum" /><span>This is {first}’s own Earnings page, as {first} sees it{data?.commissionOnly ? ' — commission and tips only (Show only commission is on)' : ''}.</span></p>}
+      {view === 'year' ? <YearTable key={them ? 'them' : 'admin'} url={`/commission/staff/${id}/year${them ? '?as=them' : ''}`} staffId={adminPay && !them ? id : undefined} /> : <DateRangeBar {...dr} />}
+      {view === 'taxes' && data && (data.commissionOnly ? <Notice>{first}’s Earnings page shows commission and tips. Ask an administrator about hours, wages or taxes.</Notice> : <TaxesPanel taxes={data.taxes} />)}
       {view === 'commission' && (isLoading || !data ? <PageLoading /> : (
         <>
           {data.pay && <HoursWagesCard pay={data.pay} taxes={data.taxes} />}
-          <SummaryCards s={data.summary} />
+          <SummaryCards s={data.summary} personal={them} />
           <div className="mt-6"><CategoryEntries entries={data.entries} /></div>
         </>
       ))}
