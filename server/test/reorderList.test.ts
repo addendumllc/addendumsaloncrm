@@ -59,9 +59,9 @@ describe('Reorder List', () => {
     const order = r.items.map((i) => i.group);
     expect(order.indexOf('Redefined Wefts')).toBe(0);
     expect(order.lastIndexOf('K-Tips')).toBeLessThan(order.indexOf('Clip-Ins'));
-    // In a section: by colour, then length.
-    const rw = r.items.filter((i) => i.group === 'Redefined Wefts').map((i) => i.shade);
-    expect(rw).toEqual([...rw].sort((a, b) => a.localeCompare(b)));
+    // In a section: by length (18", 22", 24"), then colour.
+    const rw = r.items.filter((i) => i.group === 'Redefined Wefts').map((i) => Number.parseInt(i.length ?? '999', 10));
+    expect(rw).toEqual([...rw].sort((a, b) => a - b));
     expect(r.items.find((i) => i.label.includes('Aperol'))!.shade).toBe('Aperol');
     expect(r.items.find((i) => i.label.includes('Platinum'))!.group).toBe('K-Tips');
     // Out of stock first in each section.
