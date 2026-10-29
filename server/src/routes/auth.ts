@@ -22,6 +22,7 @@ const loginLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 10, skipSuccessfu
 /** Public, non-sensitive: lets the sign-in screen show demo hints only in Demo Mode. */
 authRouter.get('/config', ah(async (_req, res) => {
   const { appearance, accounts, login, workspaces } = await getSettings();
+  res.setHeader('Cache-Control', 'no-store'); // a changed sign-in look shows straight away
   // The sign-in screen: umbrella-branded (headline, photo, the businesses' names). The workspace's own look applies once signed in.
   res.json({ demoMode: isDemo(), accent: appearance.accent, appearance, allowAccessRequests: accounts.allowAccessRequests, login, businesses: workspaces?.businesses });
 }));
