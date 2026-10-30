@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ClockShiftDTO, TimesheetRowDTO } from '@addendum/shared';
+import { payPeriodFor, type ClockShiftDTO, type PaySchedule, type TimesheetRowDTO } from '@addendum/shared';
 import { ArrowDownToLine, ArrowUpFromLine, ChevronLeft, ChevronRight, Clock3, RefreshCw } from 'lucide-react';
 import { api } from '../../api/client';
 import { useCanDo, useMe } from '../../api/hooks';
@@ -10,7 +10,6 @@ import { ShiftModal, ShiftsList } from './Shifts';
 
 const ymdLocal = (iso: string) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
-const mondayOf = (k: string) => addDaysKey(k, -((weekdayOfKey(k) + 6) % 7));
 const usd = (c: number) => `$${(c / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 /** Hours always with 2 decimals (8.00, 9.25). */
 const h = (m: number) => (m / 60).toFixed(2);
@@ -26,7 +25,20 @@ export function PayrollTimesheet() {
   const toast = useToast();
   const qc = useQueryClient();
   const today = dayKey(new Date());
-  const [week, setWeek] = useState(mondayOf(today));
+  // Weeks follow the pay schedule (e.g. Saturday–Friday), so two weeks make one pay period.
+  const { data: status } = useQuery({ queryKey: ['commission-status'], queryFn: () => api.get<{ status: { paySchedule?: PaySchedule } }>('/commission/status').then((r) => r.status) });
+  const schedule = status?.paySchedule;
+  const weekStartDow = schedule ? weekdayOfKey(schedule.anchorStart) : 1;
+  const startOfWeek = (k: string) => addDaysKey(k, -((weekdayOfKey(k) - weekStartDow + 7) % 7));
+  const [chosenWeek, setWeek] = useState<string | null>(null);
+  const week = chosenWeek ?? startOfWeek(today);
+  const period = schedule ? payPeriodFor(week, schedule) : null;
+  const { data: periodRows } = useQuery({
+    queryKey: ['timesheet', 'period', period?.from, period?.to],
+    enabled: !!period,
+    queryFn: () => api.get<{ rows: TimesheetRowDTO[] }>(`/commission/timesheet?from=${period!.from}&to=${period!.to}`).then((r) => r.rows),
+  });
+  const periodOf = (staffId: string) => periodRows?.find((x) => x.staffId === staffId)?.pay;
   const days = Array.from({ length: 7 }, (_, i) => addDaysKey(week, i));
   const to = days[6];
   const { data, isLoading } = useQuery({
@@ -159,7 +171,7 @@ export function PayrollTimesheet() {
         <Button size="sm" variant="ghost" icon={<ChevronLeft className="h-4 w-4" />} onClick={() => setWeek(addDaysKey(week, -7))} aria-label="Previous week" />
         <span className="min-w-[200px] text-center text-[14px] font-medium text-ink">{labelOfKey(week, { month: 'short', day: 'numeric' })} – {labelOfKey(to, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
         <Button size="sm" variant="ghost" icon={<ChevronRight className="h-4 w-4" />} onClick={() => setWeek(addDaysKey(week, 7))} aria-label="Next week" />
-        {week !== mondayOf(today) && <Button size="sm" variant="ghost" onClick={() => setWeek(mondayOf(today))}>This week</Button>}
+        {week !== startOfWeek(today) && <Button size="sm" variant="ghost" onClick={() => setWeek(null)}>This week</Button>}
         {editable && <Button size="sm" icon={<ArrowDownToLine className="h-4 w-4" />} loading={copying} onClick={copyWeek}>Use Square hours for empty days</Button>}
         {ownerAdmin && <Button size="sm" icon={<ArrowUpFromLine className="h-4 w-4" />} loading={sending === 'week'} onClick={() => toSquare({ from: week, to: to < today ? to : today, ...(person ? { staffId: person } : {}) }, 'week')} title="Updates Square to the hours entered this week (replacing those days’ timecards)">{person ? `Send ${rows[0]?.name.split(' ')[0] ?? ''}’s hours to Square` : 'Send hours to Square'}</Button>}
         {ownerAdmin && <Button size="sm" icon={<RefreshCw className="h-4 w-4" />} loading={sending === 'fix'} onClick={fixDoubles} title="Checks this year’s Square timecards, removes overlapping ones (keeping the latest version of each day) and re-reads everyone’s hours">Fix doubled hours in Square</Button>}
@@ -167,6 +179,15 @@ export function PayrollTimesheet() {
           <input type="checkbox" checked={onlyHourly} onChange={(e) => setOnlyHourly(e.target.checked)} />Only hourly staff and anyone with hours
         </label>
       </div>
+      {period && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl2 border border-line bg-white px-4 py-2.5 text-[13px]">
+          <span className="text-ink"><b className="font-medium">Pay period</b> {labelOfKey(period.from, { month: 'short', day: 'numeric' })} – {labelOfKey(period.to, { month: 'short', day: 'numeric' })} · paid {labelOfKey(period.payDate, { month: 'short', day: 'numeric' })}</span>
+          {schedule?.frequency === 'biweekly' && [period.from, addDaysKey(period.from, 7)].map((w, i) => (
+            <button key={w} type="button" className={chipClass(week === w)} onClick={() => setWeek(w)}>Week {i + 1}</button>
+          ))}
+          <span className="text-stone">Each person’s pay-period total is under their name.</span>
+        </div>
+      )}
       {!!clockedIn?.length && (
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl2 border border-line bg-white px-4 py-2.5 text-[13px]">
           <span className="font-medium text-ink">Clocked in now:</span>
@@ -202,6 +223,9 @@ export function PayrollTimesheet() {
                 <tr key={r.staffId}>
                   <td className="px-4 py-2">
                     <span className="font-medium text-ink">{r.name}</span>
+                    {(() => { const p = periodOf(r.staffId); return p && p.minutes > 0 ? (
+                      <span className="block text-[12px] font-medium text-plum">Pay period: {h(p.minutes)} h{p.overtimeMinutes ? ` · ${h(p.regularMinutes ?? 0)} reg · ${h(p.overtimeMinutes)} OT` : ''}{p.doubleMinutes ? ` · ${h(p.doubleMinutes)} 2×` : ''}</span>
+                    ) : null; })()}
                     <span className="block text-[12px] text-stone">{r.payType === 'hourly' && r.hourlyRateCents != null ? `${usd(r.hourlyRateCents)}/hour` : r.payType === 'salary' ? 'Salary' : 'No wage set'}</span>
                     {editable && (
                       <button type="button" className="mt-0.5 text-[11px] text-plum hover:underline" onClick={() => setMode(r, r.mode === 'week' ? 'day' : 'week')}>
