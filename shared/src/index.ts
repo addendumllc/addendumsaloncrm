@@ -1623,6 +1623,10 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
     { id: 'modern', name: 'Addendum Modern', description: 'Cool greys, sans-serif headings, soft corners.', status: 'published', roles: [],
       type: { ...TYPE_STD, headingFont: 'inter', weight: 400 }, buttons: { size: 'default', radius: 'soft' },
       colors: { accent: '#2E2D2B', accent2: '#2E2D2B', background: '#F4F4F2', sidebar: '#FFFFFF', surface: '#FFFFFF', text: '#18181B', line: '#E4E4E7' } },
+    // addendumsalon.com: ivory (#F8F6F1), ink (#14110E), its brown accent (#5A2C1A), pale sage (#EAEBDB), EB Garamond + Helvetica-style text.
+    { id: 'salon', name: 'Addendum Salon', description: 'Matches addendumsalon.com: ivory pages, a deep brown accent, a pale sage menu and EB Garamond headings.', status: 'published', roles: [],
+      type: { ...TYPE_STD, font: 'helvetica', headingFont: 'eb-garamond' }, buttons: BTN_STD,
+      colors: { accent: '#5A2C1A', accent2: '#C9B39C', background: '#F8F6F1', sidebar: '#EAEBDB', surface: '#FAFAF8', text: '#14110E', line: '#DEDBD3' } },
   ],
   defaultTheme: 'neutral',
   allow: { colors: true, type: true, buttons: true },
@@ -1887,7 +1891,8 @@ export const FONT_SLOTS: { slot: FontSlot; label: string; hint: string }[] = [
 export const FONT_CHOICES: { id: string; label: string; kind: 'serif' | 'sans'; stack: string; note?: string }[] = [
   { id: 'cormorant-garamond', label: 'Cormorant Garamond', kind: 'serif', stack: '"Cormorant Garamond", Georgia, serif', note: 'Classic' },
   { id: 'cormorant', label: 'Cormorant', kind: 'serif', stack: 'Cormorant, Georgia, serif', note: 'addendumhair.com headings' },
-  { id: 'nanum-myeongjo', label: 'Nanum Myeongjo', kind: 'serif', stack: '"Nanum Myeongjo", Georgia, serif', note: 'addendumsalon.com headings' },
+  { id: 'eb-garamond', label: 'EB Garamond', kind: 'serif', stack: '"EB Garamond", Georgia, serif', note: 'addendumsalon.com headings' },
+  { id: 'nanum-myeongjo', label: 'Nanum Myeongjo', kind: 'serif', stack: '"Nanum Myeongjo", Georgia, serif' },
   { id: 'playfair-display', label: 'Playfair Display', kind: 'serif', stack: '"Playfair Display", Georgia, serif' },
   { id: 'lora', label: 'Lora', kind: 'serif', stack: 'Lora, Georgia, serif' },
   { id: 'georgia', label: 'Georgia', kind: 'serif', stack: 'Georgia, "Times New Roman", serif', note: 'System' },
