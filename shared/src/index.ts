@@ -133,6 +133,7 @@ export const PERMISSIONS_CATALOG: PermissionDef[] = [
   { key: 'inventory:manage', category: 'Products and inventory', action: 'edit', label: 'Manage orders and stock', description: 'Update order status and edit stock quantities in Square.' },
   { key: 'shopify:push', category: 'Products and inventory', action: 'edit', label: 'Update Shopify stock', description: 'Push stock levels to Shopify manually.' },
 
+  { key: 'inventory:reorder_approve', category: 'Products and inventory', action: 'approve', label: 'Approve the Easy Reorder List', description: 'Choose which products and amounts are approved to order; the person placing orders sees only the approved list.' },
   { key: 'inventory:sync', category: 'Square and Shopify sync', action: 'approve', label: 'Run inventory sync', description: 'Run the Square ↔ Shopify sync, resolve conflicts and link products.' },
   // Which businesses (workspaces) a person can switch to. What they see inside still follows their other permissions.
   { key: 'workspace:salon', category: 'Businesses', action: 'view', label: 'Addendum Salon workspace', description: 'Can switch to the Addendum Salon workspace (its look, menu and defaults).' },

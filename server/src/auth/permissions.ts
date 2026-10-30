@@ -130,6 +130,8 @@ export const API_RULES: { method: string; path: RegExp; anyOf: string[] }[] = [
   { method: 'GET', path: /^\/admin\/system$/, anyOf: ['settings:write', 'integrations:manage'] },
   { method: 'GET', path: /^\/admin\/locations$/, anyOf: ['users:manage'] },
   { method: '*', path: /^\/admin\/(users|roles|permissions)(\/.*)?$/, anyOf: ['users:manage', 'users:permissions'] },
+  { method: 'PUT', path: /^\/inventory-sync\/reorder-list\/approved$/, anyOf: ['inventory:reorder_approve'] },
+  { method: 'DELETE', path: /^\/inventory-sync\/reorder-list\/approved$/, anyOf: ['inventory:reorder_approve'] },
   { method: '*', path: /^\/inventory-sync(\/.*)?$/, anyOf: ['inventory:sync'] },
   { method: '*', path: /^\/hair(\/.*)?$/, anyOf: ['hair:manage'] },
   { method: '*', path: /^\/inventory(\/.*)?$/, anyOf: ['inventory:view', 'inventory:order', 'inventory:read_all', 'inventory:manage'] },

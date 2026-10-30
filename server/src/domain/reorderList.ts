@@ -140,10 +140,12 @@ export async function reorderList(plan: Plan, opts: { type?: HairType; group?: s
   const prefs = await allPrefs();
   const rules = await amountRules();
   const rows: ReorderRow[] = [];
+  // Only what still needs buying: what's on order counts as stock, so a product an order already covers isn't listed.
   const needs = hair.filter((i) => {
     const owed = Math.max(0, i.preorders - i.incoming);
-    const days = i.ratePerDay > 0 ? i.stock / i.ratePerDay : null;
-    return i.stock <= 0 || owed > 0 || i.stock < LOW_UNITS || (days != null && days <= SOON_DAYS);
+    const have = i.stock + i.incoming;
+    const days = i.ratePerDay > 0 ? have / i.ratePerDay : null;
+    return have <= 0 || owed > 0 || have < LOW_UNITS || (days != null && days <= SOON_DAYS);
   });
   const history = await orderHistory(needs.map((i) => i.key));
   for (const i of needs) {
@@ -283,6 +285,24 @@ export async function saveList(plan: Plan, lines: SavedList['lines'], savedBy: s
   const v: SavedList = { plan, lines, savedBy, savedAt: new Date().toISOString() };
   await setKV(LIST_KEY, v);
   return v;
+}
+
+// ---------------- approved list ----------------
+/** The products approved to order and how many — what the person placing the orders works from. */
+export interface ApprovedList { plan: Plan; lines: { key: string; qty: number }[]; approvedBy: string | null; approvedAt: string }
+const APPROVED_KEY = 'reorder.list.approved';
+export const approvedList = () => getKV<ApprovedList>(APPROVED_KEY);
+export async function approveList(plan: Plan, lines: ApprovedList['lines'], approvedBy: string | null) {
+  const v: ApprovedList = { plan, lines: lines.filter((l) => l.qty > 0), approvedBy, approvedAt: new Date().toISOString() };
+  await setKV(APPROVED_KEY, v);
+  return v;
+}
+/** Ordered products come off the approved list (the rest stay approved). */
+export async function removeApproved(keys: string[]) {
+  const cur = await approvedList();
+  if (!cur) return;
+  const gone = new Set(keys);
+  await setKV(APPROVED_KEY, { ...cur, lines: cur.lines.filter((l) => !gone.has(l.key)) });
 }
 
 // ---------------- review & purchase orders ----------------

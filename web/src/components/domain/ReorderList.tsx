@@ -1,9 +1,10 @@
 import { productName } from '@addendum/shared';
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ChevronDown, ClipboardList, FileText, Save, SlidersHorizontal } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ClipboardList, FileText, Save, SlidersHorizontal } from 'lucide-react';
 import { api } from '../../api/client';
-import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, cx, useToast } from '../ui';
+import { useCanDo } from '../../api/hooks';
+import { Badge, Button, EmptyState, ErrorNote, Field, Modal, PageLoading, Segmented, cx, useToast } from '../ui';
 import { ProductSettingsButton } from './ProductSettings';
 
 type Plan = 'normal' | '30' | '60' | '90';
@@ -17,6 +18,7 @@ interface Row {
 interface ListResponse {
   plan: Plan; items: Row[]; groups: string[]; urgentKtips: string[];
   saved: { plan: Plan; lines: { key: string; include: boolean; qty: number }[]; savedBy: string | null; savedAt: string } | null;
+  approved: { plan: Plan; lines: { key: string; qty: number }[]; approvedBy: string | null; approvedAt: string } | null;
   amounts: Amounts;
 }
 /** Order amounts per section ("Tapes") or section and length ("Redefined Wefts 24\""): always this many, at least this many. */
@@ -44,13 +46,18 @@ const statusOf = (r: Row) => (r.available <= 0 ? 'Out of stock' : `${r.available
   + (r.available > 0 && r.daysUntilStockout != null && r.daysUntilStockout <= 14 ? ` · runs out in ~${r.daysUntilStockout}d` : '');
 
 /**
+ * Two views: Approved to order — only the approved products that still need buying, for the person placing the orders —
+ * and Review & approve (inventory:reorder_approve), where the list is ticked, amounts set and approved.
+ *
  * Reorder List (Addendum Hair): Lisa's sections in her order — 18" / 22" / 24" Redefined Wefts, 18" / 22" K-Tips,
  * 22" / 18" Tapes, Clip-Ins — each a short list of colours with the amount to order. Details open per row.
  */
 export function ReorderList({ onOrders }: { onOrders: () => void }) {
   const toast = useToast();
   const qc = useQueryClient();
+  const canApprove = useCanDo()('inventory:reorder_approve');
   const [plan, setPlan] = useState<Plan>('normal');
+  const [mode, setMode] = useState<'approved' | 'review' | null>(null);
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['reorder-list', plan],
     queryFn: () => api.get<ListResponse>(`/inventory-sync/reorder-list?plan=${plan}`),
@@ -66,7 +73,18 @@ export function ReorderList({ onOrders }: { onOrders: () => void }) {
     setInclude(Object.fromEntries(data.saved.lines.map((l) => [l.key, l.include])));
     setQty(Object.fromEntries(data.saved.lines.filter((l) => l.qty > 0).map((l) => [l.key, l.qty]))); // 0s start at the amount shown
   }, [data?.saved, loadedSaved]);
-  const [review, setReview] = useState<Review | null>(null);
+  // Reviewing again starts from what's approved: approved products ticked at their amounts, the rest unticked.
+  const [loadedApproved, setLoadedApproved] = useState(false);
+  useEffect(() => {
+    if (!data || loadedApproved) return;
+    setLoadedApproved(true);
+    const a = data.approved?.lines ?? [];
+    if (!a.length) return;
+    setPlan(data.approved!.plan);
+    const amt = new Map(a.map((l) => [l.key, l.qty]));
+    setInclude(Object.fromEntries(data.items.map((r) => [r.key, amt.has(r.key)])));
+    setQty(Object.fromEntries(a.map((l) => [l.key, l.qty])));
+  }, [data, loadedApproved]);
   const [editAmounts, setEditAmounts] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -78,6 +96,18 @@ export function ReorderList({ onOrders }: { onOrders: () => void }) {
   const estimate = all.reduce((n, r) => n + (r.costCents ?? 0) * qOf(r), 0);
   const groups = (data?.groups ?? []).map((g) => ({ name: g, rows: items.filter((r) => r.group === g) })).filter((g) => g.rows.length);
   const urgentK = items.filter((r) => data?.urgentKtips.includes(r.key));
+  const approvedLines = data?.approved?.lines ?? [];
+  const view = mode ?? (canApprove && !approvedLines.length ? 'review' : 'approved');
+
+  const approve = async () => {
+    setBusy('approve');
+    try {
+      await api.put('/inventory-sync/reorder-list/approved', { plan, lines: all.map((r) => ({ key: r.key, qty: qOf(r) })) });
+      toast(`${all.length} product${all.length === 1 ? '' : 's'} approved to order`);
+      await qc.invalidateQueries({ queryKey: ['reorder-list'] });
+      setMode('approved');
+    } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(null); }
+  };
 
   const save = async () => {
     try {
@@ -86,28 +116,39 @@ export function ReorderList({ onOrders }: { onOrders: () => void }) {
       void qc.invalidateQueries({ queryKey: ['reorder-list'] });
     } catch (e) { toast((e as Error).message, 'error'); }
   };
-  const openReview = async (rows: Row[], label: string) => {
-    setBusy(label);
-    try { setReview(await api.post<Review>('/inventory-sync/reorder-list/review', { plan, lines: chosen(rows).map((r) => ({ key: r.key, qty: qOf(r) })) })); } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(null); }
-  };
-  const [listText, setListText] = useState<string | null>(null);
+
+  const switcher = canApprove && (
+    <Segmented className="mb-4" value={view} onChange={setMode} options={[
+      { value: 'approved', label: `Approved to order${approvedLines.length ? ` (${approvedLines.length})` : ''}` },
+      { value: 'review', label: 'Review & approve' }]} />
+  );
+  if (view === 'approved') {
+    return (
+      <div>
+        {switcher}
+        {error ? <ErrorNote error={error} onRetry={() => refetch()} /> : isLoading || !data ? <PageLoading /> : (
+          <ApprovedView data={data} canApprove={canApprove} onReview={() => setMode('review')} onOrders={onOrders} />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>
+      {switcher}
       <div className="mb-4 flex flex-wrap items-end gap-3">
         <Field label="Ordering Plan" className="w-full sm:w-60">
           <select className="field h-10" value={plan} onChange={(e) => { setPlan(e.target.value as Plan); setQty({}); }}>{PLANS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}</select>
         </Field>
-        <span className="pb-2 text-[13px] text-stone"><b className="num font-medium text-ink">{all.length}</b> to order{estimate > 0 && <> · about <b className="num font-medium text-ink">{money(estimate)}</b></>}</span>
+        <span className="pb-2 text-[13px] text-stone"><b className="num font-medium text-ink">{all.length}</b> ticked{estimate > 0 && <> · about <b className="num font-medium text-ink">{money(estimate)}</b></>}</span>
         <span className="ml-auto flex flex-wrap gap-2">
           <Button icon={<SlidersHorizontal className="h-4 w-4" />} onClick={() => setEditAmounts(true)} disabled={!data}>Order amounts</Button>
           <Button icon={<Save className="h-4 w-4" />} onClick={save} disabled={!items.length}>Save List</Button>
-          <Button icon={<ClipboardList className="h-4 w-4" />} onClick={() => setListText(noteText(groups.map((g) => ({ name: g.name, rows: chosen(g.rows).map((r) => ({ r, qty: qOf(r) })) }))))} disabled={!all.length}>Copy list</Button>
-          <Button variant="primary" icon={<FileText className="h-4 w-4" />} loading={busy === 'all'} onClick={() => openReview(items, 'all')} disabled={!all.length}>Create order</Button>
+          <Button variant="primary" icon={<CheckCircle2 className="h-4 w-4" />} loading={busy === 'approve'} onClick={approve} disabled={!all.length}>Approve {all.length || ''} to order</Button>
         </span>
       </div>
 
-      {listText != null && <CopyListModal text={listText} onClose={() => setListText(null)} />}
+      <p className="mb-4 text-[13px] text-stone">Tick what to buy and set the amounts, then <b className="font-medium text-ink-soft">Approve</b>. The person placing the orders sees only the approved products, under Approved to order.</p>
       {editAmounts && data && <AmountsModal amounts={data.amounts} items={items} onClose={() => setEditAmounts(false)} onSaved={() => { setEditAmounts(false); setQty({}); void qc.invalidateQueries({ queryKey: ['reorder-list'] }); }} />}
       {urgentK.length > 0 && (
         <p className="mb-4 flex items-start gap-2 rounded-xl2 border border-rose/30 bg-rose/5 px-4 py-3 text-[14px] text-ink">
@@ -126,8 +167,7 @@ export function ReorderList({ onOrders }: { onOrders: () => void }) {
               <section key={g.name}>
                 <div className="mb-1.5 flex items-center gap-3">
                   <h2 className="text-[15px] font-semibold text-ink">{g.name}</h2>
-                  <span className="text-[13px] text-stone">{picked.reduce((n, r) => n + qOf(r), 0)} to order</span>
-                  <Button size="sm" className="ml-auto" loading={busy === g.name} disabled={!picked.length} onClick={() => openReview(g.rows, g.name)}>Create order</Button>
+                  <span className="text-[13px] text-stone">{picked.length} ticked · {picked.reduce((n, r) => n + qOf(r), 0)} units</span>
                 </div>
                 <div className="panel divide-y divide-line !p-0">
                   {g.rows.map((r) => {
@@ -179,8 +219,84 @@ export function ReorderList({ onOrders }: { onOrders: () => void }) {
         </div>
       )}
 
-      {review && <ReviewModal plan={plan} review={review} onFix={(k, v) => { setQty({ ...qty, [k]: v }); setReview(null); }}
-        onExclude={(k) => { setInclude({ ...include, [k]: false }); setReview(null); }}
+    </div>
+  );
+}
+
+/**
+ * Approved to order: only the approved products that still need buying, at the approved amounts — read-only,
+ * grouped like the list. Copy the list or create the purchase orders; ordered products come off the approved list.
+ */
+function ApprovedView({ data, canApprove, onReview, onOrders }: { data: ListResponse; canApprove: boolean; onReview: () => void; onOrders: () => void }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const a = data.approved;
+  const [fix, setFix] = useState<Record<string, number>>({});
+  const [out, setOut] = useState<Set<string>>(new Set());
+  const [review, setReview] = useState<Review | null>(null);
+  const [listText, setListText] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const amt = new Map((a?.lines ?? []).map((l) => [l.key, l.qty]));
+  // Still on the list (needs buying) and approved; anything an order or restock has since covered drops off.
+  const rows = data.items.filter((r) => amt.has(r.key) && !out.has(r.key));
+  const qOf = (r: Row) => fix[r.key] ?? amt.get(r.key)!;
+  const covered = (a?.lines.length ?? 0) - data.items.filter((r) => amt.has(r.key)).length;
+  const groups = data.groups.map((g) => ({ name: g, rows: rows.filter((r) => r.group === g) })).filter((g) => g.rows.length);
+  const estimate = rows.reduce((n, r) => n + (r.costCents ?? 0) * qOf(r), 0);
+  const plan = a?.plan ?? 'normal';
+  const openReview = async (list: Row[], label: string) => {
+    setBusy(label);
+    try { setReview(await api.post<Review>('/inventory-sync/reorder-list/review', { plan, lines: list.map((r) => ({ key: r.key, qty: qOf(r) })) })); } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(null); }
+  };
+  const when = a ? new Date(a.approvedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+
+  if (!rows.length) {
+    return (
+      <div className="panel">
+        <EmptyState title={a?.lines.length ? 'Everything approved has been ordered' : 'Nothing approved to order yet'} action={canApprove && <Button onClick={onReview}>Review & approve</Button>}>
+          {canApprove ? 'Open Review & approve, tick what to buy and approve it.' : 'Products show here once they’re approved to order.'}
+        </EmptyState>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <span className="flex items-center gap-1.5 text-[13px] text-stone">
+          <CheckCircle2 className="h-4 w-4 text-sage" />
+          <span><b className="num font-medium text-ink">{rows.length}</b> approved{a?.approvedBy ? ` by ${a.approvedBy}` : ''} · {when}{estimate > 0 && <> · about <b className="num font-medium text-ink">{money(estimate)}</b></>}</span>
+        </span>
+        <span className="ml-auto flex flex-wrap gap-2">
+          <Button icon={<ClipboardList className="h-4 w-4" />} onClick={() => setListText(noteText(groups.map((g) => ({ name: g.name, rows: g.rows.map((r) => ({ r, qty: qOf(r) })) }))))}>Copy list</Button>
+          <Button variant="primary" icon={<FileText className="h-4 w-4" />} loading={busy === 'all'} onClick={() => openReview(rows, 'all')}>Create order</Button>
+        </span>
+      </div>
+      {covered > 0 && <p className="mb-3 text-[13px] text-stone">{covered} approved product{covered === 1 ? ' is' : 's are'} no longer shown — already on order or back in stock.</p>}
+      <div className="space-y-5">
+        {groups.map((g) => (
+          <section key={g.name}>
+            <div className="mb-1.5 flex items-center gap-3">
+              <h2 className="text-[15px] font-semibold text-ink">{g.name}</h2>
+              <span className="text-[13px] text-stone">{g.rows.reduce((n, r) => n + qOf(r), 0)} to order</span>
+              <Button size="sm" className="ml-auto" loading={busy === g.name} onClick={() => openReview(g.rows, g.name)}>Create order</Button>
+            </div>
+            <div className="panel divide-y divide-line !p-0">
+              {g.rows.map((r) => (
+                <div key={r.key} className="flex items-center gap-3 px-3 py-2">
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[15px] text-ink">{nameOf(r)}</span>
+                    <span className={cx('block truncate text-[12px]', r.available <= 0 || r.urgent ? 'text-rose' : 'text-stone')}>{statusOf(r)}</span>
+                  </span>
+                  <span className="num shrink-0 text-[18px] font-medium text-ink" aria-label={`Order ${qOf(r)} of ${r.label}`}>{qOf(r)}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+      {listText != null && <CopyListModal text={listText} onClose={() => setListText(null)} />}
+      {review && <ReviewModal plan={plan} review={review} onFix={(k, v) => { setFix({ ...fix, [k]: v }); setReview(null); }}
+        onExclude={(k) => { setOut(new Set([...out, k])); setReview(null); }}
         onClose={() => setReview(null)} onDone={() => { setReview(null); void qc.invalidateQueries({ queryKey: ['reorder-list'] }); onOrders(); }} />}
     </div>
   );
@@ -303,7 +419,7 @@ function CopyListModal({ text, onClose }: { text: string; onClose: () => void })
   };
   return (
     <Modal open onClose={onClose} title="Order list" footer={<><Button variant="ghost" onClick={onClose}>Close</Button><Button variant="primary" icon={<ClipboardList className="h-4 w-4" />} onClick={copy}>Copy</Button></>}>
-      <p className="mb-2 text-[13px] text-stone">The ticked products and amounts, ready to paste into a note.</p>
+      <p className="mb-2 text-[13px] text-stone">The approved products and amounts, ready to paste into a note.</p>
       <textarea readOnly className="field h-80 w-full font-mono text-[14px] leading-relaxed" value={text} onFocus={(e) => e.currentTarget.select()} aria-label="Order list" />
     </Modal>
   );

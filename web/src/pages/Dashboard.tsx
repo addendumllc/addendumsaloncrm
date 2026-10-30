@@ -59,6 +59,8 @@ export function DashboardPage() {
     others: internal.filter((t) => t.assignedStaffId && t.assignedStaffId !== me?.id),
   };
   const { newFollowUp } = useActions();
+  // Easy Reorder: shown when something is approved to order (or, for approvers, waiting to be approved).
+  const { data: reorder } = useQuery({ queryKey: ['reorder-list', 'summary'], queryFn: () => api.get<ReorderSummary>('/inventory-sync/reorder-list/summary'), enabled: canDoTop('inventory:sync'), staleTime: 5 * 60_000 });
 
   if (isLoading) return <PageLoading />;
   if (error || !data) return <ErrorNote error={error} onRetry={refetch} />;
@@ -85,6 +87,7 @@ export function DashboardPage() {
   if (widgets.announcements || canPublish) defs.push({ id: 'announcements', title: 'Announcements', size: 'full', ownHeading: true, node: <AnnouncementsSection className="h-full" /> });
   if (widgets.projections) defs.push({ id: 'projections', title: 'Projected service revenue', size: 'full', action: <Link to="/analytics#projections" className="text-sm text-plum hover:underline">Details</Link>, node: <ProjectionCards p={widgets.projections} /> });
   if (widgets.orders) defs.push({ id: 'orders', title: widgets.orders.scope === 'mine' ? 'My hair orders' : 'Hair orders', size: 's', node: <OrdersCard o={widgets.orders} /> });
+  if (reorder && (reorder.approved > 0 || (canDoTop('inventory:reorder_approve') && reorder.notApproved > 0))) defs.push({ id: 'easy_reorder', title: 'Easy Reorder', size: 's', node: <EasyReorderCard r={reorder} canApprove={canDoTop('inventory:reorder_approve')} /> });
   if (canDoTop('timeclock:use')) defs.push({ id: 'my_hours', title: 'My hours', size: 's', action: <Link to="/time-clock" className="text-sm text-plum hover:underline">Time Clock</Link>, node: <MyHoursCard /> });
   if (widgets.myCommission) defs.push({ id: 'my_commission', title: 'My earnings', size: 's', node: (
     <Link to="/my-commission" className="panel block h-full p-4 hover:bg-plum-tint/30">
@@ -259,6 +262,18 @@ function MyHoursCard() {
       </p>
       <p className="num mt-2 font-display text-[28px] leading-none text-ink">{hm(week)}</p>
       <p className="text-[12px] text-stone">worked this week</p>
+    </Link>
+  );
+}
+
+interface ReorderSummary { approved: number; units: number; approvedBy: string | null; approvedAt: string | null; notApproved: number; urgentNotApproved: number }
+function EasyReorderCard({ r, canApprove }: { r: ReorderSummary; canApprove: boolean }) {
+  return (
+    <Link to="/inventory-sync?view=reorder-list" className="panel block h-full p-4 hover:bg-plum-tint/30">
+      <p className="num font-display text-[32px] leading-none text-ink">{r.approved}</p>
+      <p className="text-[13px] text-stone">approved to order{r.units ? ` · ${r.units} units` : ''}</p>
+      {r.approved > 0 && r.approvedAt && <p className="mt-1 truncate text-[13px] text-ink-soft">Approved{r.approvedBy ? ` by ${r.approvedBy}` : ''} {new Date(r.approvedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</p>}
+      {canApprove && r.notApproved > 0 && <p className={cx('mt-1 text-[13px]', r.urgentNotApproved ? 'text-rose' : 'text-stone')}>{r.notApproved} need{r.notApproved === 1 ? 's' : ''} review{r.urgentNotApproved ? ` · ${r.urgentNotApproved} urgent` : ''}</p>}
     </Link>
   );
 }

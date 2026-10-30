@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { setup } from './helpers.js';
+import { db } from '../src/db/index.js';
 
 const MEDIA = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-media-'));
 process.env.MEDIA_DIR = MEDIA;
@@ -204,5 +205,14 @@ describe('My Content (a stylist’s own Instagram plan)', () => {
     expect((await jen.put('/api/content/asset-sets', { name: 'x', caption: 'y' })).status).toBe(403);
     const one = await owner.file(`/api/content/media/${a.id}?download`);
     expect(one.headers['content-disposition']).toContain('First.png');
+    // Deleting a set: stylists can't; keeping the photos ungroups them; the photos-too delete removes them.
+    expect((await jen.del(`/api/content/asset-sets?name=${encodeURIComponent('Spring 2027')}`)).status).toBe(403);
+    expect((await owner.del(`/api/content/asset-sets?name=${encodeURIComponent('Spring 2027')}&photos=0`)).status).toBe(200);
+    expect((await owner.get(`/api/content/asset-sets?name=${encodeURIComponent('Spring 2027')}`)).body.set.caption).toBeNull();
+    const kept = await db().query<any>('SELECT group_name FROM content_media WHERE id = ANY($1)', [[a.id, b.id, c.id]]);
+    expect(kept.map((r) => r.group_name)).toEqual([null, null, null]);
+    await db().query("UPDATE content_media SET group_name = 'Gone' WHERE id = ANY($1)", [[a.id, b.id]]);
+    expect((await owner.del('/api/content/asset-sets?name=Gone&photos=1')).status).toBe(200);
+    expect(await db().query('SELECT 1 FROM content_media WHERE id = ANY($1)', [[a.id, b.id]])).toHaveLength(0);
   });
 });

@@ -104,10 +104,9 @@ describe('Reorder List', () => {
       expect(i.forecastQty % ROUND_TO).toBe(0);
       expect(i.suggestedQty).toBeGreaterThan(0); // never a blank 0 — at least the minimum
     }
-    expect(q('Covered').suggestedQty).toBe(10); // covered by what's on order → the minimum
+    expect(r.items.find((i) => i.label.includes('Covered'))).toBeUndefined(); // covered by what's on order → doesn't need buying
     // Labelled: set amounts, the minimum, or Suggested when sales need more than the minimum.
     expect([q('Tape-Ins').forecastKind, q('K-Tip').forecastKind]).toEqual(['set', 'set']);
-    expect(q('Covered').forecastKind).toBe('minimum');
     const aperol = q('24"');
     expect(aperol.forecastKind).toBe(aperol.forecastQty > 20 ? 'suggested' : 'minimum');
     expect(q('18" Redefined Weft · Honey').forecastKind).toBe('suggested'); // no minimum, sales need it
@@ -127,11 +126,8 @@ describe('Reorder List', () => {
     expect((await at('90', 'Black')).suggestedQty).toBe(20);
     // Honey: 30 days = 30, minus 8 available = 22 → rounded up to 25 (no odd amounts).
     expect((await at('30', 'Honey')).explain).toBe('Need 30 · Available 8 · Net need 22 · Rounded to 5s · Order 25');
-    // Covered by incoming: 15 − 2 − 40 → 0, flagged as incoming; the box still starts at the smallest order (no blank 0).
-    const cov = await at('30', 'Covered');
-    expect(cov.netNeed).toBe(0);
-    expect(cov.suggestedQty).toBe(5);
-    expect(cov.badges).toContain('INCOMING STOCK');
+    // Covered by incoming (2 here + 40 on order): doesn't need buying, so it isn't on the list.
+    expect((await reorderList('30')).items.some((i) => i.label.includes('Covered'))).toBe(false);
     // Pre-orders owed are added on top.
     expect((await at('30', 'Pre-ordered')).calculatedNeed).toBe(9 + 3);
   });
@@ -199,6 +195,33 @@ describe('Reorder List', () => {
     expect((await reorderList('normal')).items.every((i) => i.forecastQty > 0)).toBe(true);
     await api.put('/api/inventory-sync/reorder-list/prefs', { key: K[2], typicalQty: null, preferredPlan: null, safetyUnits: null, notes: null });
     await saveAmountRules({});
+  });
+
+  it('approves products to order: the approved list, the dashboard summary, and ordered ones come off', async () => {
+    const all = (await api.get('/api/inventory-sync/reorder-list?plan=normal')).body.items;
+    const res = await api.put('/api/inventory-sync/reorder-list/approved', { plan: 'normal', lines: [{ key: K[2], qty: 20 }, { key: K[0], qty: 0 }] });
+    expect(res.status).toBe(200);
+    expect(res.body.approved).toMatchObject({ plan: 'normal', lines: [{ key: K[2], qty: 20 }], approvedBy: 'Lisa Ha' }); // 0s aren't approved
+    expect((await api.get('/api/inventory-sync/reorder-list?plan=normal')).body.approved.lines).toEqual([{ key: K[2], qty: 20 }]);
+    const sum = (await api.get('/api/inventory-sync/reorder-list/summary')).body;
+    expect(sum).toMatchObject({ approved: 1, units: 20, approvedBy: 'Lisa Ha', notApproved: all.length - 1 });
+    // Creating the order takes it off the approved list.
+    expect((await api.post('/api/inventory-sync/reorder-list/purchase-orders', { plan: 'normal', lines: [{ key: K[2], qty: 20 }] })).status).toBe(201);
+    expect((await api.get('/api/inventory-sync/reorder-list?plan=normal')).body.approved.lines).toEqual([]);
+  });
+
+  it('only people with Approve the Easy Reorder List can approve', async () => {
+    // Front desk with the Easy Reorder List (inventory sync) but not approval: sees the approved list, can't approve.
+    const deskId = (await db().one<any>("SELECT id FROM staff WHERE email = 'frontdesk@addendumsalon.com'")).id;
+    await api.put(`/api/admin/users/${deskId}/access`, { overrides: { 'inventory:sync': true }, confirm: true });
+    const request = (await import('supertest')).default;
+    const { createApp } = await import('../src/app.js');
+    const desk = request.agent(createApp()).set('X-Requested-With', 'addendum-crm');
+    await desk.post('/api/auth/login').send({ email: 'frontdesk@addendumsalon.com', password: 'addendum-demo' });
+    expect((await desk.get('/api/inventory-sync/reorder-list/summary')).status).toBe(200);
+    expect((await desk.put('/api/inventory-sync/reorder-list/approved').send({ plan: 'normal', lines: [] })).status).toBe(403);
+    expect((await desk.delete('/api/inventory-sync/reorder-list/approved')).status).toBe(403);
+    await api.put(`/api/admin/users/${deskId}/access`, { overrides: { 'inventory:sync': null } });
   });
 
   it('saves the list to come back to', async () => {

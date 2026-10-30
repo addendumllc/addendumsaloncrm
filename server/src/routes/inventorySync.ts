@@ -1,4 +1,4 @@
-import { amountRules, createReorderPOs, PLANS, saveAmountRules, productPrefs, reorderList, reviewOrder, saveList, savePrefs, savedList } from '../domain/reorderList.js';
+import { amountRules, approveList, approvedList, createReorderPOs, removeApproved, PLANS, saveAmountRules, productPrefs, reorderList, reviewOrder, saveList, savePrefs, savedList } from '../domain/reorderList.js';
 import { Router, type Request } from 'express';
 import { can } from '../auth/permissions.js';
 import { z } from 'zod';
@@ -477,11 +477,34 @@ const plan = z.enum(PLANS as [string, ...string[]]).catch('normal') as unknown a
 const reorderLines = z.array(z.object({ key: z.string().min(1).max(200), qty: z.number().int().min(0).max(1_000_000) })).max(1000);
 inventorySyncRouter.get('/reorder-list', ah(async (req, res) => {
   const q = req.query as Record<string, string | undefined>;
-  res.json({ ...(await reorderList(parse(plan, q.plan), { type: (['weft', 'ktip', 'tape', 'clipin'] as const).find((t) => t === q.type), group: q.group || undefined, collection: q.collection || undefined, supplier: q.supplier || undefined })), saved: await savedList(), amounts: await amountRules() });
+  res.json({ ...(await reorderList(parse(plan, q.plan), { type: (['weft', 'ktip', 'tape', 'clipin'] as const).find((t) => t === q.type), group: q.group || undefined, collection: q.collection || undefined, supplier: q.supplier || undefined })), saved: await savedList(), approved: await approvedList(), amounts: await amountRules() });
 }));
 inventorySyncRouter.put('/reorder-list/saved', ah(async (req, res) => {
   const b = parse(z.object({ plan, lines: z.array(z.object({ key: z.string().min(1).max(200), include: z.boolean(), qty: z.number().int().min(0).max(1_000_000) })).max(2000) }), req.body);
   res.json({ saved: await saveList(b.plan, b.lines, req.user!.name) });
+}));
+// Dashboard card: how many approved products still need ordering, and how many needing it aren't approved yet.
+inventorySyncRouter.get('/reorder-list/summary', ah(async (_req, res) => {
+  const a = await approvedList();
+  const { items } = await reorderList(a?.plan ?? 'normal');
+  const amt = new Map((a?.lines ?? []).map((l) => [l.key, l.qty]));
+  const approved = items.filter((i) => amt.has(i.key));
+  res.json({
+    approved: approved.length, units: approved.reduce((n, i) => n + amt.get(i.key)!, 0), approvedBy: a?.approvedBy ?? null, approvedAt: a?.approvedAt ?? null,
+    notApproved: items.length - approved.length, urgentNotApproved: items.filter((i) => i.urgent && !amt.has(i.key)).length,
+  });
+}));
+// Approve the list (inventory:reorder_approve): the products and amounts the person placing orders works from.
+inventorySyncRouter.put('/reorder-list/approved', ah(async (req, res) => {
+  const b = parse(z.object({ plan, lines: reorderLines }), req.body);
+  const approved = await approveList(b.plan, b.lines, req.user!.name);
+  await logAction(req, 'stock.reorder_approve', 'stock', null, { plan: b.plan, lines: approved.lines });
+  res.json({ approved });
+}));
+inventorySyncRouter.delete('/reorder-list/approved', ah(async (req, res) => {
+  await approveList('normal', [], req.user!.name);
+  await logAction(req, 'stock.reorder_approve', 'stock', null, { cleared: true });
+  res.json({ ok: true });
 }));
 inventorySyncRouter.get('/reorder-list/prefs', ah(async (req, res) => res.json(await productPrefs(String(req.query.key ?? '').slice(0, 200)))));
 inventorySyncRouter.put('/reorder-list/prefs', ah(async (req, res) => {
@@ -507,6 +530,7 @@ inventorySyncRouter.post('/reorder-list/review', ah(async (req, res) => {
 inventorySyncRouter.post('/reorder-list/purchase-orders', ah(async (req, res) => {
   const b = parse(z.object({ plan, lines: reorderLines.min(1) }), req.body);
   const out = await createReorderPOs(b.plan, b.lines, req.user!.id);
+  await removeApproved(b.lines.filter((l) => !out.skipped.some((x) => x.key === l.key)).map((l) => l.key));
   await logAction(req, 'stock.po_create', 'purchase_order', out.orders[0]?.id ?? null, { orders: out.orders.map((o) => o.number), from: 'reorder_list', plan: b.plan });
   res.status(201).json(out);
 }));

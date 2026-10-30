@@ -6,7 +6,7 @@ import {
   accountsFor, addComment, analytics, campaignTimeline, companionBlog, createLaunch, crossPost, comments, contentAccounts, contentSettings, createPosts, deleteAsset, deleteCampaign, deleteIdea, deletePost, favoriteIdea, generate,
   getPost, importMetrics, keepIdea, suggestIdeas, linkOptions, listAssets, listCampaigns, listIdeas, listPosts, MEDIA_LIMITS, planning, readMedia, repurpose, reschedule, saveCampaign,
   saveContentAccounts, saveContentSettings, saveIdea, saveMedia, setMetrics, transition, updateAsset, updatePost,
-  assetGroupZip, orderAssets, renameSet, saveSetInfo, setCreatorShare, setInfo,
+  assetGroupZip, deleteSet, orderAssets, renameSet, saveSetInfo, setCreatorShare, setInfo,
 } from '../domain/content.js';
 import { createShareLink, deleteShareLink, listShareLinks, updateShareLink } from '../domain/contentShare.js';
 import { can } from '../auth/permissions.js';
@@ -198,6 +198,12 @@ contentRouter.get('/asset-sets', ah(async (req, res) => res.json({ set: await se
 contentRouter.put('/asset-sets', ah(async (req, res) => {
   const b = parse(z.object({ name: z.string().min(1).max(80), caption: z.string().max(2200).nullable().optional(), hashtags: z.string().max(1000).nullable().optional(), notes: z.string().max(2000).nullable().optional() }), req.body);
   res.json({ set: await saveSetInfo(b.name, b) });
+}));
+contentRouter.delete('/asset-sets', ah(async (req, res) => {
+  const b = parse(z.object({ name: z.string().min(1).max(80), photos: z.enum(['0', '1']).default('0') }), req.query);
+  await deleteSet(b.name, b.photos === '1');
+  await logAction(req, 'content.set_delete', 'content', null, { name: b.name, photos: b.photos === '1' });
+  res.json({ ok: true });
 }));
 contentRouter.post('/asset-sets/rename', ah(async (req, res) => { const b = parse(z.object({ from: z.string().min(1).max(80), to: z.string().max(80) }), req.body); await renameSet(b.from, b.to); res.json({ ok: true }); }));
 contentRouter.post('/assets/order', ah(async (req, res) => { await orderAssets(parse(z.object({ ids: z.array(z.string().uuid()).min(1).max(200) }), req.body).ids); res.json({ ok: true }); }));

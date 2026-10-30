@@ -216,9 +216,19 @@ function SetViewer({ name, files, onClose, onRenamed, onOpenSlide, onAddPhotos, 
     if (!window.confirm(`Take ${m.title || 'this photo'} out of the set? It stays in Assets on its own.`)) return;
     try { await api.patch(`/content/assets/${m.id}`, { group: null }); onChanged(); } catch (e) { toast((e as Error).message, 'error'); }
   };
+  // Delete the set: just the grouping (photos stay in Assets) or the photos too.
+  const [deleting, setDeleting] = useState(false);
+  const del = async (photos: boolean) => {
+    try {
+      await api.del(`/content/asset-sets?name=${encodeURIComponent(name)}&photos=${photos ? 1 : 0}`);
+      toast(photos ? `Deleted ${name} and its photos` : `Deleted ${name} — its photos are in Assets on their own`);
+      setDeleting(false); onChanged(); onClose();
+    } catch (e) { toast((e as Error).message, 'error'); }
+  };
   return (
     <Modal open xl onClose={onClose} title={name} footer={<>
       <Button className="mr-auto" icon={<Upload className="h-4 w-4" />} onClick={onAddPhotos}>Add photos</Button>
+      <Button variant="ghost" icon={<Trash2 className="h-4 w-4" />} onClick={() => setDeleting(true)}>Delete set</Button>
       <a className={buttonClass('secondary')} href={`/api/content/assets/group-download?group=${encodeURIComponent(name)}`}><Download className="h-4 w-4" /><span className="btn-label">Download in order</span></a>
       <Button variant="primary" onClick={onClose}>Done</Button>
     </>}>
@@ -251,6 +261,15 @@ function SetViewer({ name, files, onClose, onRenamed, onOpenSlide, onAddPhotos, 
           </div>
         ))}
       </div>
+      {deleting && (
+        <Modal open onClose={() => setDeleting(false)} title={`Delete ${name}?`} footer={<>
+          <Button variant="ghost" className="mr-auto" onClick={() => setDeleting(false)}>Cancel</Button>
+          <Button onClick={() => del(false)}>Keep the photos</Button>
+          <Button variant="danger" onClick={() => del(true)}>Delete photos too</Button>
+        </>}>
+          <p className="text-[14px] text-ink-soft">Deletes the set, its caption, hashtags and notes. <b className="font-medium text-ink">Keep the photos</b> leaves its {order.length} photo{order.length === 1 ? '' : 's'} in Assets on their own; <b className="font-medium text-ink">Delete photos too</b> removes them (not ones used in a post). Stylists stop seeing the set in Salon downloads.</p>
+        </Modal>
+      )}
     </Modal>
   );
 }

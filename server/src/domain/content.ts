@@ -881,6 +881,21 @@ export async function renameSet(from: string, to: string) {
     await q.query('UPDATE content_asset_sets SET name = $2 WHERE name = $1', [from, n]);
   });
 }
+/**
+ * Deletes a set: its caption and notes, and either its photos too or just the grouping (the photos stay in Assets on
+ * their own). Photos used in a post are never deleted — the whole delete stops so nothing is half done.
+ */
+export async function deleteSet(name: string, photos: boolean) {
+  if (photos) {
+    const used = await db().one<{ n: number }>('SELECT count(*)::int AS n FROM content_media m WHERE m.group_name = $1 AND EXISTS (SELECT 1 FROM content_posts p WHERE m.id = ANY(p.media_ids))', [name]);
+    if (used?.n) throw badRequest(`${used.n} of its photos ${used.n === 1 ? 'is' : 'are'} used in a post — remove ${used.n === 1 ? 'it' : 'them'} from the post first, or keep the photos.`);
+  }
+  await db().tx(async (q) => {
+    if (photos) await q.query('DELETE FROM content_media WHERE group_name = $1', [name]);
+    else await q.query('UPDATE content_media SET group_name = NULL WHERE group_name = $1', [name]);
+    await q.query('DELETE FROM content_asset_sets WHERE name = $1', [name]);
+  });
+}
 /** Caption.txt for a set's download: the caption, hashtags and how to use it. */
 export function captionText(i: AssetSetInfo) {
   return [i.caption, i.hashtags, i.notes && `---\nHow to use it: ${i.notes}`].filter(Boolean).join('\n\n');
