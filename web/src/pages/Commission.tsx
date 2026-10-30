@@ -363,9 +363,10 @@ function ReviewQueue() {
   // Several at once: tick them, then credit them all to one person (or accept them as they are).
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkPick, setBulkPick] = useState('');
-  const [busy, setBusy] = useState(false);
-  const act = async (url: string, body: object, msg: string | ((r: any) => string)) => {
-    setBusy(true);
+  // Which button is saving: only that one spins; the rest wait (disabled) until it's done.
+  const [busy, setBusy] = useState<string | null>(null);
+  const act = async (key: string, url: string, body: object, msg: string | ((r: any) => string)) => {
+    setBusy(key);
     try {
       const r = await api.post<{ entries: CommissionEntryDTO[] }>(`${url}${rq}`, body);
       qc.setQueryData(['commission-review', range], (old: any) => ({ ...old, entries: r.entries }));
@@ -376,7 +377,7 @@ function ReviewQueue() {
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
   const dates = res && (
@@ -408,9 +409,9 @@ function ReviewQueue() {
               <option value="">Credit selected to…</option>
               {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
-            <Button size="sm" variant="primary" loading={busy} disabled={!bulkPick} onClick={() => act('/commission/entries/attribute', { entryIds: ids, staffIds: [bulkPick] }, (r) => `${r.credited} credited`)}>Credit</Button>
+            <Button size="sm" variant="primary" loading={busy === 'bulk-credit'} disabled={!bulkPick || (!!busy && busy !== 'bulk-credit')} onClick={() => act('bulk-credit', '/commission/entries/attribute', { entryIds: ids, staffIds: [bulkPick] }, (r) => `${r.credited} credited`)}>Credit</Button>
             {ids.some((id) => data.find((e) => e.id === id)?.staffId) && (
-              <Button size="sm" variant="ghost" loading={busy} onClick={() => act('/commission/entries/accept', { entryIds: ids }, (r) => `${r.accepted} accepted`)}>Accept as is</Button>
+              <Button size="sm" variant="ghost" loading={busy === 'bulk-accept'} disabled={!!busy && busy !== 'bulk-accept'} onClick={() => act('bulk-accept', '/commission/entries/accept', { entryIds: ids }, (r) => `${r.accepted} accepted`)}>Accept as is</Button>
             )}
           </>}
         </div>
@@ -431,9 +432,9 @@ function ReviewQueue() {
                 <p className="mt-1 text-[13px] text-rose">{e.reviewReason}</p>
                 {approve && (
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {e.staffId && <Button size="sm" variant="primary" loading={busy} onClick={() => act(`/commission/entries/${e.id}/accept`, {}, `Accepted — ${e.staffName} gets credit`)}>Accept {e.staffName?.split(' ')[0]}</Button>}
+                    {e.staffId && <Button size="sm" variant="primary" loading={busy === `${e.id}:accept`} disabled={!!busy && busy !== `${e.id}:accept`} onClick={() => act(`${e.id}:accept`, `/commission/entries/${e.id}/accept`, {}, `Accepted — ${e.staffName} gets credit`)}>Accept {e.staffName?.split(' ')[0]}</Button>}
                     {e.kind !== 'refund' && suggestions.map((s) => (
-                      <Button key={s.staffId} size="sm" loading={busy} title={s.why} onClick={() => act(`/commission/entries/${e.id}/attribute`, { staffIds: [s.staffId] }, `Credited to ${s.name}`)}>
+                      <Button key={s.staffId} size="sm" loading={busy === `${e.id}:${s.staffId}`} disabled={!!busy && busy !== `${e.id}:${s.staffId}`} title={s.why} onClick={() => act(`${e.id}:${s.staffId}`, `/commission/entries/${e.id}/attribute`, { staffIds: [s.staffId] }, `Credited to ${s.name}`)}>
                         {s.name.split(' ')[0]} <span className="font-normal text-stone">· {s.why}</span>
                       </Button>
                     ))}
@@ -443,8 +444,8 @@ function ReviewQueue() {
                           <option value="">Someone else…</option>
                           {staff.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                         </select>
-                        <Button size="sm" variant="secondary" disabled={!pick[e.id]} loading={busy} onClick={() => act(`/commission/entries/${e.id}/attribute`, { staffIds: [pick[e.id]] }, 'Credited')}>Credit</Button>
-                        <Button size="sm" variant="ghost" loading={busy} onClick={() => act(`/commission/entries/${e.id}/attribute`, { staffIds: [] }, 'Marked as no commission')}>No commission</Button>
+                        <Button size="sm" variant="secondary" disabled={!pick[e.id] || (!!busy && busy !== `${e.id}:credit`)} loading={busy === `${e.id}:credit`} onClick={() => act(`${e.id}:credit`, `/commission/entries/${e.id}/attribute`, { staffIds: [pick[e.id]] }, 'Credited')}>Credit</Button>
+                        <Button size="sm" variant="ghost" loading={busy === `${e.id}:none`} disabled={!!busy && busy !== `${e.id}:none`} onClick={() => act(`${e.id}:none`, `/commission/entries/${e.id}/attribute`, { staffIds: [] }, 'Marked as no commission')}>No commission</Button>
                       </>
                     )}
                   </div>

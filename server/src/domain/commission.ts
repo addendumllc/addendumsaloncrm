@@ -299,11 +299,12 @@ async function doSync(opts: { trigger: 'manual' | 'auto'; staffId?: string | nul
       );
       if (o.updated_at && (!maxUpdated || o.updated_at > maxUpdated)) maxUpdated = o.updated_at;
     }
-    // Payments for the same period: tips and who took each payment.
-    const earliest = orders.reduce((m, o) => Math.min(m, new Date(o.closed_at ?? o.created_at ?? now).getTime()), from.getTime());
+    // Payments for the same period (at least the last 5 weeks, so a pay period's sales get who checked out even when
+    // their payments were missed before): tips and who took each payment.
+    const earliest = orders.reduce((m, o) => Math.min(m, new Date(o.closed_at ?? o.created_at ?? now).getTime()), Math.min(from.getTime(), now.getTime() - 35 * 86400_000));
     let payments;
     try {
-      payments = await sq.listPayments(new Date(earliest - 86400_000), now);
+      payments = await sq.listPayments(new Date(earliest - 86400_000), now, locations);
     } catch (e) {
       throw scopeHint(e);
     }

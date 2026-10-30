@@ -519,11 +519,18 @@ export class SquareApiService implements SquareService {
     if (r === null) await this.call<any>('DELETE', `/v2/labor/shifts/${encodeURIComponent(id)}`);
   }
 
-  async listPayments(from: Date, to: Date): Promise<SquarePaymentInfo[]> {
+  /** Payments at each location: without location_id Square returns only the main location's, so the salon's were missed. */
+  async listPayments(from: Date, to: Date, locationIds: string[] = []): Promise<SquarePaymentInfo[]> {
+    const out: SquarePaymentInfo[] = [];
+    for (const loc of locationIds.length ? locationIds : [null]) out.push(...await this.paymentsAt(from, to, loc));
+    return out;
+  }
+  private async paymentsAt(from: Date, to: Date, locationId: string | null): Promise<SquarePaymentInfo[]> {
     const out: SquarePaymentInfo[] = [];
     let cursor: string | undefined;
     do {
       const qs = new URLSearchParams({ begin_time: from.toISOString(), end_time: to.toISOString(), limit: '100', sort_order: 'ASC' });
+      if (locationId) qs.set('location_id', locationId);
       if (cursor) qs.set('cursor', cursor);
       const res = await this.call<{ payments?: any[]; cursor?: string }>('GET', `/v2/payments?${qs}`);
       for (const p of res?.payments ?? []) {

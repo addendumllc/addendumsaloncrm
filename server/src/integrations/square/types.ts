@@ -225,7 +225,7 @@ export interface SquareService {
   /** Orders at these locations updated in [from, to], oldest first (POST /v2/orders/search; ORDERS_READ). */
   searchOrders(locationIds: string[], updatedFrom: Date, updatedTo: Date): Promise<SquareOrder[]>;
   /** Payments created in [from, to] (GET /v2/payments; PAYMENTS_READ) — for the team member who took each payment. */
-  listPayments(from: Date, to: Date): Promise<SquarePaymentInfo[]>;
+  listPayments(from: Date, to: Date, locationIds?: string[]): Promise<SquarePaymentInfo[]>;
   /** Closed timecards that started in [from, to] (Labor API; TIMECARDS_READ). */
   listTimecards(from: Date, to: Date): Promise<SquareTimecard[]>;
   /**

@@ -136,7 +136,7 @@ export class MockSquareService implements SquareService {
       return t >= updatedFrom.getTime() && t <= updatedTo.getTime();
     }).sort((a, b) => a.updated_at!.localeCompare(b.updated_at!));
   }
-  async listPayments(from: Date, to: Date): Promise<SquarePaymentInfo[]> {
+  async listPayments(from: Date, to: Date, _locationIds?: string[]): Promise<SquarePaymentInfo[]> {
     const all = await demoOrders();
     const out: SquarePaymentInfo[] = [];
     for (const o of all) {
