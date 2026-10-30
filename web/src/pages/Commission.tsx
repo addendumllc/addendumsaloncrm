@@ -37,7 +37,7 @@ export function MyCommissionPage() {
 
 function MyCommissionContent() {
   const qc = useQueryClient();
-  const dr = useDateRange('this_pay_period');
+  const dr = useDateRange('next_paycheck');
   const { data: status } = useStatus();
   // Commission / Taxes / Year are in the side menu (?view=); on phones, a dropdown.
   const [params] = useSearchParams();
@@ -111,7 +111,7 @@ export function TeamCommissionPage() {
   const [params] = useSearchParams();
   const tab = (['review', 'payroll', 'periods'] as const).find((t) => t === params.get('tab')) ?? 'team';
   const [staff, setStaff] = useState<string | null>(null);
-  const dr = useDateRange('this_pay_period');
+  const dr = useDateRange('next_paycheck');
   const { data: status } = useStatus();
   const qc = useQueryClient();
   const toast = useToast();

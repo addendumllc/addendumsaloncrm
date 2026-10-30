@@ -11,9 +11,9 @@ import { Badge, EmptyState, Spinner, cx } from '../ui';
 export const usd = (cents: number) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(cents / 100);
 
-export type Preset = 'this_pay_period' | 'last_pay_period' | 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'custom';
+export type Preset = 'next_paycheck' | 'this_pay_period' | 'last_pay_period' | 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'custom';
 export const PRESETS: { value: Preset; label: string }[] = [
-  { value: 'this_pay_period', label: 'This pay period' }, { value: 'last_pay_period', label: 'Last pay period' },
+  { value: 'next_paycheck', label: 'Next paycheck' }, { value: 'this_pay_period', label: 'This pay period' }, { value: 'last_pay_period', label: 'Last pay period' },
   { value: 'today', label: 'Today' }, { value: 'yesterday', label: 'Yesterday' }, { value: 'this_week', label: 'This week' },
   { value: 'last_week', label: 'Last week' }, { value: 'this_month', label: 'This month' }, { value: 'last_month', label: 'Last month' },
   { value: 'custom', label: 'Custom' },
@@ -23,6 +23,8 @@ export const PRESETS: { value: Preset; label: string }[] = [
 export function presetRange(p: Preset, custom: { from: string; to: string }, schedule?: PaySchedule): { from: string; to: string; payDate?: string } {
   const today = dayKey(new Date());
   if ((p === 'this_pay_period' || p === 'last_pay_period') && schedule) return payPeriodFor(today, schedule, p === 'last_pay_period' ? -1 : 0);
+  // Next paycheck: the period that's paid next — the last one until its payday has passed, then the current one.
+  if (p === 'next_paycheck' && schedule) { const last = payPeriodFor(today, schedule, -1); return today <= last.payDate ? last : payPeriodFor(today, schedule); }
   const monday = addDaysKey(today, -((weekdayOfKey(today) + 6) % 7));
   const firstOfMonth = `${today.slice(0, 7)}-01`;
   switch (p) {
@@ -32,12 +34,12 @@ export function presetRange(p: Preset, custom: { from: string; to: string }, sch
     case 'last_week': return { from: addDaysKey(monday, -7), to: addDaysKey(monday, -1) };
     case 'this_month': { const next = addDaysKey(`${today.slice(0, 7)}-28`, 4); return { from: firstOfMonth, to: addDaysKey(`${next.slice(0, 7)}-01`, -1) }; }
     case 'last_month': { const end = addDaysKey(firstOfMonth, -1); return { from: `${end.slice(0, 7)}-01`, to: end }; }
-    case 'this_pay_period': case 'last_pay_period': return { from: monday, to: addDaysKey(monday, 6) }; // until the schedule loads
+    case 'next_paycheck': case 'this_pay_period': case 'last_pay_period': return { from: monday, to: addDaysKey(monday, 6) }; // until the schedule loads
     default: return custom;
   }
 }
 
-export function useDateRange(initial: Preset = 'this_pay_period', opts: { payPeriods?: boolean } = {}) {
+export function useDateRange(initial: Preset = 'next_paycheck', opts: { payPeriods?: boolean } = {}) {
   const payPeriods = opts.payPeriods ?? true;
   const [preset, setPreset] = useState<Preset>(initial);
   const [custom, setCustom] = useState(() => presetRange('this_month', { from: '', to: '' }));
@@ -53,7 +55,7 @@ export function DateRangeBar({ preset, setPreset, custom, setCustom, range, payP
   return (
     <div className="mb-5">
       <div className="scrollbar-none -mx-4 flex gap-1.5 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:px-0">
-        {PRESETS.filter((p) => payPeriods || !p.value.endsWith('pay_period')).map((p) => (
+        {PRESETS.filter((p) => payPeriods || !(p.value.endsWith('pay_period') || p.value === 'next_paycheck')).map((p) => (
           <button key={p.value} onClick={() => setPreset(p.value)} className={cx('shrink-0 rounded-full px-3 py-1.5 text-[13px] font-medium', preset === p.value ? 'bg-plum text-white' : 'bg-mist text-ink-soft hover:bg-line')}>{p.label}</button>
         ))}
       </div>
